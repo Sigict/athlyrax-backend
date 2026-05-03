@@ -1,0 +1,4 @@
+node_modules
+storage/db-snapshots/*.json
+storage/auth-audit/backups/*.jsonl
+
