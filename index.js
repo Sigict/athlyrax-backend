@@ -1,9 +1,11 @@
+/* global process, Buffer */
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import Stripe from 'stripe';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,6 +15,8 @@ const PORT = Number.parseInt(process.env.PORT || '3001', 10) || 3001;
 const DB_PATH = path.join(__dirname, 'storage', 'db.json');
 const TARGET_BACKUP_PATH = path.join(__dirname, 'storage', 'trainingPlannerTargets.backup.json');
 const DB_SNAPSHOT_DIR = path.join(__dirname, 'storage', 'db-snapshots');
+const DB_TENANTS_DIR = path.join(__dirname, 'storage', 'tenants');
+const BILLING_CATALOG_PATH = path.join(__dirname, 'storage', 'billing-catalog.json');
 const AUTH_USERS_PATH = path.join(__dirname, 'storage', 'auth-users.json');
 const AUTH_INVITES_PATH = path.join(__dirname, 'storage', 'auth-invites.json');
 const AUTH_AUDIT_DIR = path.join(__dirname, 'storage', 'auth-audit');
@@ -31,8 +35,9 @@ const AUTH_LOGIN_RATE_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.AUT
 const AUTH_LOGIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUTH_LOGIN_RATE_MAX_ATTEMPTS || '8', 10) || 8);
 const AUTH_ADMIN_RATE_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.AUTH_ADMIN_RATE_WINDOW_MS || '60000', 10) || 60000);
 const AUTH_ADMIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUTH_ADMIN_RATE_MAX_ATTEMPTS || '60', 10) || 60);
-const AUTH_ALLOW_COACH_SIGNUP = true;
-const AUTH_ALLOW_COACH_INVITES = true;
+const AUTH_ALLOW_COACH_SIGNUP = String(process.env.AUTH_ALLOW_COACH_SIGNUP || 'false').toLowerCase() === 'true';
+const AUTH_ALLOW_COACH_INVITES = String(process.env.AUTH_ALLOW_COACH_INVITES || 'true').toLowerCase() === 'true';
+const AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME = String(process.env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').trim().toLowerCase();
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
 const AUTH_PASSWORD_RESET_DELIVERY = String(process.env.AUTH_PASSWORD_RESET_DELIVERY || 'console').trim().toLowerCase();
@@ -46,6 +51,49 @@ const AUTH_SMTP_FROM = String(process.env.AUTH_SMTP_FROM || AUTH_SMTP_USER || ''
 const AUTH_USERNAME_PATTERN = /^[a-zA-Z0-9._-]{3,32}$/;
 const AUTH_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const AUTH_PRESENCE_WINDOW_MS = Math.max(60 * 1000, Number.parseInt(process.env.AUTH_PRESENCE_WINDOW_MS || `${5 * 60 * 1000}`, 10) || (5 * 60 * 1000));
+const BILLING_STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || '').trim();
+const BILLING_STRIPE_WEBHOOK_SECRET = String(process.env.STRIPE_WEBHOOK_SECRET || '').trim();
+const BILLING_PRICE_TIER_1 = String(process.env.STRIPE_PRICE_TIER_1 || process.env.STRIPE_PRICE_MONTHLY || '').trim();
+const BILLING_PRICE_TIER_2 = String(process.env.STRIPE_PRICE_TIER_2 || '').trim();
+const BILLING_PRICE_TIER_3 = String(process.env.STRIPE_PRICE_TIER_3 || process.env.STRIPE_PRICE_ANNUAL || '').trim();
+const BILLING_APP_BASE_URL = String(process.env.BILLING_APP_BASE_URL || process.env.APP_BASE_URL || '').trim().replace(/\/$/, '');
+const BILLING_ENFORCED = String(process.env.BILLING_ENFORCED || 'false').toLowerCase() === 'true';
+const BILLING_TRIAL_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_TRIAL_DAYS || '42', 10) || 0);
+const PHASE1_TENANT_ISOLATION = String(process.env.PHASE1_TENANT_ISOLATION || 'true').toLowerCase() === 'true';
+const DEFAULT_BILLING_CATALOG = {
+	version: 1,
+	currency: 'GBP',
+	plans: [
+		{
+			key: 'tier-1',
+			label: 'Tier 1',
+			interval: 'month',
+			amountMinor: 1800,
+			stripePriceId: BILLING_PRICE_TIER_1,
+			limits: { maxCoaches: 1, maxSwimmers: 24, maxSquads: 1 },
+		},
+		{
+			key: 'tier-2',
+			label: 'Tier 2',
+			interval: 'month',
+			amountMinor: 2800,
+			stripePriceId: BILLING_PRICE_TIER_2,
+			limits: { maxCoaches: 1, maxSwimmers: 100, maxSquads: 4 },
+		},
+		{
+			key: 'tier-3',
+			label: 'Tier 3 Club',
+			interval: 'month',
+			amountMinor: 0,
+			stripePriceId: BILLING_PRICE_TIER_3,
+			limits: { maxCoaches: null, maxSwimmers: 250, maxSquads: null },
+		},
+	],
+	addons: [
+		{ key: 'extra-25-swimmers', label: 'Extra 25 swimmers', swimmers: 25, amountMinor: 1300 },
+		{ key: 'extra-50-swimmers', label: 'Extra 50 swimmers', swimmers: 50, amountMinor: 2500 },
+	],
+};
 const DEFAULT_AUTH_USERS = [
 	{ username: 'softwareowner', password: 'softwareowner123', role: 'software-owner', createdVia: 'seed' },
 	{ username: 'headcoach', password: 'headcoach123', role: 'head-coach', createdVia: 'seed' },
@@ -69,6 +117,9 @@ const loginRateBuckets = new Map();
 const adminRateBuckets = new Map();
 const authPresenceByUser = new Map();
 const authPasswordResetByUser = new Map();
+const stripeClient = BILLING_STRIPE_SECRET_KEY
+	? new Stripe(BILLING_STRIPE_SECRET_KEY, { apiVersion: '2025-03-31.basil' })
+	: null;
 
 let writeTail = Promise.resolve();
 let authResetMailTransport = null;
@@ -76,6 +127,7 @@ let authResetMailTransport = null;
 const authBootstrap = loadOrCreateAuthUsers();
 const authUsers = authBootstrap.users;
 const authInvites = loadOrCreateAuthInvites();
+let billingCatalog = loadOrCreateBillingCatalog();
 
 if (!AUTH_REQUIRED) {
 	console.warn('[auth] Authentication is disabled (AUTH_REQUIRED=false).');
@@ -84,6 +136,74 @@ if (!AUTH_REQUIRED) {
 if (AUTH_REQUIRED && authBootstrap.source === 'defaults') {
 	console.warn('[auth] Using default seeded credentials from storage. Override before production.');
 }
+
+if (stripeClient && BILLING_ENFORCED) {
+	console.info('[billing] Subscription enforcement is enabled for write operations.');
+}
+
+app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+	if (!stripeClient) {
+		res.status(200).json({ ok: true, skipped: 'stripe_not_configured' });
+		return;
+	}
+
+	const signature = String(req.headers?.['stripe-signature'] || '').trim();
+	let event;
+
+	try {
+		if (BILLING_STRIPE_WEBHOOK_SECRET && signature) {
+			event = stripeClient.webhooks.constructEvent(req.body, signature, BILLING_STRIPE_WEBHOOK_SECRET);
+		} else {
+			const rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body || '{}');
+			event = JSON.parse(rawBody);
+		}
+	} catch (error) {
+		res.status(400).json({ error: 'Invalid webhook payload.', details: error instanceof Error ? error.message : 'Unknown error' });
+		return;
+	}
+
+	try {
+		switch (String(event?.type || '')) {
+			case 'checkout.session.completed': {
+				const session = event?.data?.object;
+				const username = String(session?.client_reference_id || session?.metadata?.username || '').trim();
+				const customerId = String(session?.customer || '').trim();
+				if (username) {
+					upsertUserBillingByUsername(username, {
+						customerId,
+						checkoutSessionId: String(session?.id || '').trim(),
+						status: String(session?.status || 'active').trim() || 'active',
+						updatedAt: new Date().toISOString(),
+					});
+				}
+				break;
+			}
+			case 'customer.subscription.created':
+			case 'customer.subscription.updated':
+			case 'customer.subscription.deleted': {
+				await handleStripeSubscriptionEvent(event?.data?.object);
+				break;
+			}
+			case 'invoice.payment_failed': {
+				const invoice = event?.data?.object;
+				const customerId = String(invoice?.customer || '').trim();
+				if (customerId) {
+					upsertUserBillingByCustomerId(customerId, {
+						status: 'past_due',
+						updatedAt: new Date().toISOString(),
+					});
+				}
+				break;
+			}
+			default:
+				break;
+		}
+
+		res.status(200).json({ received: true });
+	} catch (error) {
+		res.status(500).json({ error: 'Webhook handling failed.', details: error instanceof Error ? error.message : 'Unknown error' });
+	}
+});
 
 app.use(express.json({ limit: '25mb' }));
 
@@ -221,6 +341,381 @@ function parseAuthUsersFromEnv() {
 	}
 }
 
+function getDefaultBillingState() {
+	return {
+		planKey: 'free',
+		status: 'inactive',
+		customerId: '',
+		subscriptionId: '',
+		priceId: '',
+		checkoutSessionId: '',
+		trialEndsAt: '',
+		currentPeriodEnd: '',
+		cancelAtPeriodEnd: false,
+		updatedAt: new Date().toISOString(),
+	};
+}
+
+function slugTenantPart(value, fallback = 'default') {
+	const normalized = String(value || '')
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+	return normalized || fallback;
+}
+
+function normalizeTenantId(rawTenantId) {
+	const normalized = String(rawTenantId || '')
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+	return normalized;
+}
+
+function isPrimarySoftwareOwnerAccount(user) {
+	const role = String(user?.role || '').trim();
+	const username = String(user?.username || '').trim().toLowerCase();
+	return role === 'software-owner' && username === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME;
+}
+
+function resolveTenantKeyFromUser(user) {
+	const username = slugTenantPart(String(user?.username || '').trim(), 'unknown-user');
+	if (isPrimarySoftwareOwnerAccount(user)) return 'global-owner';
+
+	const explicitTenantId = normalizeTenantId(user?.tenantId);
+	if (explicitTenantId) return explicitTenantId;
+
+	const rawSwimClub = String(user?.swimClub || '').trim();
+	const rawTeamName = String(user?.teamName || '').trim();
+	if (rawSwimClub && rawTeamName) {
+		const swimClub = slugTenantPart(rawSwimClub, 'club');
+		const teamName = slugTenantPart(rawTeamName, 'team');
+		return `${swimClub}__${teamName}`;
+	}
+	return `user-${username}`;
+}
+
+function resolveStoragePathsForAuth(auth) {
+	if (!PHASE1_TENANT_ISOLATION) {
+		return {
+			tenantKey: 'global',
+			dbPath: DB_PATH,
+			backupPath: TARGET_BACKUP_PATH,
+			snapshotDir: DB_SNAPSHOT_DIR,
+		};
+	}
+
+	const user = findAuthUser(String(auth?.username || '').trim()) || auth || {};
+	const tenantKey = resolveTenantKeyFromUser(user);
+	if (tenantKey === 'global-owner') {
+		return {
+			tenantKey,
+			dbPath: DB_PATH,
+			backupPath: TARGET_BACKUP_PATH,
+			snapshotDir: DB_SNAPSHOT_DIR,
+		};
+	}
+
+	const tenantDir = path.join(DB_TENANTS_DIR, tenantKey);
+	return {
+		tenantKey,
+		dbPath: path.join(tenantDir, 'db.json'),
+		backupPath: path.join(tenantDir, 'trainingPlannerTargets.backup.json'),
+		snapshotDir: path.join(tenantDir, 'db-snapshots'),
+	};
+}
+
+function resolveAuthTenantId(auth) {
+	const user = findAuthUser(String(auth?.username || '').trim()) || auth || {};
+	return resolveTenantKeyFromUser(user);
+}
+
+function canAdminManageUser(auth, targetUser) {
+	if (isPrimarySoftwareOwnerAccount(auth)) return true;
+	if (!targetUser || typeof targetUser !== 'object') return false;
+	if (isPrimarySoftwareOwnerAccount(targetUser)) return false;
+	const actorTenant = resolveAuthTenantId(auth);
+	const targetTenant = resolveTenantKeyFromUser(targetUser);
+	return Boolean(actorTenant && targetTenant && actorTenant === targetTenant);
+}
+
+function normalizeBillingLimitValue(value, fallback = null) {
+	if (value === null || value === undefined || value === '' || String(value).toLowerCase() === 'unlimited') return null;
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+	return parsed;
+}
+
+function normalizeBillingPlanRow(plan) {
+	const normalized = plan && typeof plan === 'object' ? plan : {};
+	const key = String(normalized?.key || '').trim().toLowerCase();
+	const label = String(normalized?.label || key || 'Plan').trim() || key || 'Plan';
+	const interval = String(normalized?.interval || 'month').trim().toLowerCase() === 'year' ? 'year' : 'month';
+	const amountMinor = Math.max(0, Number.parseInt(normalized?.amountMinor || '0', 10) || 0);
+	const stripePriceId = String(normalized?.stripePriceId || '').trim();
+	return {
+		key,
+		label,
+		interval,
+		amountMinor,
+		stripePriceId,
+		limits: {
+			maxCoaches: normalizeBillingLimitValue(normalized?.limits?.maxCoaches, null),
+			maxSwimmers: normalizeBillingLimitValue(normalized?.limits?.maxSwimmers, null),
+			maxSquads: normalizeBillingLimitValue(normalized?.limits?.maxSquads, null),
+		},
+	};
+}
+
+function normalizeBillingAddonRow(addon) {
+	const normalized = addon && typeof addon === 'object' ? addon : {};
+	const key = String(normalized?.key || '').trim().toLowerCase();
+	const label = String(normalized?.label || key || 'Add-on').trim() || key || 'Add-on';
+	return {
+		key,
+		label,
+		swimmers: Math.max(0, Number.parseInt(normalized?.swimmers || '0', 10) || 0),
+		amountMinor: Math.max(0, Number.parseInt(normalized?.amountMinor || '0', 10) || 0),
+	};
+}
+
+function normalizeBillingCatalog(rawCatalog) {
+	const source = rawCatalog && typeof rawCatalog === 'object' ? rawCatalog : {};
+	const plans = Array.isArray(source?.plans)
+		? source.plans.map(normalizeBillingPlanRow).filter((row) => row.key)
+		: [];
+	const addons = Array.isArray(source?.addons)
+		? source.addons.map(normalizeBillingAddonRow).filter((row) => row.key)
+		: [];
+	const fallbackPlans = [
+		normalizeBillingPlanRow(DEFAULT_BILLING_CATALOG.plans[0]),
+		normalizeBillingPlanRow(DEFAULT_BILLING_CATALOG.plans[1]),
+		normalizeBillingPlanRow(DEFAULT_BILLING_CATALOG.plans[2]),
+	];
+	const fallbackAddons = [
+		normalizeBillingAddonRow(DEFAULT_BILLING_CATALOG.addons[0]),
+		normalizeBillingAddonRow(DEFAULT_BILLING_CATALOG.addons[1]),
+	];
+	return {
+		version: Math.max(1, Number.parseInt(source?.version || '1', 10) || 1),
+		currency: String(source?.currency || 'GBP').trim().toUpperCase() || 'GBP',
+		plans: plans.length > 0 ? plans : fallbackPlans,
+		addons: addons.length > 0 ? addons : fallbackAddons,
+	};
+}
+
+function loadOrCreateBillingCatalog() {
+	const existing = readJsonFile(BILLING_CATALOG_PATH);
+	const normalized = normalizeBillingCatalog(existing);
+	ensureStorageLayout();
+	writeAtomicJsonFile(BILLING_CATALOG_PATH, normalized);
+	return normalized;
+}
+
+function persistBillingCatalog() {
+	ensureStorageLayout();
+	writeAtomicJsonFile(BILLING_CATALOG_PATH, billingCatalog);
+}
+
+function getBillingPlansCatalog() {
+	return Array.isArray(billingCatalog?.plans) ? billingCatalog.plans : [];
+}
+
+function getBillingPlanPriceMaps() {
+	const byPlan = new Map();
+	const byPrice = new Map();
+	for (const plan of getBillingPlansCatalog()) {
+		const key = String(plan?.key || '').trim();
+		const priceId = String(plan?.stripePriceId || '').trim();
+		if (!key || !priceId) continue;
+		byPlan.set(key, priceId);
+		byPrice.set(priceId, key);
+	}
+	return { byPlan, byPrice };
+}
+
+function formatMoneyMinor(amountMinor, currency = 'GBP') {
+	const value = Number.isFinite(Number(amountMinor)) ? Number(amountMinor) : 0;
+	const major = value / 100;
+	const code = String(currency || 'GBP').toUpperCase();
+	if (code === 'GBP') return `\u00a3${major.toFixed(2)}`;
+	return `${major.toFixed(2)} ${code}`;
+}
+
+function serializeBillingPlanForResponse(plan) {
+	const normalized = normalizeBillingPlanRow(plan);
+	return {
+		key: normalized.key,
+		label: normalized.label,
+		interval: normalized.interval,
+		amountMinor: normalized.amountMinor,
+		amountLabel: formatMoneyMinor(normalized.amountMinor, billingCatalog?.currency),
+		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+		stripePriceId: String(normalized?.stripePriceId || '').trim(),
+		configured: Boolean(String(normalized?.stripePriceId || '').trim()),
+		limits: {
+			maxCoaches: normalized?.limits?.maxCoaches ?? null,
+			maxSwimmers: normalized?.limits?.maxSwimmers ?? null,
+			maxSquads: normalized?.limits?.maxSquads ?? null,
+		},
+	};
+}
+
+function serializeBillingAddonForResponse(addon) {
+	const normalized = normalizeBillingAddonRow(addon);
+	return {
+		key: normalized.key,
+		label: normalized.label,
+		swimmers: normalized.swimmers,
+		amountMinor: normalized.amountMinor,
+		amountLabel: formatMoneyMinor(normalized.amountMinor, billingCatalog?.currency),
+		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+	};
+}
+
+function normalizeBillingState(raw) {
+	const fallback = getDefaultBillingState();
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback;
+	return {
+		planKey: String(raw?.planKey || fallback.planKey).trim() || fallback.planKey,
+		status: String(raw?.status || fallback.status).trim() || fallback.status,
+		customerId: String(raw?.customerId || '').trim(),
+		subscriptionId: String(raw?.subscriptionId || '').trim(),
+		priceId: String(raw?.priceId || '').trim(),
+		checkoutSessionId: String(raw?.checkoutSessionId || '').trim(),
+		trialEndsAt: String(raw?.trialEndsAt || '').trim(),
+		currentPeriodEnd: String(raw?.currentPeriodEnd || '').trim(),
+		cancelAtPeriodEnd: raw?.cancelAtPeriodEnd === true,
+		updatedAt: String(raw?.updatedAt || fallback.updatedAt).trim() || fallback.updatedAt,
+	};
+}
+
+function buildBillingAccessForUser(user) {
+	const role = String(user?.role || '').trim();
+	const username = String(user?.username || '').trim().toLowerCase();
+	const isPrimarySoftwareOwner = role === 'software-owner' && username === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME;
+	const billing = normalizeBillingState(user?.billing);
+	const plan = getBillingPlansCatalog().find((row) => String(row?.key || '').trim() === String(billing?.planKey || '').trim()) || null;
+	const planLimits = {
+		maxCoaches: plan?.limits?.maxCoaches ?? null,
+		maxSwimmers: plan?.limits?.maxSwimmers ?? null,
+		maxSquads: plan?.limits?.maxSquads ?? null,
+	};
+	const isBillingEnabled = Boolean(stripeClient);
+	const isBillingEnforced = isBillingEnabled && BILLING_ENFORCED;
+	const isPaidStatus = new Set(['active', 'trialing']);
+	const isPaid = isPrimarySoftwareOwner || isPaidStatus.has(String(billing?.status || '').trim().toLowerCase());
+
+	return {
+		billingEnabled: isBillingEnabled,
+		enforced: isBillingEnforced,
+		isPaid,
+		canUsePremium: isPaid || !isBillingEnforced,
+		canWriteData: isPaid || !isBillingEnforced,
+		canManageBilling: isPrimarySoftwareOwner || isPaid,
+		planLimits,
+		planLabel: String(plan?.label || billing?.planKey || 'Free').trim(),
+		billing,
+	};
+}
+
+function buildAuthUserPayload(user) {
+	const normalizedUser = user && typeof user === 'object' ? user : {};
+	const access = buildBillingAccessForUser(normalizedUser);
+	return {
+		username: String(normalizedUser?.username || '').trim(),
+		role: String(normalizedUser?.role || 'viewer').trim() || 'viewer',
+		tenantId: String(normalizedUser?.tenantId || resolveTenantKeyFromUser(normalizedUser) || '').trim(),
+		onboardingRequired: Boolean(normalizedUser?.onboardingCompletedAt ? false : true),
+		billing: access.billing,
+		access,
+	};
+}
+
+function parseEpochSecondsToIso(seconds) {
+	const value = Number.parseInt(seconds, 10);
+	if (!Number.isFinite(value) || value <= 0) return '';
+	return new Date(value * 1000).toISOString();
+}
+
+function resolveSubscriptionPlanFromStripe(subscription) {
+	const { byPrice } = getBillingPlanPriceMaps();
+	const linePriceId = String(subscription?.items?.data?.[0]?.price?.id || '').trim();
+	if (linePriceId && byPrice.has(linePriceId)) {
+		return { planKey: byPrice.get(linePriceId), priceId: linePriceId };
+	}
+	if (String(subscription?.status || '').trim().toLowerCase() === 'active') {
+		return { planKey: 'tier-1', priceId: linePriceId };
+	}
+	return { planKey: 'free', priceId: linePriceId };
+}
+
+function upsertUserBillingByUsername(username, partialBilling) {
+	const target = String(username || '').trim();
+	if (!target) return null;
+	const index = authUsers.findIndex((row) => String(row?.username || '').trim() === target);
+	if (index < 0) return null;
+	const previous = normalizeBillingState(authUsers[index]?.billing);
+	authUsers[index] = {
+		...authUsers[index],
+		billing: normalizeBillingState({
+			...previous,
+			...(partialBilling && typeof partialBilling === 'object' ? partialBilling : {}),
+			updatedAt: new Date().toISOString(),
+		}),
+	};
+	persistAuthUsers();
+	return authUsers[index];
+}
+
+function upsertUserBillingByCustomerId(customerId, partialBilling) {
+	const target = String(customerId || '').trim();
+	if (!target) return null;
+	const index = authUsers.findIndex((row) => String(row?.billing?.customerId || '').trim() === target);
+	if (index < 0) return null;
+	const previous = normalizeBillingState(authUsers[index]?.billing);
+	authUsers[index] = {
+		...authUsers[index],
+		billing: normalizeBillingState({
+			...previous,
+			...(partialBilling && typeof partialBilling === 'object' ? partialBilling : {}),
+			customerId: target,
+			updatedAt: new Date().toISOString(),
+		}),
+	};
+	persistAuthUsers();
+	return authUsers[index];
+}
+
+async function handleStripeSubscriptionEvent(subscriptionObject) {
+	const subscription = subscriptionObject && typeof subscriptionObject === 'object' ? subscriptionObject : {};
+	const customerId = String(subscription?.customer || '').trim();
+	if (!customerId) return;
+
+	const { planKey, priceId } = resolveSubscriptionPlanFromStripe(subscription);
+	const nextBilling = {
+		customerId,
+		subscriptionId: String(subscription?.id || '').trim(),
+		status: String(subscription?.status || 'inactive').trim() || 'inactive',
+		planKey,
+		priceId,
+		trialEndsAt: parseEpochSecondsToIso(subscription?.trial_end),
+		currentPeriodEnd: parseEpochSecondsToIso(subscription?.current_period_end),
+		cancelAtPeriodEnd: subscription?.cancel_at_period_end === true,
+		updatedAt: new Date().toISOString(),
+	};
+
+	const updated = upsertUserBillingByCustomerId(customerId, nextBilling);
+	if (updated) return;
+
+	const usernameFromMetadata = String(subscription?.metadata?.username || '').trim();
+	if (usernameFromMetadata) {
+		upsertUserBillingByUsername(usernameFromMetadata, nextBilling);
+	}
+}
+
 function normalizeAuthUserRows(rows) {
 	if (!Array.isArray(rows)) return [];
 	return rows
@@ -241,6 +736,13 @@ function normalizeAuthUserRows(rows) {
 			const country = String(row?.country || '').trim();
 			const isApproved = row?.isApproved !== false;
 			const onboardingCompletedAt = String(row?.onboardingCompletedAt || '').trim();
+			const billing = normalizeBillingState(row?.billing);
+			const tenantId = normalizeTenantId(row?.tenantId) || resolveTenantKeyFromUser({
+				username,
+				role,
+				swimClub,
+				teamName,
+			});
 			const passwordHash = fromHash || (fromPassword ? hashPassword(fromPassword) : '');
 			if (!username || !passwordHash) return null;
 			return {
@@ -259,6 +761,8 @@ function normalizeAuthUserRows(rows) {
 				country,
 				isApproved,
 				onboardingCompletedAt,
+				tenantId,
+				billing,
 			};
 		})
 		.filter(Boolean);
@@ -274,6 +778,9 @@ function normalizeInviteRows(rows) {
 			const createdAt = String(row?.createdAt || '').trim() || new Date().toISOString();
 			const expiresAt = String(row?.expiresAt || '').trim();
 			const targetEmail = String(row?.targetEmail || '').trim();
+			const tenantId = normalizeTenantId(row?.tenantId);
+			const swimClub = String(row?.swimClub || '').trim();
+			const teamName = String(row?.teamName || '').trim();
 			const maxUses = Math.max(1, Number.parseInt(row?.maxUses || '1', 10) || 1);
 			const usedCount = Math.max(0, Number.parseInt(row?.usedCount || '0', 10) || 0);
 			const disabled = row?.disabled === true;
@@ -285,6 +792,9 @@ function normalizeInviteRows(rows) {
 				createdAt,
 				expiresAt,
 				targetEmail,
+				tenantId,
+				swimClub,
+				teamName,
 				maxUses,
 				usedCount,
 				disabled,
@@ -510,7 +1020,11 @@ function getAuthPresenceSummary() {
 		return role === 'software-owner' || role === 'head-coach' || role === 'assistant-coach';
 	}).length;
 	const signedUpUsers = authUsers
-		.filter((row) => String(row?.createdVia || '') === 'self-signup')
+		.filter((row) => {
+			const createdVia = String(row?.createdVia || '').trim();
+			const inviteCodeUsed = row?.inviteCodeUsed === true;
+			return createdVia === 'self-signup' && !inviteCodeUsed;
+		})
 		.map((row) => ({
 			username: String(row?.username || '').trim(),
 			role: String(row?.role || 'viewer').trim() || 'viewer',
@@ -559,6 +1073,21 @@ function requireWriteRole(req, res, next) {
 	res.status(403).json({ error: 'Insufficient role privileges for write operation.' });
 }
 
+function requireBillingWriteAccess(req, res, next) {
+	if (!AUTH_REQUIRED) return next();
+	if (!BILLING_ENFORCED || !stripeClient) return next();
+	const user = findAuthUser(String(req.auth?.username || '').trim());
+	const access = buildBillingAccessForUser(user || req.auth);
+	if (access.canWriteData) {
+		next();
+		return;
+	}
+	res.status(402).json({
+		error: 'Active subscription required for write operations.',
+		access,
+	});
+}
+
 function requireStrictAuth(req, res, next) {
 	if (!req.auth) {
 		appendAuthAuditEvent({
@@ -592,7 +1121,8 @@ function requireAdminRole(req, res, next) {
 
 function requireSoftwareOwnerRole(req, res, next) {
 	const role = String(req.auth?.role || '').trim();
-	if (role === 'software-owner') {
+	const username = String(req.auth?.username || '').trim().toLowerCase();
+	if (role === 'software-owner' && username === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME) {
 		next();
 		return;
 	}
@@ -601,9 +1131,9 @@ function requireSoftwareOwnerRole(req, res, next) {
 		req,
 		status: 'blocked',
 		reason: 'software_owner_required',
-		details: { method: req.method, path: req.path, role },
+		details: { method: req.method, path: req.path, role, username },
 	});
-	res.status(403).json({ error: 'Software owner privileges required.' });
+	res.status(403).json({ error: 'Primary software owner privileges required.' });
 }
 
 function sanitizeAuditText(value, fallback = '') {
@@ -677,11 +1207,11 @@ function createAuthAuditBackupIfDue() {
 	}
 }
 
-function appendAuthAuditEvent({ action, req, status = 'info', target = '', reason = '', details = {} }) {
+function appendAuthAuditEvent({ action, req, status = 'info', target = '', reason = '', details = {}, actor = '', actorRole = '' }) {
 	try {
 		ensureStorageLayout();
-		const actor = sanitizeAuditText(req?.auth?.username || 'anonymous', 'anonymous');
-		const actorRole = sanitizeAuditText(req?.auth?.role || 'unknown', 'unknown');
+		const resolvedActor = sanitizeAuditText(actor || req?.auth?.username || 'anonymous', 'anonymous');
+		const resolvedActorRole = sanitizeAuditText(actorRole || req?.auth?.role || 'unknown', 'unknown');
 		const ip = sanitizeAuditText(resolveClientKey(req), 'unknown');
 		const method = sanitizeAuditText(req?.method || '', '');
 		const routePath = sanitizeAuditText(req?.path || '', '');
@@ -689,8 +1219,8 @@ function appendAuthAuditEvent({ action, req, status = 'info', target = '', reaso
 			at: new Date().toISOString(),
 			action: sanitizeAuditText(action, 'unknown_action'),
 			status: sanitizeAuditText(status, 'info'),
-			actor,
-			actorRole,
+			actor: resolvedActor,
+			actorRole: resolvedActorRole,
 			target: sanitizeAuditText(target, ''),
 			reason: sanitizeAuditText(reason, ''),
 			ip,
@@ -884,6 +1414,7 @@ function sanitizeAuthUsers(users) {
 		? users.map((row) => ({
 			username: String(row?.username || '').trim(),
 			role: String(row?.role || 'viewer').trim() || 'viewer',
+			tenantId: String(row?.tenantId || resolveTenantKeyFromUser(row) || '').trim(),
 			createdVia: String(row?.createdVia || 'legacy').trim() || 'legacy',
 			createdAt: String(row?.createdAt || '').trim(),
 			fullName: String(row?.fullName || '').trim(),
@@ -895,6 +1426,7 @@ function sanitizeAuthUsers(users) {
 			country: String(row?.country || '').trim(),
 			isApproved: row?.isApproved !== false,
 			onboardingCompletedAt: String(row?.onboardingCompletedAt || '').trim(),
+			billing: normalizeBillingState(row?.billing),
 		}))
 		: [];
 }
@@ -913,10 +1445,15 @@ function writeJsonFile(filePath, data) {
 	}
 }
 
-function ensureStorageLayout() {
+function ensureStorageLayout(storagePaths = null) {
+	const dbPath = storagePaths?.dbPath || DB_PATH;
+	const backupPath = storagePaths?.backupPath || TARGET_BACKUP_PATH;
+	const snapshotDir = storagePaths?.snapshotDir || DB_SNAPSHOT_DIR;
 	try {
-		fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-		fs.mkdirSync(DB_SNAPSHOT_DIR, { recursive: true });
+		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+		fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+		fs.mkdirSync(snapshotDir, { recursive: true });
+		fs.mkdirSync(DB_TENANTS_DIR, { recursive: true });
 		fs.mkdirSync(AUTH_AUDIT_DIR, { recursive: true });
 		fs.mkdirSync(AUTH_AUDIT_BACKUP_DIR, { recursive: true });
 	} catch {
@@ -935,14 +1472,14 @@ function writeAtomicJsonFile(filePath, data) {
 	fs.renameSync(tmpPath, filePath);
 }
 
-function rotateSnapshotFiles() {
-	if (!fs.existsSync(DB_SNAPSHOT_DIR)) return;
-	const snapshotFiles = fs.readdirSync(DB_SNAPSHOT_DIR)
+function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {
+	if (!fs.existsSync(snapshotDir)) return;
+	const snapshotFiles = fs.readdirSync(snapshotDir)
 		.filter((name) => name.startsWith('db-') && name.endsWith('.json'))
 		.map((name) => ({
 			name,
-			fullPath: path.join(DB_SNAPSHOT_DIR, name),
-			mtime: fs.statSync(path.join(DB_SNAPSHOT_DIR, name)).mtimeMs,
+			fullPath: path.join(snapshotDir, name),
+			mtime: fs.statSync(path.join(snapshotDir, name)).mtimeMs,
 		}))
 		.sort((a, b) => b.mtime - a.mtime);
 
@@ -956,13 +1493,14 @@ function rotateSnapshotFiles() {
 	}
 }
 
-function writeDbSnapshotIfPossible() {
+function writeDbSnapshotIfPossible(dbPath = DB_PATH, snapshotDir = DB_SNAPSHOT_DIR) {
 	try {
-		if (!fs.existsSync(DB_PATH)) return;
+		if (!fs.existsSync(dbPath)) return;
 		const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-		const snapshotPath = path.join(DB_SNAPSHOT_DIR, `db-${stamp}.json`);
-		fs.copyFileSync(DB_PATH, snapshotPath);
-		rotateSnapshotFiles();
+		const snapshotPath = path.join(snapshotDir, `db-${stamp}.json`);
+		fs.mkdirSync(snapshotDir, { recursive: true });
+		fs.copyFileSync(dbPath, snapshotPath);
+		rotateSnapshotFiles(snapshotDir);
 	} catch {
 		// Snapshot is best-effort only.
 	}
@@ -1238,22 +1776,29 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 
 	const role = String(usableInvite?.role || 'assistant-coach').trim() || 'assistant-coach';
 	const isApproved = Boolean(usableInvite) || AUTH_ALLOW_COACH_SIGNUP;
+	const effectiveSwimClub = String(usableInvite?.swimClub || swimClub).trim();
+	const effectiveTeamName = String(usableInvite?.teamName || teamName).trim();
+	const tenantId = normalizeTenantId(usableInvite?.tenantId)
+		|| resolveTenantKeyFromUser({ username, role, swimClub: effectiveSwimClub, teamName: effectiveTeamName });
 	authUsers.push({
 		username,
 		role,
+		tenantId,
 		passwordHash: hashPassword(password),
 		tokenValidAfter: 0,
-		createdVia: 'self-signup',
+		createdVia: usableInvite ? 'self-signup-invite' : 'self-signup',
+		inviteCodeUsed: Boolean(usableInvite),
 		createdAt: new Date().toISOString(),
 		fullName,
 		email,
 		phone,
-		swimClub,
-		teamName,
+		swimClub: effectiveSwimClub,
+		teamName: effectiveTeamName,
 		city,
 		country,
 		isApproved,
 		onboardingCompletedAt: '',
+		billing: getDefaultBillingState(),
 	});
 
 	try {
@@ -1275,7 +1820,7 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 		res.status(201).json({
 			ok: true,
 			token,
-			user: { username, role, onboardingRequired: true },
+			user: buildAuthUserPayload({ username, role, onboardingCompletedAt: '', billing: getDefaultBillingState() }),
 		});
 	} catch (error) {
 		authUsers.pop();
@@ -1334,16 +1879,19 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		action: 'login_success',
 		req,
 		status: 'success',
+		actor: user.username,
+		actorRole: String(user?.role || 'unknown'),
 		target: user.username,
-		details: { role: user.role },
+		details: {
+			role: user.role,
+			swimClub: String(user?.swimClub || '').trim(),
+			teamName: String(user?.teamName || '').trim(),
+			email: String(user?.email || '').trim(),
+		},
 	});
 	res.status(200).json({
 		token,
-		user: {
-			username: user.username,
-			role: user.role,
-			onboardingRequired: Boolean(user?.onboardingCompletedAt ? false : true),
-		},
+		user: buildAuthUserPayload(user),
 	});
 });
 
@@ -1503,12 +2051,190 @@ app.get('/auth/me', (req, res) => {
 		authRequired: true,
 		authenticated: true,
 		user: {
-			username: req.auth.username,
-			role: req.auth.role,
+			...buildAuthUserPayload(findAuthUser(req.auth.username) || req.auth),
 			expiresAt: req.auth.exp,
-			onboardingRequired: Boolean(findAuthUser(req.auth.username)?.onboardingCompletedAt ? false : true),
 		},
 	});
+});
+
+app.get('/billing/config', requireStrictAuth, (_req, res) => {
+	const plans = getBillingPlansCatalog().map(serializeBillingPlanForResponse);
+	const addons = Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [];
+	res.status(200).json({
+		enabled: Boolean(stripeClient),
+		enforced: Boolean(stripeClient) && BILLING_ENFORCED,
+		trialDays: BILLING_TRIAL_DAYS,
+		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+		plans,
+		addons,
+	});
+});
+
+app.get('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (_req, res) => {
+	res.status(200).json({
+		catalog: {
+			version: Number(billingCatalog?.version || 1),
+			currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+			plans: getBillingPlansCatalog().map(serializeBillingPlanForResponse),
+			addons: Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [],
+		},
+	});
+});
+
+app.put('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
+	const payload = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+		? req.body
+		: null;
+	if (!payload) {
+		res.status(400).json({ error: 'Invalid billing catalog payload.' });
+		return;
+	}
+
+	const normalized = normalizeBillingCatalog(payload);
+	if (!Array.isArray(normalized?.plans) || normalized.plans.length < 1) {
+		res.status(400).json({ error: 'At least one billing plan is required.' });
+		return;
+	}
+
+	billingCatalog = {
+		version: Number(billingCatalog?.version || 1) + 1,
+		currency: String(normalized?.currency || 'GBP').toUpperCase(),
+		plans: normalized.plans,
+		addons: Array.isArray(normalized?.addons) ? normalized.addons : [],
+	};
+	persistBillingCatalog();
+
+	res.status(200).json({
+		ok: true,
+		catalog: {
+			version: Number(billingCatalog?.version || 1),
+			currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+			plans: getBillingPlansCatalog().map(serializeBillingPlanForResponse),
+			addons: Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [],
+		},
+	});
+});
+
+app.get('/billing/subscription', requireStrictAuth, (req, res) => {
+	const user = findAuthUser(String(req.auth?.username || '').trim());
+	if (!user) {
+		res.status(404).json({ error: 'User not found.' });
+		return;
+	}
+
+	res.status(200).json({
+		user: buildAuthUserPayload(user),
+		trialDays: BILLING_TRIAL_DAYS,
+		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+		plans: getBillingPlansCatalog().map(serializeBillingPlanForResponse),
+		addons: Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [],
+	});
+});
+
+app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
+	if (!stripeClient) {
+		res.status(503).json({ error: 'Stripe is not configured on backend.' });
+		return;
+	}
+	if (!BILLING_APP_BASE_URL) {
+		res.status(400).json({ error: 'BILLING_APP_BASE_URL is required to create checkout sessions.' });
+		return;
+	}
+
+	const planKey = String(req.body?.planKey || 'tier-1').trim();
+	const { byPlan } = getBillingPlanPriceMaps();
+	const priceId = byPlan.get(planKey);
+	if (!priceId) {
+		res.status(400).json({ error: 'Invalid or unconfigured billing plan.' });
+		return;
+	}
+
+	const username = String(req.auth?.username || '').trim();
+	const user = findAuthUser(username);
+	if (!user) {
+		res.status(404).json({ error: 'User not found.' });
+		return;
+	}
+
+	try {
+		const billing = normalizeBillingState(user?.billing);
+		const hasUsedSubscription = Boolean(String(billing?.subscriptionId || '').trim());
+		let customerId = String(billing?.customerId || '').trim();
+		if (!customerId) {
+			const createdCustomer = await stripeClient.customers.create({
+				email: String(user?.email || '').trim() || undefined,
+				name: String(user?.fullName || user?.username || '').trim() || undefined,
+				metadata: { username },
+			});
+			customerId = String(createdCustomer?.id || '').trim();
+			upsertUserBillingByUsername(username, { customerId, updatedAt: new Date().toISOString() });
+		}
+
+		const checkoutSession = await stripeClient.checkout.sessions.create({
+			mode: 'subscription',
+			customer: customerId,
+			line_items: [{ price: priceId, quantity: 1 }],
+			success_url: `${BILLING_APP_BASE_URL}/?billing=success`,
+			cancel_url: `${BILLING_APP_BASE_URL}/?billing=cancel`,
+			allow_promotion_codes: true,
+			client_reference_id: username,
+			metadata: { username, planKey },
+			subscription_data: {
+				metadata: { username, planKey },
+				...(BILLING_TRIAL_DAYS > 0 && !hasUsedSubscription ? { trial_period_days: BILLING_TRIAL_DAYS } : {}),
+			},
+		});
+
+		upsertUserBillingByUsername(username, {
+			planKey,
+			priceId,
+			checkoutSessionId: String(checkoutSession?.id || '').trim(),
+			status: 'checkout_pending',
+			updatedAt: new Date().toISOString(),
+		});
+
+		res.status(200).json({
+			ok: true,
+			sessionId: String(checkoutSession?.id || '').trim(),
+			url: String(checkoutSession?.url || '').trim(),
+		});
+	} catch (error) {
+		res.status(500).json({ error: 'Could not create checkout session.', details: error instanceof Error ? error.message : 'Unknown error' });
+	}
+});
+
+app.post('/billing/portal-session', requireStrictAuth, async (req, res) => {
+	if (!stripeClient) {
+		res.status(503).json({ error: 'Stripe is not configured on backend.' });
+		return;
+	}
+	if (!BILLING_APP_BASE_URL) {
+		res.status(400).json({ error: 'BILLING_APP_BASE_URL is required to create portal sessions.' });
+		return;
+	}
+
+	const username = String(req.auth?.username || '').trim();
+	const user = findAuthUser(username);
+	if (!user) {
+		res.status(404).json({ error: 'User not found.' });
+		return;
+	}
+
+	const customerId = String(user?.billing?.customerId || '').trim();
+	if (!customerId) {
+		res.status(400).json({ error: 'No billing customer exists yet. Start a subscription checkout first.' });
+		return;
+	}
+
+	try {
+		const session = await stripeClient.billingPortal.sessions.create({
+			customer: customerId,
+			return_url: `${BILLING_APP_BASE_URL}/?billing=portal-return`,
+		});
+		res.status(200).json({ ok: true, url: String(session?.url || '').trim() });
+	} catch (error) {
+		res.status(500).json({ error: 'Could not create billing portal session.', details: error instanceof Error ? error.message : 'Unknown error' });
+	}
 });
 
 app.post('/auth/onboarding/complete', requireStrictAuth, (req, res) => {
@@ -1631,6 +2357,21 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	const role = String(req.body?.role || 'assistant-coach').trim() || 'assistant-coach';
 	const targetEmail = String(req.body?.email || '').trim();
 	const maxUses = Math.max(1, Number.parseInt(req.body?.maxUses || '1', 10) || 1);
+	const actor = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+	const actorIsPrimaryOwner = isPrimarySoftwareOwnerAccount(actor);
+	const inviteSwimClub = actorIsPrimaryOwner
+		? String(req.body?.swimClub || '').trim()
+		: String(actor?.swimClub || '').trim();
+	const inviteTeamName = actorIsPrimaryOwner
+		? String(req.body?.teamName || '').trim()
+		: String(actor?.teamName || '').trim();
+	const inviteTenantId = actorIsPrimaryOwner
+		? (normalizeTenantId(req.body?.tenantId) || resolveTenantKeyFromUser({ swimClub: inviteSwimClub, teamName: inviteTeamName }))
+		: resolveTenantKeyFromUser(actor);
+	if (!actorIsPrimaryOwner && !['assistant-coach', 'head-coach'].includes(role)) {
+		res.status(403).json({ error: 'Only assistant-coach or head-coach invites are allowed for tenant admins.' });
+		return;
+	}
 	if (targetEmail && !AUTH_EMAIL_PATTERN.test(targetEmail)) {
 		res.status(400).json({ error: 'Enter a valid invite email address.' });
 		return;
@@ -1649,6 +2390,9 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 		code,
 		role,
 		createdBy: String(req.auth?.username || '').trim() || 'unknown',
+		tenantId: inviteTenantId,
+		swimClub: inviteSwimClub,
+		teamName: inviteTeamName,
 		createdAt: createdAt.toISOString(),
 		expiresAt: expiresAt.toISOString(),
 		targetEmail,
@@ -1687,7 +2431,7 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	}
 });
 
-app.get('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (_req, res) => {
+app.get('/auth/users', requireStrictAuth, requireSoftwareOwnerRole, requireAdminRateLimit, (_req, res) => {
 	res.status(200).json({
 		users: sanitizeAuthUsers(authUsers),
 	});
@@ -1695,8 +2439,23 @@ app.get('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLimi
 
 app.post('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {
 	const username = String(req.body?.username || '').trim();
-	const role = String(req.body?.role || 'viewer').trim() || 'viewer';
+	const requestedRole = String(req.body?.role || 'viewer').trim() || 'viewer';
 	const password = String(req.body?.password || '');
+	const actor = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+	const actorIsPrimaryOwner = isPrimarySoftwareOwnerAccount(actor);
+	const role = !actorIsPrimaryOwner && requestedRole === 'software-owner' ? 'head-coach' : requestedRole;
+	const actorTenantId = resolveTenantKeyFromUser(actor);
+	const swimClub = actorIsPrimaryOwner
+		? String(req.body?.swimClub || '').trim()
+		: String(actor?.swimClub || '').trim();
+	const teamName = actorIsPrimaryOwner
+		? String(req.body?.teamName || '').trim()
+		: String(actor?.teamName || '').trim();
+	const requestedTenantId = normalizeTenantId(req.body?.tenantId)
+		|| resolveTenantKeyFromUser({ username, role, swimClub, teamName });
+	const tenantId = role === 'software-owner'
+		? 'global-owner'
+		: (actorIsPrimaryOwner ? requestedTenantId : actorTenantId);
 
 	if (!username || !password) {
 		res.status(400).json({ error: 'Username and password are required.' });
@@ -1711,10 +2470,14 @@ app.post('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLim
 	authUsers.push({
 		username,
 		role,
+		tenantId,
 		passwordHash: hashPassword(password),
 		tokenValidAfter: 0,
 		createdVia: 'admin',
 		createdAt: new Date().toISOString(),
+		swimClub,
+		teamName,
+		billing: getDefaultBillingState(),
 	});
 
 	try {
@@ -1750,6 +2513,10 @@ app.put('/auth/users/:username/password', requireStrictAuth, requireAdminRole, r
 	const index = authUsers.findIndex((row) => row.username === targetUsername);
 	if (index < 0) {
 		res.status(404).json({ error: 'User not found.' });
+		return;
+	}
+	if (!canAdminManageUser(req.auth, authUsers[index])) {
+		res.status(403).json({ error: 'Tenant scope does not allow managing this user.' });
 		return;
 	}
 
@@ -1789,6 +2556,14 @@ app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requi
 	const index = authUsers.findIndex((row) => row.username === targetUsername);
 	if (index < 0) {
 		res.status(404).json({ error: 'User not found.' });
+		return;
+	}
+	if (!canAdminManageUser(req.auth, authUsers[index])) {
+		res.status(403).json({ error: 'Tenant scope does not allow managing this user.' });
+		return;
+	}
+	if (!isPrimarySoftwareOwnerAccount(req.auth) && nextRole === 'software-owner') {
+		res.status(403).json({ error: 'Tenant admins cannot assign software-owner role.' });
 		return;
 	}
 
@@ -1834,6 +2609,10 @@ app.put('/auth/users/:username/approval', requireStrictAuth, requireAdminRole, r
 		res.status(404).json({ error: 'User not found.' });
 		return;
 	}
+	if (!canAdminManageUser(req.auth, authUsers[index])) {
+		res.status(403).json({ error: 'Tenant scope does not allow managing this user.' });
+		return;
+	}
 
 	const previous = authUsers[index];
 	authUsers[index] = {
@@ -1872,6 +2651,10 @@ app.delete('/auth/users/:username', requireStrictAuth, requireAdminRole, require
 		res.status(404).json({ error: 'User not found.' });
 		return;
 	}
+	if (!canAdminManageUser(req.auth, authUsers[index])) {
+		res.status(403).json({ error: 'Tenant scope does not allow managing this user.' });
+		return;
+	}
 
 	const currentUserName = String(req.auth?.username || '').trim();
 	if (targetUsername === currentUserName) {
@@ -1898,11 +2681,119 @@ app.delete('/auth/users/:username', requireStrictAuth, requireAdminRole, require
 	}
 });
 
-// Serve db.json at /db
-app.get('/db', requireAuth, (req, res) => {
+function normalizeDocumentsForPermission(rows) {
+	const source = Array.isArray(rows) ? rows : [];
+	return source
+		.map((row) => ({
+			id: String(row?.id || ''),
+			title: String(row?.title || ''),
+			placeholderKey: String(row?.placeholderKey || ''),
+			contentType: String(row?.contentType || 'text'),
+			pageKey: String(row?.pageKey || ''),
+			sectionKey: String(row?.sectionKey || ''),
+			elementKey: String(row?.elementKey || ''),
+			buttonUrl: String(row?.buttonUrl || ''),
+			category: String(row?.category || ''),
+			notes: String(row?.notes || ''),
+			contentHtml: String(row?.contentHtml || ''),
+			isPublished: Boolean(row?.isPublished),
+			fileName: String(row?.fileName || ''),
+			fileType: String(row?.fileType || ''),
+			fileSize: Number(row?.fileSize || 0),
+			fileDataUrl: String(row?.fileDataUrl || ''),
+			version: Math.max(1, Number(row?.version || 1)),
+			updatedAt: String(row?.updatedAt || ''),
+		}))
+		.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+}
+
+function hasUnauthorizedDocumentsChange(currentDb, nextDb, auth) {
+	const role = String(auth?.role || '').trim();
+	const username = String(auth?.username || '').trim().toLowerCase();
+	if (role === 'software-owner' && username === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME) {
+		return false;
+	}
+	const currentDocs = normalizeDocumentsForPermission(currentDb?.documents);
+	const nextDocs = normalizeDocumentsForPermission(nextDb?.documents);
+	return JSON.stringify(currentDocs) !== JSON.stringify(nextDocs);
+}
+
+app.get('/content/placeholders', (req, res) => {
 	fs.readFile(DB_PATH, 'utf8', (err, data) => {
 		if (err) {
 			res.status(500).json({ error: 'Could not read db.json' });
+			return;
+		}
+
+		try {
+			const parsed = JSON.parse(data);
+			const sourceRows = Array.isArray(parsed?.documents) ? parsed.documents : [];
+			const publishedRows = sourceRows
+				.filter((row) => row && typeof row === 'object' && row.isPublished)
+				.map((row) => ({
+					id: String(row?.id || ''),
+					title: String(row?.title || ''),
+					placeholderKey: String(row?.placeholderKey || ''),
+					contentType: String(row?.contentType || 'text'),
+					pageKey: String(row?.pageKey || ''),
+					sectionKey: String(row?.sectionKey || ''),
+					elementKey: String(row?.elementKey || ''),
+					buttonUrl: String(row?.buttonUrl || ''),
+					category: String(row?.category || ''),
+					notes: String(row?.notes || ''),
+					contentHtml: String(row?.contentHtml || ''),
+					fileName: String(row?.fileName || ''),
+					fileType: String(row?.fileType || ''),
+					fileSize: Number(row?.fileSize || 0),
+					fileDataUrl: String(row?.fileDataUrl || ''),
+					version: Math.max(1, Number(row?.version || 1)),
+					updatedAt: String(row?.updatedAt || row?.createdAt || ''),
+				}))
+				.filter((row) => row.placeholderKey);
+
+			const placeholders = {};
+			for (const row of publishedRows) {
+				const key = String(row.placeholderKey || '').trim();
+				if (!key) continue;
+				const existing = placeholders[key];
+				if (!existing) {
+					placeholders[key] = row;
+					continue;
+				}
+				const existingMs = Date.parse(String(existing?.updatedAt || ''));
+				const rowMs = Date.parse(String(row?.updatedAt || ''));
+				if (Number.isFinite(rowMs) && (!Number.isFinite(existingMs) || rowMs > existingMs)) {
+					placeholders[key] = row;
+				}
+			}
+
+			res.setHeader('Content-Type', 'application/json');
+			res.setHeader('Cache-Control', 'no-store');
+			res.status(200).json({
+				ok: true,
+				count: Object.keys(placeholders).length,
+				updatedAt: new Date().toISOString(),
+				placeholders,
+			});
+		} catch {
+			res.status(500).json({ error: 'Could not parse db.json payload.' });
+		}
+	});
+});
+
+// Serve db.json at /db
+app.get('/db', requireAuth, (req, res) => {
+	const storagePaths = resolveStoragePathsForAuth(req.auth);
+	ensureStorageLayout(storagePaths);
+	if (!fs.existsSync(storagePaths.dbPath) && fs.existsSync(DB_PATH) && storagePaths.dbPath !== DB_PATH) {
+		const globalSeed = readJsonFile(DB_PATH);
+		if (globalSeed && typeof globalSeed === 'object') {
+			writeAtomicJsonFile(storagePaths.dbPath, globalSeed);
+		}
+	}
+	fs.readFile(storagePaths.dbPath, 'utf8', (err, data) => {
+		if (err) {
+			res.status(500).json({ error: 'Could not read db.json', tenant: storagePaths.tenantKey });
 		} else {
 			res.setHeader('Content-Type', 'application/json');
 			res.send(data);
@@ -1910,18 +2801,33 @@ app.get('/db', requireAuth, (req, res) => {
 	});
 });
 
-app.put('/db', requireAuth, requireWriteRole, (req, res) => {
+app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, res) => {
 	const body = req.body;
 	if (!body || typeof body !== 'object' || Array.isArray(body)) {
 		res.status(400).json({ error: 'Invalid payload. Expected JSON object.' });
 		return;
 	}
+	const storagePaths = resolveStoragePathsForAuth(req.auth);
+	ensureStorageLayout(storagePaths);
+
+	const existingDb = readJsonFile(storagePaths.dbPath);
+	if (hasUnauthorizedDocumentsChange(existingDb, body, req.auth)) {
+		appendAuthAuditEvent({
+			action: 'unauthorized_access_blocked',
+			req,
+			status: 'blocked',
+			reason: 'documents_owner_only',
+			details: { path: '/db', method: 'PUT' },
+		});
+		res.status(403).json({ error: 'Documents can only be modified by the primary software-owner account.' });
+		return;
+	}
 
 	enqueueWrite(async () => {
-		ensureStorageLayout();
-		writeDbSnapshotIfPossible();
+		ensureStorageLayout(storagePaths);
+		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
 
-		const backupPayload = readJsonFile(TARGET_BACKUP_PATH);
+		const backupPayload = readJsonFile(storagePaths.backupPath);
 		const backupRows = Array.isArray(backupPayload?.rows) ? backupPayload.rows : [];
 		const merged = mergePlannerTargets(body, backupRows);
 		const safeBody = {
@@ -1929,13 +2835,13 @@ app.put('/db', requireAuth, requireWriteRole, (req, res) => {
 			trainingPlannerWeeks: merged.nextWeeks,
 		};
 
-		writeAtomicJsonFile(DB_PATH, safeBody);
+		writeAtomicJsonFile(storagePaths.dbPath, safeBody);
 
 		const nextBackup = {
 			savedAt: new Date().toISOString(),
 			rows: extractPlannerTargetRows(safeBody),
 		};
-		writeAtomicJsonFile(TARGET_BACKUP_PATH, nextBackup);
+		writeAtomicJsonFile(storagePaths.backupPath, nextBackup);
 
 		return {
 			recoveredTargets: merged.recoveredTargets,
@@ -1959,6 +2865,7 @@ app.put('/db', requireAuth, requireWriteRole, (req, res) => {
 
 const server = app.listen(PORT, () => {
 	console.log(`Server running at http://localhost:${PORT}/db`);
+	console.log(`Website placeholders feed at http://localhost:${PORT}/content/placeholders`);
 });
 
 server.on('error', (error) => {
