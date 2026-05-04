@@ -31,8 +31,8 @@ const AUTH_LOGIN_RATE_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.AUT
 const AUTH_LOGIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUTH_LOGIN_RATE_MAX_ATTEMPTS || '8', 10) || 8);
 const AUTH_ADMIN_RATE_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.AUTH_ADMIN_RATE_WINDOW_MS || '60000', 10) || 60000);
 const AUTH_ADMIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUTH_ADMIN_RATE_MAX_ATTEMPTS || '60', 10) || 60);
-const AUTH_ALLOW_COACH_SIGNUP = String(process.env.AUTH_ALLOW_COACH_SIGNUP || 'false').toLowerCase() === 'true';
-const AUTH_ALLOW_COACH_INVITES = String(process.env.AUTH_ALLOW_COACH_INVITES || 'false').toLowerCase() === 'true';
+const AUTH_ALLOW_COACH_SIGNUP = true;
+const AUTH_ALLOW_COACH_INVITES = true;
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
 const AUTH_PASSWORD_RESET_DELIVERY = String(process.env.AUTH_PASSWORD_RESET_DELIVERY || 'console').trim().toLowerCase();
