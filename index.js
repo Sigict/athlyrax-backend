@@ -59,6 +59,10 @@ const BILLING_PRICE_TIER_3 = String(process.env.STRIPE_PRICE_TIER_3 || process.e
 const BILLING_APP_BASE_URL = String(process.env.BILLING_APP_BASE_URL || process.env.APP_BASE_URL || '').trim().replace(/\/$/, '');
 const BILLING_ENFORCED = String(process.env.BILLING_ENFORCED || 'false').toLowerCase() === 'true';
 const BILLING_TRIAL_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_TRIAL_DAYS || '42', 10) || 0);
+const BILLING_BASE_TRIAL_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_BASE_TRIAL_DAYS || '28', 10) || 0);
+const BILLING_REFERRAL_BONUS_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_REFERRAL_BONUS_DAYS || '14', 10) || 0);
+const BILLING_PARTNER_COMMISSION_PERCENT = Math.max(0, Number.parseInt(process.env.BILLING_PARTNER_COMMISSION_PERCENT || '10', 10) || 0);
+const BILLING_PARTNER_COMMISSION_MONTHS = Math.max(0, Number.parseInt(process.env.BILLING_PARTNER_COMMISSION_MONTHS || '36', 10) || 0);
 const PHASE1_TENANT_ISOLATION = String(process.env.PHASE1_TENANT_ISOLATION || 'true').toLowerCase() === 'true';
 const DEFAULT_BILLING_CATALOG = {
 	version: 1,
@@ -736,6 +740,11 @@ function normalizeAuthUserRows(rows) {
 			const country = String(row?.country || '').trim();
 			const isApproved = row?.isApproved !== false;
 			const onboardingCompletedAt = String(row?.onboardingCompletedAt || '').trim();
+			const referralCode = String(row?.referralCode || '').trim().toUpperCase();
+			const referredByUsername = String(row?.referredByUsername || '').trim();
+			const partnerCommissionPercent = Math.max(0, Number.parseInt(row?.partnerCommissionPercent || '0', 10) || 0);
+			const partnerCommissionMonths = Math.max(0, Number.parseInt(row?.partnerCommissionMonths || '0', 10) || 0);
+			const partnerAttributionAt = String(row?.partnerAttributionAt || '').trim();
 			const billing = normalizeBillingState(row?.billing);
 			const tenantId = normalizeTenantId(row?.tenantId) || resolveTenantKeyFromUser({
 				username,
@@ -761,11 +770,24 @@ function normalizeAuthUserRows(rows) {
 				country,
 				isApproved,
 				onboardingCompletedAt,
+				referralCode,
+				referredByUsername,
+				partnerCommissionPercent,
+				partnerCommissionMonths,
+				partnerAttributionAt,
 				tenantId,
 				billing,
 			};
 		})
 		.filter(Boolean);
+}
+
+function resolveTrialDaysForUser(user) {
+	const normalized = user && typeof user === 'object' ? user : {};
+	const hasReferralAttribution = normalized?.inviteCodeUsed === true
+		|| String(normalized?.createdVia || '').trim() === 'self-signup-invite'
+		|| Boolean(String(normalized?.referralCode || '').trim());
+	return Math.max(0, BILLING_BASE_TRIAL_DAYS + (hasReferralAttribution ? BILLING_REFERRAL_BONUS_DAYS : 0));
 }
 
 function normalizeInviteRows(rows) {
@@ -1798,6 +1820,11 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 		country,
 		isApproved,
 		onboardingCompletedAt: '',
+		referralCode: usableInvite ? String(usableInvite?.code || '').trim().toUpperCase() : '',
+		referredByUsername: usableInvite ? String(usableInvite?.createdBy || '').trim() : '',
+		partnerCommissionPercent: usableInvite ? BILLING_PARTNER_COMMISSION_PERCENT : 0,
+		partnerCommissionMonths: usableInvite ? BILLING_PARTNER_COMMISSION_MONTHS : 0,
+		partnerAttributionAt: usableInvite ? new Date().toISOString() : '',
 		billing: getDefaultBillingState(),
 	});
 
@@ -2057,13 +2084,14 @@ app.get('/auth/me', (req, res) => {
 	});
 });
 
-app.get('/billing/config', requireStrictAuth, (_req, res) => {
+app.get('/billing/config', requireStrictAuth, (req, res) => {
+	const user = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
 	const plans = getBillingPlansCatalog().map(serializeBillingPlanForResponse);
 	const addons = Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [];
 	res.status(200).json({
 		enabled: Boolean(stripeClient),
 		enforced: Boolean(stripeClient) && BILLING_ENFORCED,
-		trialDays: BILLING_TRIAL_DAYS,
+		trialDays: resolveTrialDaysForUser(user),
 		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
 		plans,
 		addons,
@@ -2124,7 +2152,7 @@ app.get('/billing/subscription', requireStrictAuth, (req, res) => {
 
 	res.status(200).json({
 		user: buildAuthUserPayload(user),
-		trialDays: BILLING_TRIAL_DAYS,
+		trialDays: resolveTrialDaysForUser(user),
 		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
 		plans: getBillingPlansCatalog().map(serializeBillingPlanForResponse),
 		addons: Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [],
@@ -2159,12 +2187,25 @@ app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
 	try {
 		const billing = normalizeBillingState(user?.billing);
 		const hasUsedSubscription = Boolean(String(billing?.subscriptionId || '').trim());
+		const trialDays = resolveTrialDaysForUser(user);
+		const referralCode = String(user?.referralCode || '').trim().toUpperCase();
+		const referredByUsername = String(user?.referredByUsername || '').trim();
+		const partnerCommissionPercent = Math.max(0, Number.parseInt(user?.partnerCommissionPercent || '0', 10) || 0);
+		const partnerCommissionMonths = Math.max(0, Number.parseInt(user?.partnerCommissionMonths || '0', 10) || 0);
+		const checkoutMetadata = {
+			username,
+			planKey,
+			...(referralCode ? { referralCode } : {}),
+			...(referredByUsername ? { referredByUsername } : {}),
+			...(partnerCommissionPercent > 0 ? { partnerCommissionPercent: String(partnerCommissionPercent) } : {}),
+			...(partnerCommissionMonths > 0 ? { partnerCommissionMonths: String(partnerCommissionMonths) } : {}),
+		};
 		let customerId = String(billing?.customerId || '').trim();
 		if (!customerId) {
 			const createdCustomer = await stripeClient.customers.create({
 				email: String(user?.email || '').trim() || undefined,
 				name: String(user?.fullName || user?.username || '').trim() || undefined,
-				metadata: { username },
+				metadata: checkoutMetadata,
 			});
 			customerId = String(createdCustomer?.id || '').trim();
 			upsertUserBillingByUsername(username, { customerId, updatedAt: new Date().toISOString() });
@@ -2178,10 +2219,10 @@ app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
 			cancel_url: `${BILLING_APP_BASE_URL}/?billing=cancel`,
 			allow_promotion_codes: true,
 			client_reference_id: username,
-			metadata: { username, planKey },
+			metadata: checkoutMetadata,
 			subscription_data: {
-				metadata: { username, planKey },
-				...(BILLING_TRIAL_DAYS > 0 && !hasUsedSubscription ? { trial_period_days: BILLING_TRIAL_DAYS } : {}),
+				metadata: checkoutMetadata,
+				...(trialDays > 0 && !hasUsedSubscription ? { trial_period_days: trialDays } : {}),
 			},
 		});
 
