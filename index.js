@@ -457,6 +457,67 @@ function canAdminManageUser(auth, targetUser) {
 	return Boolean(actorTenant && targetTenant && actorTenant === targetTenant);
 }
 
+function getTenantUsersByTenantId(tenantId) {
+	const normalizedTenantId = normalizeTenantId(tenantId);
+	if (!normalizedTenantId) return [];
+	return authUsers.filter((row) => resolveTenantKeyFromUser(row) === normalizedTenantId);
+}
+
+function resolveTenantPlanLimits(tenantId) {
+	const tenantUsers = getTenantUsersByTenantId(tenantId);
+	if (tenantUsers.length < 1) return { planKey: 'free', limits: null };
+	const selectedUser = tenantUsers.find((row) => {
+		const planKey = String(row?.billing?.planKey || '').trim();
+		return planKey && planKey !== 'free';
+	}) || tenantUsers[0];
+	const planKey = String(selectedUser?.billing?.planKey || 'free').trim() || 'free';
+	const plan = getBillingPlansCatalog().find((row) => String(row?.key || '').trim() === planKey) || null;
+	return {
+		planKey,
+		limits: plan?.limits || null,
+	};
+}
+
+function countActiveTenantRoleUsers(tenantId, role, excludeUsername = '') {
+	const normalizedTenantId = normalizeTenantId(tenantId);
+	const excluded = String(excludeUsername || '').trim().toLowerCase();
+	if (!normalizedTenantId) return 0;
+	return authUsers.filter((row) => {
+		const rowTenantId = resolveTenantKeyFromUser(row);
+		if (rowTenantId !== normalizedTenantId) return false;
+		if (String(row?.role || '').trim() !== role) return false;
+		if (excluded && String(row?.username || '').trim().toLowerCase() === excluded) return false;
+		return true;
+	}).length;
+}
+
+function countOpenTenantHeadCoachInvites(tenantId) {
+	const normalizedTenantId = normalizeTenantId(tenantId);
+	if (!normalizedTenantId) return 0;
+	const now = Date.now();
+	return authInvites.reduce((acc, invite) => {
+		if (normalizeTenantId(invite?.tenantId) !== normalizedTenantId) return acc;
+		if (String(invite?.role || '').trim() !== 'head-coach') return acc;
+		if (invite?.disabled === true) return acc;
+		const expiresAtMs = Date.parse(String(invite?.expiresAt || ''));
+		if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now) return acc;
+		const remaining = Math.max(0, Number(invite?.maxUses || 1) - Number(invite?.usedCount || 0));
+		return acc + remaining;
+	}, 0);
+}
+
+function getSessionCoordinatorCapacityError(tenantId, { includePendingInvites = false, excludeUsername = '' } = {}) {
+	const normalizedTenantId = normalizeTenantId(tenantId);
+	if (!normalizedTenantId || normalizedTenantId === 'global-owner') return '';
+	const { limits } = resolveTenantPlanLimits(normalizedTenantId);
+	const maxCoaches = limits?.maxCoaches;
+	if (maxCoaches === null || maxCoaches === undefined) return '';
+	const headCoachCount = countActiveTenantRoleUsers(normalizedTenantId, 'head-coach', excludeUsername);
+	const pendingHeadCoachInvites = includePendingInvites ? countOpenTenantHeadCoachInvites(normalizedTenantId) : 0;
+	if ((headCoachCount + pendingHeadCoachInvites) < maxCoaches) return '';
+	return 'This subscription tier allows only one session coordinator for this team.';
+}
+
 function normalizeBillingLimitValue(value, fallback = null) {
 	if (value === null || value === undefined || value === '' || String(value).toLowerCase() === 'unlimited') return null;
 	const parsed = Number.parseInt(value, 10);
@@ -1825,6 +1886,13 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 	const effectiveTeamName = String(usableInvite?.teamName || teamName).trim();
 	const tenantId = normalizeTenantId(usableInvite?.tenantId)
 		|| resolveTenantKeyFromUser({ username, role, swimClub: effectiveSwimClub, teamName: effectiveTeamName });
+	if (role === 'head-coach') {
+		const sessionCoordinatorCapacityError = getSessionCoordinatorCapacityError(tenantId);
+		if (sessionCoordinatorCapacityError) {
+			res.status(403).json({ error: sessionCoordinatorCapacityError });
+			return;
+		}
+	}
 	authUsers.push({
 		username,
 		role,
@@ -2435,6 +2503,13 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 		res.status(403).json({ error: 'Only assistant-coach or head-coach invites are allowed for tenant admins.' });
 		return;
 	}
+	if (role === 'head-coach') {
+		const sessionCoordinatorCapacityError = getSessionCoordinatorCapacityError(inviteTenantId, { includePendingInvites: true });
+		if (sessionCoordinatorCapacityError) {
+			res.status(403).json({ error: sessionCoordinatorCapacityError });
+			return;
+		}
+	}
 	if (targetEmail && !AUTH_EMAIL_PATTERN.test(targetEmail)) {
 		res.status(400).json({ error: 'Enter a valid invite email address.' });
 		return;
@@ -2519,6 +2594,13 @@ app.post('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLim
 	const tenantId = role === 'software-owner'
 		? 'global-owner'
 		: (actorIsPrimaryOwner ? requestedTenantId : actorTenantId);
+	if (role === 'head-coach') {
+		const sessionCoordinatorCapacityError = getSessionCoordinatorCapacityError(tenantId);
+		if (sessionCoordinatorCapacityError) {
+			res.status(403).json({ error: sessionCoordinatorCapacityError });
+			return;
+		}
+	}
 
 	if (!username || !password) {
 		res.status(400).json({ error: 'Username and password are required.' });
@@ -2628,6 +2710,14 @@ app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requi
 	if (!isPrimarySoftwareOwnerAccount(req.auth) && nextRole === 'software-owner') {
 		res.status(403).json({ error: 'Tenant admins cannot assign software-owner role.' });
 		return;
+	}
+	if (nextRole === 'head-coach') {
+		const targetTenantId = resolveTenantKeyFromUser(authUsers[index]);
+		const sessionCoordinatorCapacityError = getSessionCoordinatorCapacityError(targetTenantId, { excludeUsername: targetUsername });
+		if (sessionCoordinatorCapacityError) {
+			res.status(403).json({ error: sessionCoordinatorCapacityError });
+			return;
+		}
 	}
 
 	const previous = authUsers[index];
