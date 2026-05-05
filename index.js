@@ -28,6 +28,8 @@ const AUTH_AUDIT_MAX_ARCHIVE_FILES = Math.max(1, Number.parseInt(process.env.AUT
 const AUTH_AUDIT_FETCH_MAX_ROWS = Math.max(50, Number.parseInt(process.env.AUTH_AUDIT_FETCH_MAX_ROWS || '1000', 10) || 1000);
 const AUTH_AUDIT_MAX_BACKUP_FILES = Math.max(1, Number.parseInt(process.env.AUTH_AUDIT_MAX_BACKUP_FILES || '30', 10) || 30);
 const AUTH_AUDIT_BACKUP_INTERVAL_MS = Math.max(60 * 1000, Number.parseInt(process.env.AUTH_AUDIT_BACKUP_INTERVAL_MS || `${12 * 60 * 60 * 1000}`, 10) || (12 * 60 * 60 * 1000));
+const NODE_ENV = String(process.env.NODE_ENV || 'development').toLowerCase();
+const IS_PRODUCTION = NODE_ENV === 'production';
 const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || 'true').toLowerCase() === 'true';
 const AUTH_SECRET = String(process.env.AUTH_SECRET || 'athlyrax-dev-secret-change-me').trim();
 const AUTH_TOKEN_TTL_SECONDS = Math.max(300, Number.parseInt(process.env.AUTH_TOKEN_TTL_SECONDS || '43200', 10) || 43200);
@@ -42,7 +44,7 @@ const AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME = String(process.env.AUTH_PRIMARY_SOF
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
 const AUTH_PASSWORD_RESET_DELIVERY = String(process.env.AUTH_PASSWORD_RESET_DELIVERY || 'console').trim().toLowerCase();
-const AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE = String(process.env.AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE || 'true').toLowerCase() === 'true';
+const AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE = String(process.env.AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE || 'false').toLowerCase() === 'true';
 const AUTH_SMTP_HOST = String(process.env.AUTH_SMTP_HOST || '').trim();
 const AUTH_SMTP_PORT = Math.max(1, Number.parseInt(process.env.AUTH_SMTP_PORT || '587', 10) || 587);
 const AUTH_SMTP_SECURE = String(process.env.AUTH_SMTP_SECURE || 'false').toLowerCase() === 'true';
@@ -130,6 +132,10 @@ const authPasswordResetByUser = new Map();
 const stripeClient = BILLING_STRIPE_SECRET_KEY
 	? new Stripe(BILLING_STRIPE_SECRET_KEY, { apiVersion: '2025-03-31.basil' })
 	: null;
+
+if (AUTH_REQUIRED && IS_PRODUCTION && AUTH_SECRET === 'athlyrax-dev-secret-change-me') {
+	console.warn('[auth] AUTH_SECRET is using the development default in production. Set a strong AUTH_SECRET immediately.');
+}
 
 let writeTail = Promise.resolve();
 let authResetMailTransport = null;
@@ -1690,6 +1696,7 @@ app.get('/auth/config', (req, res) => {
 		allowCoachSignup: AUTH_ALLOW_COACH_SIGNUP || AUTH_ALLOW_COACH_INVITES,
 		requireInviteCode: !AUTH_ALLOW_COACH_SIGNUP,
 		allowCoachInvites: AUTH_ALLOW_COACH_INVITES,
+		securityMode: IS_PRODUCTION ? 'production' : 'development',
 	});
 });
 
@@ -1981,8 +1988,7 @@ app.post('/auth/password-reset/request', requireLoginRateLimit, async (req, res)
 			message: 'If an account exists, a reset code has been issued.',
 			resetCodeTtlMinutes: AUTH_PASSWORD_RESET_TTL_MINUTES,
 		};
-		const isProduction = String(process.env.NODE_ENV || 'development').toLowerCase() === 'production';
-		if (!isProduction && AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE) {
+		if (!IS_PRODUCTION && AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE) {
 			payload.devResetCode = resetCode;
 			payload.devResetUser = username;
 		}
