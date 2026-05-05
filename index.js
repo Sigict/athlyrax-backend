@@ -109,6 +109,7 @@ const DEFAULT_AUTH_USERS = [
 		]
 		: []),
 ];
+const DEMO_SEED_USERNAMES = new Set(['headcoach', 'assistant', 'viewer']);
 const WRITE_ALLOWED_ROLES = new Set(['software-owner', 'head-coach', 'assistant-coach']);
 const ADMIN_ALLOWED_ROLES = new Set(['software-owner', 'head-coach']);
 const DEFAULT_ALLOWED_ORIGINS = [
@@ -897,18 +898,28 @@ function getNowEpochSeconds() {
 function loadOrCreateAuthUsers() {
 	ensureStorageLayout();
 
+	const sanitizeDemoUsers = (rows) => {
+		if (AUTH_ENABLE_DEMO_SEED_USERS) return rows;
+		return rows.filter((row) => !DEMO_SEED_USERNAMES.has(String(row?.username || '').trim().toLowerCase()));
+	};
+
 	const fromFile = normalizeAuthUserRows(readJsonFile(AUTH_USERS_PATH));
-	if (fromFile.length > 0) {
-		return { users: fromFile, source: 'file' };
+	const cleanedFromFile = sanitizeDemoUsers(fromFile);
+	if (cleanedFromFile.length > 0) {
+		if (cleanedFromFile.length !== fromFile.length) {
+			writeJsonFile(AUTH_USERS_PATH, cleanedFromFile);
+		}
+		return { users: cleanedFromFile, source: 'file' };
 	}
 
 	const fromEnv = normalizeAuthUserRows(parseAuthUsersFromEnv());
-	if (fromEnv.length > 0) {
-		writeJsonFile(AUTH_USERS_PATH, fromEnv);
-		return { users: fromEnv, source: 'env' };
+	const cleanedFromEnv = sanitizeDemoUsers(fromEnv);
+	if (cleanedFromEnv.length > 0) {
+		writeJsonFile(AUTH_USERS_PATH, cleanedFromEnv);
+		return { users: cleanedFromEnv, source: 'env' };
 	}
 
-	const fromDefaults = normalizeAuthUserRows(DEFAULT_AUTH_USERS);
+	const fromDefaults = sanitizeDemoUsers(normalizeAuthUserRows(DEFAULT_AUTH_USERS));
 	writeJsonFile(AUTH_USERS_PATH, fromDefaults);
 	return { users: fromDefaults, source: 'defaults' };
 }
