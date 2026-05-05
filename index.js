@@ -37,6 +37,7 @@ const AUTH_ADMIN_RATE_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.AUT
 const AUTH_ADMIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUTH_ADMIN_RATE_MAX_ATTEMPTS || '60', 10) || 60);
 const AUTH_ALLOW_COACH_SIGNUP = String(process.env.AUTH_ALLOW_COACH_SIGNUP || 'false').toLowerCase() === 'true';
 const AUTH_ALLOW_COACH_INVITES = String(process.env.AUTH_ALLOW_COACH_INVITES || 'true').toLowerCase() === 'true';
+const AUTH_ENABLE_DEMO_SEED_USERS = String(process.env.AUTH_ENABLE_DEMO_SEED_USERS || 'false').toLowerCase() === 'true';
 const AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME = String(process.env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').trim().toLowerCase();
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
@@ -100,9 +101,13 @@ const DEFAULT_BILLING_CATALOG = {
 };
 const DEFAULT_AUTH_USERS = [
 	{ username: 'softwareowner', password: 'softwareowner123', role: 'software-owner', createdVia: 'seed' },
-	{ username: 'headcoach', password: 'headcoach123', role: 'head-coach', createdVia: 'seed' },
-	{ username: 'assistant', password: 'assistant123', role: 'assistant-coach', createdVia: 'seed' },
-	{ username: 'viewer', password: 'viewer123', role: 'viewer', createdVia: 'seed' },
+	...(AUTH_ENABLE_DEMO_SEED_USERS
+		? [
+			{ username: 'headcoach', password: 'headcoach123', role: 'head-coach', createdVia: 'seed' },
+			{ username: 'assistant', password: 'assistant123', role: 'assistant-coach', createdVia: 'seed' },
+			{ username: 'viewer', password: 'viewer123', role: 'viewer', createdVia: 'seed' },
+		]
+		: []),
 ];
 const WRITE_ALLOWED_ROLES = new Set(['software-owner', 'head-coach', 'assistant-coach']);
 const ADMIN_ALLOWED_ROLES = new Set(['software-owner', 'head-coach']);
