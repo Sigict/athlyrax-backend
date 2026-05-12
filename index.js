@@ -61,15 +61,23 @@ const BILLING_PRICE_TIER_2 = String(process.env.STRIPE_PRICE_TIER_2 || '').trim(
 const BILLING_PRICE_TIER_3 = String(process.env.STRIPE_PRICE_TIER_3 || process.env.STRIPE_PRICE_ANNUAL || '').trim();
 const BILLING_APP_BASE_URL = String(process.env.BILLING_APP_BASE_URL || process.env.APP_BASE_URL || '').trim().replace(/\/$/, '');
 const BILLING_ENFORCED = String(process.env.BILLING_ENFORCED || 'false').toLowerCase() === 'true';
+const BILLING_CHECKOUT_ENABLED = String(process.env.BILLING_CHECKOUT_ENABLED || 'true').toLowerCase() !== 'false';
 const BILLING_TRIAL_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_TRIAL_DAYS || '42', 10) || 0);
 const BILLING_BASE_TRIAL_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_BASE_TRIAL_DAYS || '28', 10) || 0);
 const BILLING_REFERRAL_BONUS_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_REFERRAL_BONUS_DAYS || '14', 10) || 0);
+const BILLING_TIER_KEYS = ['tier-1', 'tier-2', 'tier-3'];
 const BILLING_PARTNER_COMMISSION_PERCENT = Math.max(0, Number.parseInt(process.env.BILLING_PARTNER_COMMISSION_PERCENT || '10', 10) || 0);
 const BILLING_PARTNER_COMMISSION_MONTHS = Math.max(0, Number.parseInt(process.env.BILLING_PARTNER_COMMISSION_MONTHS || '36', 10) || 0);
 const PHASE1_TENANT_ISOLATION = String(process.env.PHASE1_TENANT_ISOLATION || 'true').toLowerCase() === 'true';
 const DEFAULT_BILLING_CATALOG = {
 	version: 1,
 	currency: 'GBP',
+	settings: {
+		enforceCharging: BILLING_ENFORCED,
+		checkoutEnabled: BILLING_CHECKOUT_ENABLED,
+		baseTrialDays: BILLING_BASE_TRIAL_DAYS,
+		referralBonusDays: BILLING_REFERRAL_BONUS_DAYS,
+	},
 	plans: [
 		{
 			key: 'tier-1',
@@ -559,6 +567,44 @@ function normalizeBillingAddonRow(addon) {
 }
 
 function normalizeBillingCatalog(rawCatalog) {
+	function normalizeBillingSettings(rawSettings) {
+		const normalizePageVisibilityByTier = (rawVisibility) => {
+			const sourceVisibility = rawVisibility && typeof rawVisibility === 'object' && !Array.isArray(rawVisibility)
+				? rawVisibility
+				: {};
+			const nextVisibility = {};
+			for (const tierKey of BILLING_TIER_KEYS) {
+				const tierValue = sourceVisibility?.[tierKey];
+				if (!tierValue || typeof tierValue !== 'object' || Array.isArray(tierValue)) {
+					nextVisibility[tierKey] = {};
+					continue;
+				}
+				const normalizedTier = {};
+				for (const [pageKey, visible] of Object.entries(tierValue)) {
+					const normalizedPageKey = String(pageKey || '').trim();
+					if (!normalizedPageKey) continue;
+					normalizedTier[normalizedPageKey] = visible !== false;
+				}
+				nextVisibility[tierKey] = normalizedTier;
+			}
+			return nextVisibility;
+		};
+
+		const source = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+		const hasLegacyTrialDays = Number.isFinite(Number(source?.trialDays));
+		const legacyTrialDays = Math.max(0, Number.parseInt(source?.trialDays || '0', 10) || 0);
+		const defaultBaseTrial = Math.max(0, BILLING_BASE_TRIAL_DAYS || BILLING_TRIAL_DAYS);
+		return {
+			enforceCharging: source?.enforceCharging === true ? true : source?.enforceCharging === false ? false : BILLING_ENFORCED,
+			checkoutEnabled: source?.checkoutEnabled === true ? true : source?.checkoutEnabled === false ? false : BILLING_CHECKOUT_ENABLED,
+			baseTrialDays: hasLegacyTrialDays
+				? legacyTrialDays
+				: Math.max(0, Number.parseInt(source?.baseTrialDays || `${defaultBaseTrial}`, 10) || defaultBaseTrial),
+			referralBonusDays: Math.max(0, Number.parseInt(source?.referralBonusDays || `${BILLING_REFERRAL_BONUS_DAYS}`, 10) || BILLING_REFERRAL_BONUS_DAYS),
+			pageVisibilityByTier: normalizePageVisibilityByTier(source?.pageVisibilityByTier),
+		};
+	}
+
 	const source = rawCatalog && typeof rawCatalog === 'object' ? rawCatalog : {};
 	const plans = Array.isArray(source?.plans)
 		? source.plans.map(normalizeBillingPlanRow).filter((row) => row.key)
@@ -578,6 +624,7 @@ function normalizeBillingCatalog(rawCatalog) {
 	return {
 		version: Math.max(1, Number.parseInt(source?.version || '1', 10) || 1),
 		currency: String(source?.currency || 'GBP').trim().toUpperCase() || 'GBP',
+		settings: normalizeBillingSettings(source?.settings || source),
 		plans: plans.length > 0 ? plans : fallbackPlans,
 		addons: addons.length > 0 ? addons : fallbackAddons,
 	};
@@ -598,6 +645,19 @@ function persistBillingCatalog() {
 
 function getBillingPlansCatalog() {
 	return Array.isArray(billingCatalog?.plans) ? billingCatalog.plans : [];
+}
+
+function getBillingPolicy() {
+	const source = billingCatalog?.settings && typeof billingCatalog.settings === 'object' ? billingCatalog.settings : {};
+	return {
+		enforceCharging: source?.enforceCharging === true,
+		checkoutEnabled: source?.checkoutEnabled !== false,
+		baseTrialDays: Math.max(0, Number.parseInt(String(source?.baseTrialDays || BILLING_BASE_TRIAL_DAYS), 10) || BILLING_BASE_TRIAL_DAYS),
+		referralBonusDays: Math.max(0, Number.parseInt(String(source?.referralBonusDays || BILLING_REFERRAL_BONUS_DAYS), 10) || BILLING_REFERRAL_BONUS_DAYS),
+		pageVisibilityByTier: source?.pageVisibilityByTier && typeof source.pageVisibilityByTier === 'object'
+			? source.pageVisibilityByTier
+			: {},
+	};
 }
 
 function getBillingPlanPriceMaps() {
@@ -2176,15 +2236,18 @@ app.get('/auth/me', (req, res) => {
 
 app.get('/billing/config', requireStrictAuth, (req, res) => {
 	const user = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+	const policy = getBillingPolicy();
 	const plans = getBillingPlansCatalog().map(serializeBillingPlanForResponse);
 	const addons = Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [];
 	res.status(200).json({
 		enabled: Boolean(stripeClient),
-		enforced: Boolean(stripeClient) && BILLING_ENFORCED,
+		enforced: Boolean(stripeClient) && policy.enforceCharging,
+		checkoutEnabled: Boolean(policy.checkoutEnabled),
 		trialDays: resolveTrialDaysForUser(user),
 		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
 		plans,
 		addons,
+		settings: policy,
 	});
 });
 
@@ -2193,6 +2256,7 @@ app.get('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (_req, 
 		catalog: {
 			version: Number(billingCatalog?.version || 1),
 			currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+			settings: getBillingPolicy(),
 			plans: getBillingPlansCatalog().map(serializeBillingPlanForResponse),
 			addons: Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [],
 		},
@@ -2214,9 +2278,19 @@ app.put('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (req, r
 		return;
 	}
 
+	const payloadHasPageVisibilityByTier = payload?.settings
+		&& typeof payload.settings === 'object'
+		&& Object.prototype.hasOwnProperty.call(payload.settings, 'pageVisibilityByTier');
+	const existingPolicy = getBillingPolicy();
+	const mergedSettings = {
+		...(normalized?.settings && typeof normalized.settings === 'object' ? normalized.settings : existingPolicy),
+		...(!payloadHasPageVisibilityByTier ? { pageVisibilityByTier: existingPolicy?.pageVisibilityByTier } : {}),
+	};
+
 	billingCatalog = {
 		version: Number(billingCatalog?.version || 1) + 1,
 		currency: String(normalized?.currency || 'GBP').toUpperCase(),
+		settings: mergedSettings,
 		plans: normalized.plans,
 		addons: Array.isArray(normalized?.addons) ? normalized.addons : [],
 	};
@@ -2227,6 +2301,7 @@ app.put('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (req, r
 		catalog: {
 			version: Number(billingCatalog?.version || 1),
 			currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+			settings: getBillingPolicy(),
 			plans: getBillingPlansCatalog().map(serializeBillingPlanForResponse),
 			addons: Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [],
 		},
@@ -2246,6 +2321,7 @@ app.get('/billing/subscription', requireStrictAuth, (req, res) => {
 		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
 		plans: getBillingPlansCatalog().map(serializeBillingPlanForResponse),
 		addons: Array.isArray(billingCatalog?.addons) ? billingCatalog.addons.map(serializeBillingAddonForResponse) : [],
+		settings: getBillingPolicy(),
 	});
 });
 
@@ -2938,11 +3014,8 @@ app.get('/content/placeholders', (req, res) => {
 app.get('/db', requireAuth, (req, res) => {
 	const storagePaths = resolveStoragePathsForAuth(req.auth);
 	ensureStorageLayout(storagePaths);
-	if (!fs.existsSync(storagePaths.dbPath) && fs.existsSync(DB_PATH) && storagePaths.dbPath !== DB_PATH) {
-		const globalSeed = readJsonFile(DB_PATH);
-		if (globalSeed && typeof globalSeed === 'object') {
-			writeAtomicJsonFile(storagePaths.dbPath, globalSeed);
-		}
+	if (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {
+		writeAtomicJsonFile(storagePaths.dbPath, {});
 	}
 	fs.readFile(storagePaths.dbPath, 'utf8', (err, data) => {
 		if (err) {
