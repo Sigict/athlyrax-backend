@@ -1958,7 +1958,12 @@ function mergePlannerTargets(dbShape, backupRows) {
 		const existingTargetKey = String(existingWeek?.primaryTargetCompetitionKey || '').trim();
 		const existingTargetName = String(existingWeek?.primaryTargetCompetitionName || '').trim();
 		const existingFixtureId = normalizeTargetFixtureId(existingWeek);
-		const shouldRecoverTarget = !existingTargetKey;
+		const hasExplicitTargetField = Object.prototype.hasOwnProperty.call(existingWeek || {}, 'primaryTargetCompetitionKey');
+		const existingUpdatedAtMs = Date.parse(String(existingWeek?.updatedAt || existingWeek?.createdAt || ''));
+		const hasTimestampedIntentionalClear = hasExplicitTargetField
+			&& !existingTargetKey
+			&& Number.isFinite(existingUpdatedAtMs);
+		const shouldRecoverTarget = !existingTargetKey && !hasTimestampedIntentionalClear;
 		const shouldRecoverName = Boolean(existingTargetKey) && !existingTargetName && Boolean(targetName);
 		const shouldRecoverFixtureId = Boolean(existingTargetKey) && !existingFixtureId && Boolean(targetFixtureId);
 
@@ -1984,6 +1989,14 @@ function mergePlannerTargets(dbShape, backupRows) {
 		recoveredTargets,
 		recoveredFixtureIds,
 	};
+}
+
+function getDbShapeUpdatedAtMs(dbShape) {
+	const metaUpdatedAtMs = Date.parse(String(dbShape?.__meta?.updatedAt || ''));
+	if (Number.isFinite(metaUpdatedAtMs)) return metaUpdatedAtMs;
+	const savedAtMs = Date.parse(String(dbShape?.__savedAt || ''));
+	if (Number.isFinite(savedAtMs)) return savedAtMs;
+	return Number.NaN;
 }
 
 app.use((req, res, next) => {
@@ -2262,7 +2275,7 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	const user = authUsers.find((row) => row.username === username);
+	const user = findAuthUserByIdentifier(username);
 	if (!user || !verifyPassword(password, user.passwordHash)) {
 		appendAuthAuditEvent({
 			action: 'login_failed',
@@ -2469,6 +2482,70 @@ app.get('/auth/me', (req, res) => {
 	});
 });
 
+app.get('/auth/guard', (req, res) => {
+	const audience = String(req.query?.audience || '').trim().toLowerCase();
+	if (audience !== 'coach' && audience !== 'swimmer') {
+		res.status(400).json({ error: 'Audience must be "coach" or "swimmer".' });
+		return;
+	}
+
+	if (!AUTH_REQUIRED) {
+		res.status(200).json({
+			authRequired: false,
+			authenticated: Boolean(req.auth),
+			audience,
+			allowed: true,
+			user: req.auth ? { username: req.auth.username, role: req.auth.role } : null,
+		});
+		return;
+	}
+
+	if (!req.auth) {
+		appendAuthAuditEvent({
+			action: 'unauthorized_access_blocked',
+			req,
+			status: 'blocked',
+			reason: 'auth_guard_requires_login',
+			details: { audience },
+		});
+		res.status(401).json({ error: 'Authentication required.', audience, allowed: false });
+		return;
+	}
+
+	const user = findAuthUser(req.auth.username) || req.auth;
+	const role = String(user?.role || req.auth.role || '').trim().toLowerCase();
+	const coachRoles = new Set(['software-owner', 'head-coach', 'assistant-coach', 'viewer']);
+	const isAllowed = audience === 'coach' ? coachRoles.has(role) : role === 'swimmer';
+
+	if (!isAllowed) {
+		appendAuthAuditEvent({
+			action: 'unauthorized_access_blocked',
+			req,
+			status: 'blocked',
+			reason: 'auth_guard_role_mismatch',
+			details: { audience, role },
+		});
+		res.status(403).json({
+			error: audience === 'coach' ? 'Coach software access required.' : 'Swimmer access required.',
+			audience,
+			allowed: false,
+			role,
+		});
+		return;
+	}
+
+	res.status(200).json({
+		authRequired: true,
+		authenticated: true,
+		audience,
+		allowed: true,
+		user: {
+			...buildAuthUserPayload(user),
+			expiresAt: req.auth.exp,
+		},
+	});
+});
+
 app.get('/billing/config', requireStrictAuth, (req, res) => {
 	const user = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
 	const policy = getBillingPolicy();
@@ -2517,9 +2594,17 @@ app.put('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (req, r
 		&& typeof payload.settings === 'object'
 		&& Object.prototype.hasOwnProperty.call(payload.settings, 'pageVisibilityByTier');
 	const existingPolicy = getBillingPolicy();
+	const normalizedPageVisibilityByTier = normalized?.settings?.pageVisibilityByTier;
+	const normalizedPageVisibilityHasEntries = BILLING_TIER_KEYS.some((tierKey) => {
+		const tierMap = normalizedPageVisibilityByTier?.[tierKey];
+		return tierMap && typeof tierMap === 'object' && !Array.isArray(tierMap) && Object.keys(tierMap).length > 0;
+	});
+	const shouldPreserveExistingPageVisibility = !normalizedPageVisibilityHasEntries;
 	const mergedSettings = {
 		...(normalized?.settings && typeof normalized.settings === 'object' ? normalized.settings : existingPolicy),
-		...(!payloadHasPageVisibilityByTier ? { pageVisibilityByTier: existingPolicy?.pageVisibilityByTier } : {}),
+		...(!payloadHasPageVisibilityByTier || shouldPreserveExistingPageVisibility
+			? { pageVisibilityByTier: existingPolicy?.pageVisibilityByTier }
+			: {}),
 	};
 
 	billingCatalog = {
@@ -3488,6 +3573,20 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		ensureStorageLayout(storagePaths);
 		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
 
+		const currentDb = readJsonFile(storagePaths.dbPath);
+		const currentUpdatedAtMs = getDbShapeUpdatedAtMs(currentDb);
+		const incomingUpdatedAtMs = getDbShapeUpdatedAtMs(body);
+		const isStaleWrite = Number.isFinite(currentUpdatedAtMs)
+			&& Number.isFinite(incomingUpdatedAtMs)
+			&& incomingUpdatedAtMs + 1000 < currentUpdatedAtMs;
+		if (isStaleWrite) {
+			return {
+				recoveredTargets: 0,
+				recoveredFixtureIds: 0,
+				staleWriteIgnored: true,
+			};
+		}
+
 		const backupPayload = readJsonFile(storagePaths.backupPath);
 		const backupRows = Array.isArray(backupPayload?.rows) ? backupPayload.rows : [];
 		const merged = mergePlannerTargets(body, backupRows);
@@ -3507,6 +3606,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		return {
 			recoveredTargets: merged.recoveredTargets,
 			recoveredFixtureIds: merged.recoveredFixtureIds,
+			staleWriteIgnored: false,
 		};
 	})
 		.then((result) => {
@@ -3514,6 +3614,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				ok: true,
 				recoveredTargets: result.recoveredTargets,
 				recoveredFixtureIds: result.recoveredFixtureIds,
+				staleWriteIgnored: result.staleWriteIgnored === true,
 			});
 		})
 		.catch((error) => {
