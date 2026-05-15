@@ -17,6 +17,7 @@ const TARGET_BACKUP_PATH = path.join(__dirname, 'storage', 'trainingPlannerTarge
 const DB_SNAPSHOT_DIR = path.join(__dirname, 'storage', 'db-snapshots');
 const DB_TENANTS_DIR = path.join(__dirname, 'storage', 'tenants');
 const BILLING_CATALOG_PATH = path.join(__dirname, 'storage', 'billing-catalog.json');
+const BILLING_CATALOG_BACKUP_DIR = path.join(__dirname, 'storage', 'billing-catalog-backups');
 const AUTH_USERS_PATH = path.join(__dirname, 'storage', 'auth-users.json');
 const AUTH_INVITES_PATH = path.join(__dirname, 'storage', 'auth-invites.json');
 const AUTH_AUDIT_DIR = path.join(__dirname, 'storage', 'auth-audit');
@@ -27,9 +28,11 @@ const AUTH_AUDIT_MAX_BYTES = Math.max(64 * 1024, Number.parseInt(process.env.AUT
 const AUTH_AUDIT_MAX_ARCHIVE_FILES = Math.max(1, Number.parseInt(process.env.AUTH_AUDIT_MAX_ARCHIVE_FILES || '30', 10) || 30);
 const AUTH_AUDIT_FETCH_MAX_ROWS = Math.max(50, Number.parseInt(process.env.AUTH_AUDIT_FETCH_MAX_ROWS || '1000', 10) || 1000);
 const AUTH_AUDIT_MAX_BACKUP_FILES = Math.max(1, Number.parseInt(process.env.AUTH_AUDIT_MAX_BACKUP_FILES || '30', 10) || 30);
+const BILLING_CATALOG_MAX_BACKUP_FILES = Math.max(1, Number.parseInt(process.env.BILLING_CATALOG_MAX_BACKUP_FILES || '40', 10) || 40);
 const AUTH_AUDIT_BACKUP_INTERVAL_MS = Math.max(60 * 1000, Number.parseInt(process.env.AUTH_AUDIT_BACKUP_INTERVAL_MS || `${12 * 60 * 60 * 1000}`, 10) || (12 * 60 * 60 * 1000));
 const NODE_ENV = String(process.env.NODE_ENV || 'development').toLowerCase();
 const IS_PRODUCTION = NODE_ENV === 'production';
+const BILLING_STRICT_RECOVERY = String(process.env.BILLING_STRICT_RECOVERY || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
 const AUTH_REQUIRED = String(process.env.AUTH_REQUIRED || 'true').toLowerCase() === 'true';
 const AUTH_SECRET = String(process.env.AUTH_SECRET || 'athlyrax-dev-secret-change-me').trim();
 const AUTH_TOKEN_TTL_SECONDS = Math.max(300, Number.parseInt(process.env.AUTH_TOKEN_TTL_SECONDS || '43200', 10) || 43200);
@@ -68,6 +71,7 @@ const BILLING_REFERRAL_BONUS_DAYS = Math.max(0, Number.parseInt(process.env.BILL
 const BILLING_TIER_KEYS = ['tier-1', 'tier-2', 'tier-3'];
 const BILLING_PARTNER_COMMISSION_PERCENT = Math.max(0, Number.parseInt(process.env.BILLING_PARTNER_COMMISSION_PERCENT || '10', 10) || 0);
 const BILLING_PARTNER_COMMISSION_MONTHS = Math.max(0, Number.parseInt(process.env.BILLING_PARTNER_COMMISSION_MONTHS || '36', 10) || 0);
+const BILLING_EMAIL_NOTIFICATIONS_ENABLED = String(process.env.BILLING_EMAIL_NOTIFICATIONS_ENABLED || 'true').toLowerCase() !== 'false';
 const PHASE1_TENANT_ISOLATION = String(process.env.PHASE1_TENANT_ISOLATION || 'true').toLowerCase() === 'true';
 const DEFAULT_BILLING_CATALOG = {
 	version: 1,
@@ -200,6 +204,7 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 						updatedAt: new Date().toISOString(),
 					});
 				}
+				await sendBillingCheckoutCompletedEmail(session);
 				break;
 			}
 			case 'customer.subscription.created':
@@ -217,6 +222,12 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 						updatedAt: new Date().toISOString(),
 					});
 				}
+				await sendBillingInvoiceEmail(invoice, 'failed');
+				break;
+			}
+			case 'invoice.paid': {
+				const invoice = event?.data?.object;
+				await sendBillingInvoiceEmail(invoice, 'paid');
 				break;
 			}
 			default:
@@ -631,16 +642,95 @@ function normalizeBillingCatalog(rawCatalog) {
 }
 
 function loadOrCreateBillingCatalog() {
-	const existing = readJsonFile(BILLING_CATALOG_PATH);
-	const normalized = normalizeBillingCatalog(existing);
 	ensureStorageLayout();
+	const existing = readJsonFile(BILLING_CATALOG_PATH);
+	if (existing && typeof existing === 'object') {
+		const normalized = normalizeBillingCatalog(existing);
+		writeAtomicJsonFile(BILLING_CATALOG_PATH, normalized);
+		backupBillingCatalogSnapshot(normalized, 'bootstrap-current');
+		return normalized;
+	}
+
+	const recovered = loadLatestBillingCatalogBackup();
+	if (recovered) {
+		console.warn('[billing] billing-catalog.json missing/invalid; restored latest backup snapshot.');
+		writeAtomicJsonFile(BILLING_CATALOG_PATH, recovered);
+		return recovered;
+	}
+
+	if (BILLING_STRICT_RECOVERY) {
+		throw new Error('[billing] billing-catalog.json missing/invalid and no backup available. Refusing to bootstrap defaults in strict recovery mode.');
+	}
+
+	const normalized = normalizeBillingCatalog(null);
+	console.warn('[billing] No billing catalog or backup found; bootstrapping defaults (strict recovery disabled).');
 	writeAtomicJsonFile(BILLING_CATALOG_PATH, normalized);
+	backupBillingCatalogSnapshot(normalized, 'bootstrap-default');
 	return normalized;
 }
 
 function persistBillingCatalog() {
 	ensureStorageLayout();
 	writeAtomicJsonFile(BILLING_CATALOG_PATH, billingCatalog);
+	backupBillingCatalogSnapshot(billingCatalog, 'save');
+}
+
+function loadLatestBillingCatalogBackup() {
+	if (!fs.existsSync(BILLING_CATALOG_BACKUP_DIR)) return null;
+	const snapshots = fs.readdirSync(BILLING_CATALOG_BACKUP_DIR)
+		.filter((name) => name.startsWith('billing-catalog-') && name.endsWith('.json'))
+		.map((name) => ({
+			name,
+			fullPath: path.join(BILLING_CATALOG_BACKUP_DIR, name),
+			mtime: fs.statSync(path.join(BILLING_CATALOG_BACKUP_DIR, name)).mtimeMs,
+		}))
+		.sort((a, b) => b.mtime - a.mtime);
+
+	for (const snapshot of snapshots) {
+		const parsed = readJsonFile(snapshot.fullPath);
+		if (!parsed || typeof parsed !== 'object') continue;
+		const normalized = normalizeBillingCatalog(parsed);
+		if (Array.isArray(normalized?.plans) && normalized.plans.length > 0) {
+			return normalized;
+		}
+	}
+
+	return null;
+}
+
+function rotateBillingCatalogBackups() {
+	if (!fs.existsSync(BILLING_CATALOG_BACKUP_DIR)) return;
+	const snapshots = fs.readdirSync(BILLING_CATALOG_BACKUP_DIR)
+		.filter((name) => name.startsWith('billing-catalog-') && name.endsWith('.json'))
+		.map((name) => ({
+			name,
+			fullPath: path.join(BILLING_CATALOG_BACKUP_DIR, name),
+			mtime: fs.statSync(path.join(BILLING_CATALOG_BACKUP_DIR, name)).mtimeMs,
+		}))
+		.sort((a, b) => b.mtime - a.mtime);
+
+	if (snapshots.length <= BILLING_CATALOG_MAX_BACKUP_FILES) return;
+	for (const stale of snapshots.slice(BILLING_CATALOG_MAX_BACKUP_FILES)) {
+		try {
+			fs.unlinkSync(stale.fullPath);
+		} catch {
+			// Ignore cleanup failures to avoid blocking billing saves.
+		}
+	}
+}
+
+function backupBillingCatalogSnapshot(rawCatalog, reason = 'save') {
+	try {
+		ensureStorageLayout();
+		const normalized = normalizeBillingCatalog(rawCatalog);
+		const stamp = new Date().toISOString().replace(/[.:]/g, '-');
+		const safeReason = String(reason || 'save').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+		const backupPath = path.join(BILLING_CATALOG_BACKUP_DIR, `billing-catalog-${stamp}-${safeReason}.json`);
+		writeAtomicJsonFile(backupPath, normalized);
+		rotateBillingCatalogBackups();
+	} catch {
+		// Backup writes are best-effort and should never block billing save flow.
+	}
 }
 
 function getBillingPlansCatalog() {
@@ -851,6 +941,114 @@ async function handleStripeSubscriptionEvent(subscriptionObject) {
 	if (usernameFromMetadata) {
 		upsertUserBillingByUsername(usernameFromMetadata, nextBilling);
 	}
+}
+
+function findAuthUserByCustomerId(customerId) {
+	const target = String(customerId || '').trim();
+	if (!target) return null;
+	return authUsers.find((row) => String(row?.billing?.customerId || '').trim() === target) || null;
+}
+
+function resolveBillingPlanLabel(planKey) {
+	const key = String(planKey || '').trim();
+	if (!key) return 'Free';
+	const matched = getBillingPlansCatalog().find((plan) => String(plan?.key || '').trim() === key);
+	return String(matched?.label || key || 'Free').trim();
+}
+
+function resolveAmountLabelFromInvoice(invoice) {
+	const amountMinor = Math.max(0, Number.parseInt(invoice?.amount_paid ?? invoice?.amount_due ?? 0, 10) || 0);
+	const currency = String(invoice?.currency || billingCatalog?.currency || 'GBP').trim().toUpperCase() || 'GBP';
+	return formatMoneyMinor(amountMinor, currency);
+}
+
+function resolvePlanKeyFromInvoice(invoice) {
+	const { byPrice } = getBillingPlanPriceMaps();
+	const priceId = String(invoice?.lines?.data?.[0]?.price?.id || '').trim();
+	if (!priceId) return '';
+	return String(byPrice.get(priceId) || '').trim();
+}
+
+async function deliverBillingEmail({ user, subject, lines }) {
+	try {
+		if (!BILLING_EMAIL_NOTIFICATIONS_ENABLED) return { mode: 'skipped', reason: 'disabled' };
+		const email = String(user?.email || '').trim();
+		if (!AUTH_EMAIL_PATTERN.test(email)) return { mode: 'skipped', reason: 'invalid_email' };
+		const username = String(user?.username || '').trim();
+		const fullName = String(user?.fullName || '').trim();
+		const greetingName = fullName || username || 'coach';
+		const textBody = [`Hi ${greetingName},`, '', ...lines, '', 'AthlyraX Billing'].join('\n');
+
+		if (!AUTH_SMTP_HOST || !AUTH_SMTP_FROM) {
+			console.log(`[billing-email] ${email}\n${subject}\n${textBody}`);
+			return { mode: 'console' };
+		}
+
+		const transport = getAuthResetMailTransport();
+		await transport.sendMail({
+			from: AUTH_SMTP_FROM,
+			to: email,
+			subject,
+			text: textBody,
+		});
+		return { mode: 'smtp' };
+	} catch (error) {
+		console.warn('[billing-email] Could not send billing email:', error instanceof Error ? error.message : error);
+		return { mode: 'error' };
+	}
+}
+
+async function sendBillingCheckoutCompletedEmail(session) {
+	const payload = session && typeof session === 'object' ? session : {};
+	const username = String(payload?.client_reference_id || payload?.metadata?.username || '').trim();
+	const customerId = String(payload?.customer || '').trim();
+	const user = findAuthUser(username) || findAuthUserByCustomerId(customerId);
+	if (!user) return;
+
+	const billing = normalizeBillingState(user?.billing);
+	const planKey = String(payload?.metadata?.planKey || billing?.planKey || '').trim();
+	const planLabel = resolveBillingPlanLabel(planKey);
+	const matchedPlan = getBillingPlansCatalog().find((plan) => String(plan?.key || '').trim() === planKey);
+	const amountLabel = matchedPlan ? formatMoneyMinor(matchedPlan.amountMinor, billingCatalog?.currency) : 'See invoice';
+
+	await deliverBillingEmail({
+		user,
+		subject: 'AthlyraX subscription checkout received',
+		lines: [
+			'Thank you. Your subscription checkout has been received.',
+			`Tier: ${planLabel}`,
+			`Amount: ${amountLabel}`,
+			'Invoice details will follow by email after payment is finalized.',
+		],
+	});
+}
+
+async function sendBillingInvoiceEmail(invoice, kind) {
+	const payload = invoice && typeof invoice === 'object' ? invoice : {};
+	const customerId = String(payload?.customer || '').trim();
+	const user = findAuthUserByCustomerId(customerId);
+	if (!user) return;
+
+	const billing = normalizeBillingState(user?.billing);
+	const planKeyFromInvoice = resolvePlanKeyFromInvoice(payload);
+	const planLabel = resolveBillingPlanLabel(planKeyFromInvoice || billing?.planKey);
+	const amountLabel = resolveAmountLabelFromInvoice(payload);
+	const invoiceNumber = String(payload?.number || payload?.id || '').trim() || 'Not available';
+	const hostedInvoiceUrl = String(payload?.hosted_invoice_url || '').trim();
+	const invoiceUrlLabel = hostedInvoiceUrl || 'Not available';
+	const failed = String(kind || '').trim().toLowerCase() === 'failed';
+
+	await deliverBillingEmail({
+		user,
+		subject: failed ? 'AthlyraX invoice payment failed' : 'AthlyraX invoice receipt',
+		lines: [
+			failed ? 'We could not process your latest invoice payment.' : 'Your invoice payment has been confirmed.',
+			`Tier: ${planLabel}`,
+			`Amount: ${amountLabel}`,
+			`Invoice: ${invoiceNumber}`,
+			`Invoice link: ${invoiceUrlLabel}`,
+		],
+	});
 }
 
 function normalizeAuthUserRows(rows) {
@@ -1619,6 +1817,7 @@ function ensureStorageLayout(storagePaths = null) {
 		fs.mkdirSync(path.dirname(backupPath), { recursive: true });
 		fs.mkdirSync(snapshotDir, { recursive: true });
 		fs.mkdirSync(DB_TENANTS_DIR, { recursive: true });
+		fs.mkdirSync(BILLING_CATALOG_BACKUP_DIR, { recursive: true });
 		fs.mkdirSync(AUTH_AUDIT_DIR, { recursive: true });
 		fs.mkdirSync(AUTH_AUDIT_BACKUP_DIR, { recursive: true });
 	} catch {
@@ -1833,7 +2032,7 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	const username = String(req.body?.username || '').trim();
+	const requestedUsername = String(req.body?.username || '').trim();
 	const password = String(req.body?.password || '');
 	const fullName = String(req.body?.fullName || '').trim();
 	const email = String(req.body?.email || '').trim();
@@ -1843,27 +2042,27 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 	const city = String(req.body?.city || '').trim();
 	const country = String(req.body?.country || '').trim();
 	const inviteCode = String(req.body?.inviteCode || '').trim();
-	if (!username || !password) {
+	if (!password) {
 		appendAuthAuditEvent({
 			action: 'register_failed',
 			req,
 			status: 'error',
-			target: username || 'unknown',
+			target: requestedUsername || 'unknown',
 			reason: 'missing_credentials',
 		});
-		res.status(400).json({ error: 'Username and password are required.' });
+		res.status(400).json({ error: 'Password is required.' });
 		return;
 	}
 
-	if (!fullName || !email || !swimClub || !teamName) {
+	if (!fullName || !email) {
 		appendAuthAuditEvent({
 			action: 'register_failed',
 			req,
 			status: 'error',
-			target: username || 'unknown',
+			target: requestedUsername || 'unknown',
 			reason: 'missing_profile_fields',
 		});
-		res.status(400).json({ error: 'Full name, email, swim club, and team name are required.' });
+		res.status(400).json({ error: 'Full name and email are required.' });
 		return;
 	}
 
@@ -1872,11 +2071,30 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 			action: 'register_failed',
 			req,
 			status: 'error',
-			target: username,
+			target: requestedUsername || 'unknown',
 			reason: 'invalid_email',
 		});
 		res.status(400).json({ error: 'Enter a valid email address.' });
 		return;
+	}
+
+	const emailBase = String(email.split('@')[0] || '')
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9._-]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 24) || 'coach';
+	let username = String(requestedUsername || emailBase)
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9._-]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 32);
+	if (!AUTH_USERNAME_PATTERN.test(username)) {
+		username = emailBase;
+	}
+	if (!AUTH_USERNAME_PATTERN.test(username)) {
+		username = `coach-${Date.now().toString().slice(-6)}`;
 	}
 
 	if (!AUTH_USERNAME_PATTERN.test(username)) {
@@ -1903,15 +2121,14 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
+	const uniqueBase = String(username || 'coach').slice(0, 24) || 'coach';
+	let suffix = 0;
+	while (authUsers.some((row) => row.username === username) && suffix < 1000) {
+		suffix += 1;
+		username = `${uniqueBase}-${suffix}`.slice(0, 32);
+	}
 	if (authUsers.some((row) => row.username === username)) {
-		appendAuthAuditEvent({
-			action: 'register_failed',
-			req,
-			status: 'error',
-			target: username,
-			reason: 'username_taken',
-		});
-		res.status(409).json({ error: 'Username already exists.' });
+		res.status(500).json({ error: 'Could not allocate a unique username. Try again.' });
 		return;
 	}
 
@@ -1940,12 +2157,30 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	const role = String(usableInvite?.role || 'assistant-coach').trim() || 'assistant-coach';
-	const isApproved = Boolean(usableInvite) || AUTH_ALLOW_COACH_SIGNUP;
+	const role = String(usableInvite?.role || (AUTH_ALLOW_COACH_SIGNUP ? 'head-coach' : 'assistant-coach')).trim() || 'assistant-coach';
+	const isApproved = true;
 	const effectiveSwimClub = String(usableInvite?.swimClub || swimClub).trim();
 	const effectiveTeamName = String(usableInvite?.teamName || teamName).trim();
 	const tenantId = normalizeTenantId(usableInvite?.tenantId)
 		|| resolveTenantKeyFromUser({ username, role, swimClub: effectiveSwimClub, teamName: effectiveTeamName });
+
+	if (!usableInvite) {
+		const tenantHasMembers = getTenantUsersByTenantId(tenantId)
+			.some((row) => !isPrimarySoftwareOwnerAccount(row));
+		if (tenantHasMembers) {
+			appendAuthAuditEvent({
+				action: 'register_failed',
+				req,
+				status: 'blocked',
+				target: username,
+				reason: 'tenant_requires_invite',
+				details: { tenantId },
+			});
+			res.status(409).json({ error: 'This team already exists. Ask an admin for an invite code.' });
+			return;
+		}
+	}
+
 	if (role === 'head-coach') {
 		const sessionCoordinatorCapacityError = getSessionCoordinatorCapacityError(tenantId);
 		if (sessionCoordinatorCapacityError) {
@@ -2454,8 +2689,8 @@ app.post('/auth/onboarding/complete', requireStrictAuth, (req, res) => {
 	const city = String(req.body?.city || '').trim();
 	const country = String(req.body?.country || '').trim();
 
-	if (!fullName || !email || !swimClub || !teamName) {
-		res.status(400).json({ error: 'Full name, email, swim club, and team name are required.' });
+	if (!fullName || !email) {
+		res.status(400).json({ error: 'Full name and email are required.' });
 		return;
 	}
 	if (!AUTH_EMAIL_PATTERN.test(email)) {
@@ -3008,6 +3243,206 @@ app.get('/content/placeholders', (req, res) => {
 			res.status(500).json({ error: 'Could not parse db.json payload.' });
 		}
 	});
+});
+
+app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
+	const identifier = String(req.body?.email || '').trim();
+	const password = String(req.body?.password || '');
+	const fullName = String(req.body?.fullName || '').trim();
+	const createAccount = req.body?.createAccount === true;
+
+	if (!identifier || !password) {
+		res.status(400).json({ error: 'Email/username and password are required.' });
+		return;
+	}
+
+	if (createAccount) {
+		if (!fullName) {
+			res.status(400).json({ error: 'Full name is required.' });
+			return;
+		}
+		if (password.length < 8) {
+			res.status(400).json({ error: 'Password must be at least 8 characters.' });
+			return;
+		}
+
+		const normalizedEmail = String(identifier || '').trim().toLowerCase();
+		if (!AUTH_EMAIL_PATTERN.test(normalizedEmail)) {
+			res.status(400).json({ error: 'Enter a valid email address.' });
+			return;
+		}
+		if (authUsers.some((row) => String(row?.email || '').trim().toLowerCase() === normalizedEmail)) {
+			res.status(409).json({ error: 'Email is already registered.' });
+			return;
+		}
+
+		const emailBase = String(normalizedEmail.split('@')[0] || '')
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9._-]+/g, '-')
+			.replace(/^-+|-+$/g, '')
+			.slice(0, 24) || 'swimmer';
+		let username = emailBase;
+		const uniqueBase = String(username || 'swimmer').slice(0, 24) || 'swimmer';
+		let suffix = 0;
+		while (authUsers.some((row) => String(row?.username || '').trim() === username) && suffix < 1000) {
+			suffix += 1;
+			username = `${uniqueBase}-${suffix}`.slice(0, 32);
+		}
+		if (authUsers.some((row) => String(row?.username || '').trim() === username)) {
+			res.status(500).json({ error: 'Could not allocate a unique username. Try again.' });
+			return;
+		}
+
+		authUsers.push({
+			username,
+			role: 'swimmer',
+			tenantId: 'snapshot-public',
+			passwordHash: hashPassword(password),
+			tokenValidAfter: 0,
+			createdVia: 'snapshot-self-signup',
+			inviteCodeUsed: false,
+			createdAt: new Date().toISOString(),
+			fullName,
+			email: normalizedEmail,
+			phone: '',
+			swimClub: 'AthlyraX Snapshot',
+			teamName: 'AthlyraX Snapshot',
+			city: '',
+			country: '',
+			isApproved: true,
+			onboardingCompletedAt: '',
+			billing: getDefaultBillingState(),
+		});
+
+		try {
+			persistAuthUsers();
+			const token = issueAuthToken({ username, role: 'swimmer' });
+			res.status(201).json({
+				ok: true,
+				token,
+				user: buildAuthUserPayload(findAuthUser(username)),
+			});
+		} catch (error) {
+			authUsers.pop();
+			res.status(500).json({
+				error: 'Could not create snapshot account.',
+				details: error instanceof Error ? error.message : 'Unknown error',
+			});
+		}
+		return;
+	}
+
+	const user = findAuthUserByIdentifier(identifier);
+	if (!user || !verifyPassword(password, user.passwordHash)) {
+		res.status(401).json({ error: 'Invalid credentials.' });
+		return;
+	}
+
+	const token = issueAuthToken(user);
+	res.status(200).json({ token, user: buildAuthUserPayload(user) });
+});
+
+app.post('/snapshot/account/password-reset/request', requireLoginRateLimit, async (req, res) => {
+	const identifier = String(req.body?.identifier || '').trim();
+	if (!identifier) {
+		res.status(400).json({ error: 'Email or username is required.' });
+		return;
+	}
+
+	const user = findAuthUserByIdentifier(identifier);
+	if (!user) {
+		res.status(200).json({ ok: true, message: 'If an account exists, a reset code has been issued.' });
+		return;
+	}
+
+	const username = String(user.username || '').trim().toLowerCase();
+	const resetCode = makePasswordResetCode();
+	const expiresAtMs = Date.now() + (AUTH_PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+	try {
+		await deliverPasswordResetCode({ user, resetCode });
+		authPasswordResetByUser.set(username, {
+			codeHash: hashPasswordResetCode(resetCode),
+			expiresAtMs,
+			requestedAt: new Date().toISOString(),
+		});
+
+		const payload = {
+			ok: true,
+			message: 'If an account exists, a reset code has been issued.',
+			resetCodeTtlMinutes: AUTH_PASSWORD_RESET_TTL_MINUTES,
+		};
+		if (!IS_PRODUCTION && AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE) {
+			payload.devResetCode = resetCode;
+			payload.devResetUser = username;
+		}
+		res.status(200).json(payload);
+	} catch (error) {
+		res.status(500).json({
+			error: 'Could not issue reset code. Please try again.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
+});
+
+app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req, res) => {
+	const identifier = String(req.body?.identifier || '').trim();
+	const resetCode = String(req.body?.code || '').trim();
+	const nextPassword = String(req.body?.password || '');
+
+	if (!identifier || !resetCode || !nextPassword) {
+		res.status(400).json({ error: 'Email/username, reset code, and new password are required.' });
+		return;
+	}
+	if (nextPassword.length < 8) {
+		res.status(400).json({ error: 'Password must be at least 8 characters.' });
+		return;
+	}
+
+	const user = findAuthUserByIdentifier(identifier);
+	if (!user) {
+		res.status(404).json({ error: 'User not found.' });
+		return;
+	}
+
+	const userKey = String(user.username || '').trim().toLowerCase();
+	const resetEntry = authPasswordResetByUser.get(userKey);
+	if (!resetEntry || Number(resetEntry.expiresAtMs || 0) <= Date.now()) {
+		authPasswordResetByUser.delete(userKey);
+		res.status(400).json({ error: 'Reset code is invalid or expired.' });
+		return;
+	}
+
+	if (hashPasswordResetCode(resetCode) !== String(resetEntry.codeHash || '')) {
+		res.status(400).json({ error: 'Reset code is invalid or expired.' });
+		return;
+	}
+
+	const index = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === userKey);
+	if (index < 0) {
+		authPasswordResetByUser.delete(userKey);
+		res.status(404).json({ error: 'User not found.' });
+		return;
+	}
+
+	const previous = authUsers[index];
+	authUsers[index] = {
+		...previous,
+		passwordHash: hashPassword(nextPassword),
+		tokenValidAfter: getNowEpochSeconds(),
+	};
+
+	try {
+		persistAuthUsers();
+		authPasswordResetByUser.delete(userKey);
+		res.status(200).json({ ok: true, username: authUsers[index].username });
+	} catch (error) {
+		authUsers[index] = previous;
+		res.status(500).json({
+			error: 'Could not update password.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
 });
 
 // Serve db.json at /db
