@@ -2526,7 +2526,7 @@ app.get('/auth/guard', (req, res) => {
 			details: { audience, role },
 		});
 		res.status(403).json({
-			error: audience === 'coach' ? 'Coach software access required.' : 'Swimmer access required.',
+			error: audience === 'coach' ? 'Coach-only software sign-in required. Use Swimmer Sign In for swimmer accounts.' : 'Swimmer access required.',
 			audience,
 			allowed: false,
 			role,
@@ -3525,6 +3525,415 @@ app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req
 		authUsers[index] = previous;
 		res.status(500).json({
 			error: 'Could not update password.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
+});
+
+function normalizeNameKey(value) {
+	return String(value || '')
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function splitFullName(fullName) {
+	const cleaned = String(fullName || '').trim().replace(/\s+/g, ' ');
+	if (!cleaned) return { firstName: '', lastName: '' };
+	const parts = cleaned.split(' ');
+	if (parts.length < 2) {
+		return { firstName: parts[0], lastName: '' };
+	}
+	return {
+		firstName: parts[0],
+		lastName: parts.slice(1).join(' '),
+	};
+}
+
+function normalizeTargetPreference(rawPreference) {
+	const source = rawPreference && typeof rawPreference === 'object' ? rawPreference : {};
+	const ignored = Boolean(source?.ignored);
+	const event = ignored ? '' : String(source?.event || '').trim();
+	const date = ignored ? '' : String(source?.date || '').trim();
+	const mode = String(source?.mode || 'independent').trim() || 'independent';
+	const status = String(source?.status || 'none').trim() || 'none';
+	return {
+		ignored,
+		event,
+		date,
+		notes: String(source?.notes || '').trim(),
+		status,
+		mode,
+		updatedAt: String(source?.updatedAt || new Date().toISOString()).trim() || new Date().toISOString(),
+	};
+}
+
+function normalizeTargetHistoryRows(rows) {
+	const sourceRows = Array.isArray(rows) ? rows : [];
+	return sourceRows
+		.map((row, index) => {
+			const at = String(row?.at || '').trim();
+			if (!at) return null;
+			return {
+				id: String(row?.id || `target-history-${index}-${Date.now().toString(36)}`).trim(),
+				at,
+				action: String(row?.action || 'Target update').trim() || 'Target update',
+				mode: String(row?.mode || 'independent').trim() || 'independent',
+				status: String(row?.status || 'none').trim() || 'none',
+				event: String(row?.event || '').trim(),
+				date: String(row?.date || '').trim(),
+				notes: String(row?.notes || '').trim(),
+			};
+		})
+		.filter(Boolean)
+		.slice(0, 240);
+}
+
+function resolveSwimmerRowIndex(swimmersRows, options = {}) {
+	const rows = Array.isArray(swimmersRows) ? swimmersRows : [];
+	if (rows.length < 1) return -1;
+	const authUsername = String(options?.authUsername || '').trim().toLowerCase();
+	if (authUsername) {
+		const accountIndex = rows.findIndex((row) => String(row?.swimmerAccountUsername || '').trim().toLowerCase() === authUsername);
+		if (accountIndex >= 0) return accountIndex;
+	}
+
+	const authEmail = String(options?.authEmail || '').trim().toLowerCase();
+	if (authEmail) {
+		const accountEmailIndex = rows.findIndex((row) => String(row?.swimmerAccountEmail || '').trim().toLowerCase() === authEmail);
+		if (accountEmailIndex >= 0) return accountEmailIndex;
+	}
+
+	const swimmerId = String(options?.swimmerId || '').trim();
+	if (swimmerId) {
+		const idIndex = rows.findIndex((row) => String(row?.id || '').trim() === swimmerId);
+		if (idIndex >= 0) return idIndex;
+	}
+
+	const email = String(options?.email || '').trim().toLowerCase();
+	if (email) {
+		const emailIndex = rows.findIndex((row) => String(row?.email || '').trim().toLowerCase() === email);
+		if (emailIndex >= 0) return emailIndex;
+	}
+
+	const fullName = String(options?.fullName || '').trim();
+	const fullNameKey = normalizeNameKey(fullName);
+	if (fullNameKey) {
+		const byNameIndex = rows.findIndex((row) => {
+			const rowFullName = `${String(row?.firstName || '').trim()} ${String(row?.lastName || '').trim()}`.trim();
+			return normalizeNameKey(rowFullName) === fullNameKey;
+		});
+		if (byNameIndex >= 0) return byNameIndex;
+	}
+
+	const firstName = String(options?.firstName || '').trim();
+	const lastName = String(options?.lastName || '').trim();
+	if (firstName && lastName) {
+		const firstKey = normalizeNameKey(firstName);
+		const lastKey = normalizeNameKey(lastName);
+		const splitIndex = rows.findIndex((row) => normalizeNameKey(row?.firstName) === firstKey && normalizeNameKey(row?.lastName) === lastKey);
+		if (splitIndex >= 0) return splitIndex;
+	}
+
+	return -1;
+}
+
+function requireSwimmerRole(req, res, next) {
+	const role = String(req.auth?.role || '').trim().toLowerCase();
+	if (role === 'swimmer') {
+		next();
+		return;
+	}
+	res.status(403).json({ error: 'Swimmer access required.' });
+}
+
+function toFiniteNumber(value, fallback = 0) {
+	const n = Number(value);
+	return Number.isFinite(n) ? n : fallback;
+}
+
+function clampScore(value) {
+	return Math.max(0, Math.min(100, toFiniteNumber(value, 0)));
+}
+
+function sanitizeAxisIds(axisIds) {
+	const fallback = [
+		'technical_control',
+		'efficiency',
+		'robustness_of_efficiency',
+		'aerobic_capacity',
+		'anaerobic_capacity',
+		'speed_expression',
+		'performance_progression',
+		'coach_observation',
+	];
+	if (!Array.isArray(axisIds)) return fallback;
+	const next = Array.from(
+		new Set(
+			axisIds
+				.map((item) => String(item || '').trim())
+				.filter(Boolean)
+		)
+	);
+	return next.length ? next : fallback;
+}
+
+function axisValueFromSnapshot(axisId, values = {}) {
+	const source = values && typeof values === 'object' ? values : {};
+	if (axisId === 'robustness_of_efficiency') {
+		return clampScore(source?.robustness_of_efficiency ?? source?.technical_stability ?? source?.durability ?? 0);
+	}
+	if (axisId === 'speed_expression') {
+		return clampScore(source?.speed_expression ?? source?.power_speed_expression ?? 0);
+	}
+	if (axisId === 'performance_progression') {
+		return clampScore(source?.performance_progression ?? source?.progression ?? source?.performance_control ?? source?.control ?? 0);
+	}
+	if (axisId === 'coach_observation') {
+		return clampScore(
+			source?.coach_observation ??
+			source?.coachObservation ??
+			source?.coach_assessment ??
+			source?.coachAssessment ??
+			source?.coach ??
+			0
+		);
+	}
+	return clampScore(source?.[axisId] ?? 0);
+}
+
+function capabilityScoreFromValues(valuesByAxis, axisIds) {
+	const ids = sanitizeAxisIds(axisIds);
+	const vals = ids.map((id) => clampScore(valuesByAxis?.[id] ?? 0));
+	if (!vals.length) return 0;
+	return Math.round(vals.reduce((sum, value) => sum + value, 0) / vals.length);
+}
+
+function normalizeValuesForAxes(values, axisIds) {
+	const ids = sanitizeAxisIds(axisIds);
+	const next = {};
+	for (const id of ids) {
+		next[id] = axisValueFromSnapshot(id, values);
+	}
+	return next;
+}
+
+app.post('/swimmer/capability/compute', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const body = req.body && typeof req.body === 'object' ? req.body : {};
+	const axisIds = sanitizeAxisIds(body?.axisIds);
+	const snapshots = Array.isArray(body?.snapshots) ? body.snapshots.filter((row) => row && typeof row === 'object') : [];
+
+	const valuesBySnapshotId = {};
+	const scoreBySnapshotId = {};
+	const normalizedByIndex = snapshots.map((snapshot, index) => {
+		const values = normalizeValuesForAxes(snapshot?.values, axisIds);
+		const score = capabilityScoreFromValues(values, axisIds);
+		const key = String(snapshot?.id || `snapshot-${index + 1}`).trim();
+		valuesBySnapshotId[key] = values;
+		scoreBySnapshotId[key] = score;
+		return { key, values, score };
+	});
+
+	const latest = normalizedByIndex[normalizedByIndex.length - 1] || { values: normalizeValuesForAxes({}, axisIds), score: 0 };
+	const previous = normalizedByIndex[normalizedByIndex.length - 2] || latest;
+
+	res.status(200).json({
+		ok: true,
+		axisIds,
+		latestValues: latest.values,
+		previousValues: previous.values,
+		latestScore: latest.score,
+		previousScore: previous.score,
+		valuesBySnapshotId,
+		scoreBySnapshotId,
+	});
+});
+
+app.post('/swimmer/capability/apply-event', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const body = req.body && typeof req.body === 'object' ? req.body : {};
+	const axisIds = sanitizeAxisIds(body?.axisIds);
+	const currentValues = normalizeValuesForAxes(body?.currentValues, axisIds);
+	const eventKind = String(body?.eventKind || '').trim();
+	const structured = body?.structured === true;
+	const competition = body?.competition === true;
+
+	let delta = 0;
+	if (eventKind === 'training-day') {
+		delta = structured ? 2 : 1;
+	} else if (eventKind === 'test-entry') {
+		delta = competition ? 3 : 2;
+	} else {
+		res.status(400).json({ error: 'Unsupported event kind.' });
+		return;
+	}
+
+	const nextValues = {};
+	for (const id of axisIds) {
+		nextValues[id] = clampScore(currentValues[id] + delta);
+	}
+
+	res.status(200).json({
+		ok: true,
+		axisIds,
+		values: nextValues,
+		score: capabilityScoreFromValues(nextValues, axisIds),
+	});
+});
+
+app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const profilePayload = req.body && typeof req.body === 'object' ? req.body : {};
+	const targetPreference = normalizeTargetPreference(profilePayload?.targetPreference);
+	const targetHistory = normalizeTargetHistoryRows(profilePayload?.targetHistory);
+	const swimmerPayload = profilePayload?.swimmer && typeof profilePayload.swimmer === 'object' ? profilePayload.swimmer : {};
+
+	const fullName = String(swimmerPayload?.name || swimmerPayload?.fullName || '').trim() || String(findAuthUser(String(req.auth?.username || '').trim())?.fullName || '').trim();
+	const splitName = splitFullName(fullName);
+	const email = String(swimmerPayload?.email || '').trim() || String(findAuthUser(String(req.auth?.username || '').trim())?.email || '').trim();
+	const authUsername = String(req.auth?.username || '').trim();
+	const authEmail = String(findAuthUser(authUsername)?.email || '').trim();
+	const swimmerId = String(swimmerPayload?.id || '').trim();
+
+	const storagePaths = resolveStoragePathsForAuth(req.auth);
+	ensureStorageLayout(storagePaths);
+	const dbShape = readJsonFile(storagePaths.dbPath);
+	const nextDb = dbShape && typeof dbShape === 'object' ? { ...dbShape } : {};
+	const swimmersRows = Array.isArray(nextDb.swimmers) ? nextDb.swimmers.slice() : [];
+
+	const swimmerIndex = resolveSwimmerRowIndex(swimmersRows, {
+		authUsername,
+		authEmail,
+		swimmerId,
+		email,
+		fullName,
+		firstName: splitName.firstName,
+		lastName: splitName.lastName,
+	});
+
+	if (swimmerIndex < 0) {
+		res.status(404).json({
+			error: 'Could not match swimmer record for this account. Ask coach admin to align swimmer roster with account identity.',
+		});
+		return;
+	}
+
+	const existingRow = swimmersRows[swimmerIndex] && typeof swimmersRows[swimmerIndex] === 'object'
+		? swimmersRows[swimmerIndex]
+		: {};
+
+	swimmersRows[swimmerIndex] = {
+		...existingRow,
+		targetPreference,
+		targetHistory,
+		targetHistoryUpdatedAt: new Date().toISOString(),
+		swimmerAccountUsername: String(req.auth?.username || '').trim(),
+		swimmerAccountEmail: String(email || '').trim(),
+	};
+
+	nextDb.swimmers = swimmersRows;
+
+	try {
+		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
+		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		res.status(200).json({
+			ok: true,
+			swimmerId: String(swimmersRows[swimmerIndex]?.id || ''),
+			targetHistoryCount: targetHistory.length,
+		});
+	} catch (error) {
+		res.status(500).json({
+			error: 'Could not save swimmer target profile.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
+});
+
+app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const swimmerPayload = req.body && req.body.swimmer && typeof req.body.swimmer === 'object' ? req.body.swimmer : {};
+	const fullName = String(swimmerPayload?.name || swimmerPayload?.fullName || '').trim() || String(findAuthUser(String(req.auth?.username || '').trim())?.fullName || '').trim();
+	const splitName = splitFullName(fullName);
+	const email = String(swimmerPayload?.email || '').trim() || String(findAuthUser(String(req.auth?.username || '').trim())?.email || '').trim();
+	const authUsername = String(req.auth?.username || '').trim();
+	const authEmail = String(findAuthUser(authUsername)?.email || '').trim();
+	const swimmerId = String(swimmerPayload?.id || '').trim();
+
+	const storagePaths = resolveStoragePathsForAuth(req.auth);
+	ensureStorageLayout(storagePaths);
+	const dbShape = readJsonFile(storagePaths.dbPath);
+	const nextDb = dbShape && typeof dbShape === 'object' ? { ...dbShape } : {};
+	const swimmersRows = Array.isArray(nextDb.swimmers) ? nextDb.swimmers.slice() : [];
+
+	const swimmerIndex = resolveSwimmerRowIndex(swimmersRows, {
+		authUsername,
+		authEmail,
+		swimmerId,
+		email,
+		fullName,
+		firstName: splitName.firstName,
+		lastName: splitName.lastName,
+	});
+
+	if (swimmerIndex < 0) {
+		res.status(404).json({
+			error: 'Could not match swimmer record for disconnect action.',
+		});
+		return;
+	}
+
+	const existingRow = swimmersRows[swimmerIndex] && typeof swimmersRows[swimmerIndex] === 'object'
+		? swimmersRows[swimmerIndex]
+		: {};
+	const existingHistory = normalizeTargetHistoryRows(existingRow?.targetHistory);
+	const disconnectedAt = new Date().toISOString();
+	const disconnectedHistory = [
+		{
+			id: `target-history-disconnect-${Date.now().toString(36)}`,
+			at: disconnectedAt,
+			action: 'Coach connection disconnected by swimmer',
+			mode: 'independent',
+			status: 'none',
+			event: '',
+			date: '',
+			notes: 'Swimmer ended coach data-sharing connection.',
+		},
+		...existingHistory,
+	].slice(0, 240);
+
+	const existingPreference = normalizeTargetPreference(existingRow?.targetPreference);
+
+	swimmersRows[swimmerIndex] = {
+		...existingRow,
+		coachConnected: false,
+		coachLinkStatus: 'none',
+		coachConnectionStatus: {
+			state: 'disconnected-by-swimmer',
+			disconnectedAt,
+			disconnectedBy: String(req.auth?.username || '').trim(),
+		},
+		targetPreference: {
+			...existingPreference,
+			mode: 'independent',
+			status: existingPreference.ignored ? 'ignored-by-swimmer' : 'none',
+			updatedAt: disconnectedAt,
+		},
+		targetHistory: disconnectedHistory,
+		targetHistoryUpdatedAt: disconnectedAt,
+	};
+
+	nextDb.swimmers = swimmersRows;
+
+	try {
+		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
+		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		res.status(200).json({
+			ok: true,
+			swimmerId: String(swimmersRows[swimmerIndex]?.id || ''),
+			disconnectedAt,
+		});
+	} catch (error) {
+		res.status(500).json({
+			error: 'Could not disconnect coach connection.',
 			details: error instanceof Error ? error.message : 'Unknown error',
 		});
 	}
