@@ -3849,6 +3849,109 @@ app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req
 	}
 });
 
+app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const body = req.body && typeof req.body === 'object' ? req.body : {};
+	const swimmerPayload = body?.swimmer && typeof body.swimmer === 'object' ? body.swimmer : {};
+	const snapshots = Array.isArray(body?.snapshots) ? body.snapshots : [];
+	const history = Array.isArray(body?.history) ? body.history : [];
+	const pbRows = Array.isArray(body?.pbRows) ? body.pbRows : [];
+	const pbSelectedSnapshotIds = Array.isArray(body?.pbSelectedSnapshotIds)
+		? body.pbSelectedSnapshotIds.map((id) => String(id || '').trim()).filter(Boolean)
+		: [];
+	const targetPreference = normalizeTargetPreference(body?.targetPreference);
+	const targetHistory = normalizeTargetHistoryRows(body?.targetHistory);
+	const customTestSets = Array.isArray(body?.customTestSets) ? body.customTestSets : [];
+	const ispProfile = body?.ispProfile && typeof body.ispProfile === 'object' ? body.ispProfile : null;
+
+	const authUsername = String(req.auth?.username || '').trim();
+	const authUser = findAuthUser(authUsername) || {};
+	const authEmail = String(authUser?.email || '').trim();
+	const fullName = String(swimmerPayload?.name || swimmerPayload?.fullName || authUser?.fullName || authUsername).trim();
+	const splitName = splitFullName(fullName);
+	const email = String(swimmerPayload?.email || authEmail).trim();
+	const swimmerId = String(swimmerPayload?.id || '').trim();
+
+	const storagePaths = resolveStoragePathsForAuth(req.auth);
+	ensureStorageLayout(storagePaths);
+	const dbShape = readJsonFile(storagePaths.dbPath);
+	const nextDb = dbShape && typeof dbShape === 'object' ? { ...dbShape } : {};
+	const swimmersRows = Array.isArray(nextDb.swimmers) ? nextDb.swimmers.slice() : [];
+
+	let swimmerIndex = resolveSwimmerRowIndex(swimmersRows, {
+		authUsername,
+		authEmail,
+		swimmerId,
+		email,
+		fullName,
+		firstName: splitName.firstName,
+		lastName: splitName.lastName,
+	});
+
+	if (swimmerIndex < 0) {
+		swimmersRows.push({
+			id: swimmerId || `swimmer-${Date.now().toString(36)}`,
+			firstName: splitName.firstName,
+			lastName: splitName.lastName,
+			name: fullName,
+			email,
+			swimmerAccountUsername: authUsername,
+			swimmerAccountEmail: authEmail || email,
+		});
+		swimmerIndex = swimmersRows.length - 1;
+	}
+
+	const existingRow = swimmersRows[swimmerIndex] && typeof swimmersRows[swimmerIndex] === 'object'
+		? swimmersRows[swimmerIndex]
+		: {};
+
+	swimmersRows[swimmerIndex] = {
+		...existingRow,
+		id: String(existingRow?.id || swimmerId || `swimmer-${Date.now().toString(36)}`),
+		firstName: splitName.firstName || String(existingRow?.firstName || ''),
+		lastName: splitName.lastName || String(existingRow?.lastName || ''),
+		name: fullName || String(existingRow?.name || ''),
+		email: email || String(existingRow?.email || ''),
+		dob: String(swimmerPayload?.dob || existingRow?.dob || ''),
+		sex: String(swimmerPayload?.sex || existingRow?.sex || ''),
+		gender: String(swimmerPayload?.sex || existingRow?.gender || ''),
+		mainEvent: String(swimmerPayload?.mainEvent || existingRow?.mainEvent || ''),
+		club: String(swimmerPayload?.club || existingRow?.club || ''),
+		squad: String(swimmerPayload?.squad || existingRow?.squad || ''),
+		pathway: String(swimmerPayload?.pathway || existingRow?.pathway || 'individual'),
+		coachConnected: Boolean(swimmerPayload?.coachConnected),
+		coachLinkStatus: String(swimmerPayload?.coachLinkStatus || existingRow?.coachLinkStatus || 'none'),
+		coachEmail: String(swimmerPayload?.coachEmail || existingRow?.coachEmail || ''),
+		coachCode: String(swimmerPayload?.coachCode || existingRow?.coachCode || ''),
+		coachPhase: String(swimmerPayload?.coachPhase || existingRow?.coachPhase || ''),
+		snapshots,
+		history,
+		pbRows,
+		pbSelectedSnapshotIds,
+		targetPreference,
+		targetHistory,
+		customTestSets,
+		ispProfile: ispProfile || existingRow?.ispProfile || null,
+		swimmerAccountUsername: authUsername,
+		swimmerAccountEmail: authEmail || email,
+	};
+
+	nextDb.swimmers = swimmersRows;
+
+	try {
+		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
+		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		res.status(200).json({
+			ok: true,
+			swimmerId: String(swimmersRows[swimmerIndex]?.id || ''),
+		});
+	} catch (error) {
+		res.status(500).json({
+			error: 'Could not sync swimmer profile data.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
+});
+
 app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (req, res) => {
 	const swimmerPayload = req.body && req.body.swimmer && typeof req.body.swimmer === 'object' ? req.body.swimmer : {};
 	const fullName = String(swimmerPayload?.name || swimmerPayload?.fullName || '').trim() || String(findAuthUser(String(req.auth?.username || '').trim())?.fullName || '').trim();
