@@ -3594,6 +3594,7 @@ function normalizeTargetHistoryRows(rows) {
 function resolveSwimmerRowIndex(swimmersRows, options = {}) {
 	const rows = Array.isArray(swimmersRows) ? swimmersRows : [];
 	if (rows.length < 1) return -1;
+	const strictAccountBinding = options?.strictAccountBinding === true;
 	const authUsername = String(options?.authUsername || '').trim().toLowerCase();
 	if (authUsername) {
 		const accountIndex = rows.findIndex((row) => String(row?.swimmerAccountUsername || '').trim().toLowerCase() === authUsername);
@@ -3605,6 +3606,8 @@ function resolveSwimmerRowIndex(swimmersRows, options = {}) {
 		const accountEmailIndex = rows.findIndex((row) => String(row?.swimmerAccountEmail || '').trim().toLowerCase() === authEmail);
 		if (accountEmailIndex >= 0) return accountEmailIndex;
 	}
+
+	if (strictAccountBinding) return -1;
 
 	const swimmerId = String(options?.swimmerId || '').trim();
 	if (swimmerId) {
@@ -3809,20 +3812,28 @@ app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req
 		fullName,
 		firstName: splitName.firstName,
 		lastName: splitName.lastName,
+		strictAccountBinding: true,
 	});
 
-	if (swimmerIndex < 0) {
-		res.status(404).json({
-			error: 'Could not match swimmer record for this account. Ask coach admin to align swimmer roster with account identity.',
+	let resolvedSwimmerIndex = swimmerIndex;
+	if (resolvedSwimmerIndex < 0) {
+		swimmersRows.push({
+			id: swimmerId || `swimmer-${Date.now().toString(36)}`,
+			firstName: splitName.firstName,
+			lastName: splitName.lastName,
+			name: fullName,
+			email,
+			swimmerAccountUsername: authUsername,
+			swimmerAccountEmail: authEmail || email,
 		});
-		return;
+		resolvedSwimmerIndex = swimmersRows.length - 1;
 	}
 
-	const existingRow = swimmersRows[swimmerIndex] && typeof swimmersRows[swimmerIndex] === 'object'
-		? swimmersRows[swimmerIndex]
+	const existingRow = swimmersRows[resolvedSwimmerIndex] && typeof swimmersRows[resolvedSwimmerIndex] === 'object'
+		? swimmersRows[resolvedSwimmerIndex]
 		: {};
 
-	swimmersRows[swimmerIndex] = {
+	swimmersRows[resolvedSwimmerIndex] = {
 		...existingRow,
 		targetPreference,
 		targetHistory,
@@ -3838,7 +3849,7 @@ app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req
 		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
 		res.status(200).json({
 			ok: true,
-			swimmerId: String(swimmersRows[swimmerIndex]?.id || ''),
+			swimmerId: String(swimmersRows[resolvedSwimmerIndex]?.id || ''),
 			targetHistoryCount: targetHistory.length,
 		});
 	} catch (error) {
@@ -3885,6 +3896,7 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 		fullName,
 		firstName: splitName.firstName,
 		lastName: splitName.lastName,
+		strictAccountBinding: true,
 	});
 
 	if (swimmerIndex < 0) {
@@ -3975,6 +3987,7 @@ app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (re
 		fullName,
 		firstName: splitName.firstName,
 		lastName: splitName.lastName,
+		strictAccountBinding: true,
 	});
 
 	if (swimmerIndex < 0) {
@@ -4053,8 +4066,30 @@ app.get('/db', requireAuth, (req, res) => {
 		if (err) {
 			res.status(500).json({ error: 'Could not read db.json', tenant: storagePaths.tenantKey });
 		} else {
+			let responsePayload = data;
+			const role = String(req.auth?.role || '').trim().toLowerCase();
+			if (role === 'swimmer') {
+				const authUsername = String(req.auth?.username || '').trim().toLowerCase();
+				const authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+				const authEmail = String(authUser?.email || '').trim().toLowerCase();
+				try {
+					const parsed = JSON.parse(String(data || '{}'));
+					const swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];
+					const scopedSwimmers = swimmers.filter((row) => {
+						const rowUsername = String(row?.swimmerAccountUsername || '').trim().toLowerCase();
+						const rowAccountEmail = String(row?.swimmerAccountEmail || '').trim().toLowerCase();
+						const rowEmail = String(row?.email || '').trim().toLowerCase();
+						if (authUsername && rowUsername === authUsername) return true;
+						if (authEmail && (rowAccountEmail === authEmail || rowEmail === authEmail)) return true;
+						return false;
+					});
+					responsePayload = JSON.stringify({ swimmers: scopedSwimmers });
+				} catch {
+					responsePayload = JSON.stringify({ swimmers: [] });
+				}
+			}
 			res.setHeader('Content-Type', 'application/json');
-			res.send(data);
+			res.send(responsePayload);
 		}
 	});
 });
