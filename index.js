@@ -19,6 +19,7 @@ const DB_TENANTS_DIR = path.join(__dirname, 'storage', 'tenants');
 const BILLING_CATALOG_PATH = path.join(__dirname, 'storage', 'billing-catalog.json');
 const BILLING_CATALOG_BACKUP_DIR = path.join(__dirname, 'storage', 'billing-catalog-backups');
 const AUTH_USERS_PATH = path.join(__dirname, 'storage', 'auth-users.json');
+const AUTH_USERS_BACKUP_PATH = path.join(__dirname, 'storage', 'auth-users.backup.json');
 const AUTH_INVITES_PATH = path.join(__dirname, 'storage', 'auth-invites.json');
 const AUTH_AUDIT_DIR = path.join(__dirname, 'storage', 'auth-audit');
 const AUTH_AUDIT_ACTIVE_PATH = path.join(AUTH_AUDIT_DIR, 'events.jsonl');
@@ -1234,18 +1235,31 @@ function loadOrCreateAuthUsers() {
 		if (cleanedFromFile.length !== fromFile.length) {
 			writeJsonFile(AUTH_USERS_PATH, cleanedFromFile);
 		}
+		writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromFile);
 		return { users: cleanedFromFile, source: 'file' };
+	}
+
+	const fromBackup = normalizeAuthUserRows(readJsonFile(AUTH_USERS_BACKUP_PATH));
+	const cleanedFromBackup = sanitizeDemoUsers(fromBackup);
+	if (cleanedFromBackup.length > 0) {
+		writeJsonFile(AUTH_USERS_PATH, cleanedFromBackup);
+		if (cleanedFromBackup.length !== fromBackup.length) {
+			writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromBackup);
+		}
+		return { users: cleanedFromBackup, source: 'backup' };
 	}
 
 	const fromEnv = normalizeAuthUserRows(parseAuthUsersFromEnv());
 	const cleanedFromEnv = sanitizeDemoUsers(fromEnv);
 	if (cleanedFromEnv.length > 0) {
 		writeJsonFile(AUTH_USERS_PATH, cleanedFromEnv);
+		writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromEnv);
 		return { users: cleanedFromEnv, source: 'env' };
 	}
 
 	const fromDefaults = sanitizeDemoUsers(normalizeAuthUserRows(DEFAULT_AUTH_USERS));
 	writeJsonFile(AUTH_USERS_PATH, fromDefaults);
+	writeJsonFile(AUTH_USERS_BACKUP_PATH, fromDefaults);
 	return { users: fromDefaults, source: 'defaults' };
 }
 
@@ -1797,6 +1811,7 @@ function sanitizeAuthUsers(users) {
 function persistAuthUsers() {
 	const payload = normalizeAuthUserRows(authUsers);
 	writeAtomicJsonFile(AUTH_USERS_PATH, payload);
+	writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);
 }
 
 function writeJsonFile(filePath, data) {
