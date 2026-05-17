@@ -49,6 +49,7 @@ const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVIT
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
 const AUTH_PASSWORD_RESET_DELIVERY = String(process.env.AUTH_PASSWORD_RESET_DELIVERY || 'console').trim().toLowerCase();
 const AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE = String(process.env.AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE || 'false').toLowerCase() === 'true';
+const AUTH_AUTO_HEAL_SWIMMER_BINDINGS = String(process.env.AUTH_AUTO_HEAL_SWIMMER_BINDINGS || 'true').toLowerCase() !== 'false';
 const AUTH_SMTP_HOST = String(process.env.AUTH_SMTP_HOST || '').trim();
 const AUTH_SMTP_PORT = Math.max(1, Number.parseInt(process.env.AUTH_SMTP_PORT || '587', 10) || 587);
 const AUTH_SMTP_SECURE = String(process.env.AUTH_SMTP_SECURE || 'false').toLowerCase() === 'true';
@@ -2315,6 +2316,14 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
+	if (AUTH_AUTO_HEAL_SWIMMER_BINDINGS && String(user?.role || '').trim().toLowerCase() === 'swimmer') {
+		try {
+			ensureSwimmerAccountBindingInStorage(user);
+		} catch {
+			// Never block login on auto-heal failures.
+		}
+	}
+
 	const token = issueAuthToken(user);
 	appendAuthAuditEvent({
 		action: 'login_success',
@@ -3658,6 +3667,99 @@ function resolveSwimmerRowIndex(swimmersRows, options = {}) {
 	return -1;
 }
 
+function makeSwimmerBindingRowId() {
+	return `swimmer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function ensureSwimmerAccountBindingInStorage(authLike) {
+	const username = String(authLike?.username || '').trim();
+	if (!username) return { updated: false, reason: 'missing_username' };
+	const authUser = findAuthUser(username) || authLike || {};
+	const role = String(authUser?.role || '').trim().toLowerCase();
+	if (role !== 'swimmer') return { updated: false, reason: 'not_swimmer' };
+
+	const authUsername = String(authUser?.username || username).trim();
+	const authEmail = String(authUser?.email || '').trim();
+	const fullName = String(authUser?.fullName || authUsername).trim();
+	const splitName = splitFullName(fullName);
+	const storagePaths = resolveStoragePathsForAuth(authUser);
+	ensureStorageLayout(storagePaths);
+
+	const dbShape = readJsonFile(storagePaths.dbPath);
+	const nextDb = dbShape && typeof dbShape === 'object' ? { ...dbShape } : {};
+	const swimmersRows = Array.isArray(nextDb.swimmers)
+		? nextDb.swimmers.filter((row) => row && typeof row === 'object').slice()
+		: [];
+
+	let swimmerIndex = resolveSwimmerRowIndex(swimmersRows, {
+		authUsername,
+		authEmail,
+		strictAccountBinding: true,
+	});
+
+	let updated = false;
+	if (swimmerIndex < 0) {
+		swimmersRows.push({
+			id: makeSwimmerBindingRowId(),
+			firstName: splitName.firstName,
+			lastName: splitName.lastName,
+			name: fullName,
+			email: authEmail,
+			notes: 'Auto-healed swimmer binding row.',
+			active: true,
+			swimmerAccountUsername: authUsername,
+			swimmerAccountEmail: authEmail,
+		});
+		swimmerIndex = swimmersRows.length - 1;
+		updated = true;
+	}
+
+	if (swimmerIndex >= 0) {
+		const current = swimmersRows[swimmerIndex] && typeof swimmersRows[swimmerIndex] === 'object'
+			? swimmersRows[swimmerIndex]
+			: {};
+		const next = {
+			...current,
+			swimmerAccountUsername: authUsername,
+			swimmerAccountEmail: authEmail || String(current?.swimmerAccountEmail || '').trim() || String(current?.email || '').trim(),
+		};
+		if (JSON.stringify(next) !== JSON.stringify(current)) {
+			swimmersRows[swimmerIndex] = next;
+			updated = true;
+		}
+	}
+
+	if (!updated) {
+		return { updated: false, tenantKey: storagePaths.tenantKey };
+	}
+
+	nextDb.swimmers = swimmersRows;
+	writeAtomicJsonFile(storagePaths.dbPath, nextDb);
+	return {
+		updated: true,
+		tenantKey: storagePaths.tenantKey,
+		swimmerId: String(swimmersRows[swimmerIndex]?.id || ''),
+	};
+}
+
+function autoHealSwimmerBindingsAtStartup() {
+	if (!AUTH_AUTO_HEAL_SWIMMER_BINDINGS) return;
+	const swimmerUsers = authUsers.filter((row) => String(row?.role || '').trim().toLowerCase() === 'swimmer');
+	if (swimmerUsers.length < 1) return;
+	let repaired = 0;
+	for (const swimmerUser of swimmerUsers) {
+		try {
+			const result = ensureSwimmerAccountBindingInStorage(swimmerUser);
+			if (result?.updated) repaired += 1;
+		} catch {
+			// Ignore healing failures at startup; runtime reads/logins still attempt healing.
+		}
+	}
+	if (repaired > 0) {
+		console.log(`[auth] Auto-healed swimmer bindings: ${repaired}`);
+	}
+}
+
 function requireSwimmerRole(req, res, next) {
 	const role = String(req.auth?.role || '').trim().toLowerCase();
 	if (role === 'swimmer') {
@@ -4090,7 +4192,7 @@ app.get('/db', requireAuth, (req, res) => {
 				try {
 					const parsed = JSON.parse(String(data || '{}'));
 					const swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];
-					const scopedSwimmers = swimmers.filter((row) => {
+					let scopedSwimmers = swimmers.filter((row) => {
 						const rowUsername = String(row?.swimmerAccountUsername || '').trim().toLowerCase();
 						const rowAccountEmail = String(row?.swimmerAccountEmail || '').trim().toLowerCase();
 						const rowEmail = String(row?.email || '').trim().toLowerCase();
@@ -4098,6 +4200,25 @@ app.get('/db', requireAuth, (req, res) => {
 						if (authEmail && (rowAccountEmail === authEmail || rowEmail === authEmail)) return true;
 						return false;
 					});
+					if (scopedSwimmers.length < 1 && AUTH_AUTO_HEAL_SWIMMER_BINDINGS) {
+						try {
+							const healResult = ensureSwimmerAccountBindingInStorage(authUser);
+							if (healResult?.updated) {
+								const refreshed = readJsonFile(storagePaths.dbPath);
+								const refreshedSwimmers = Array.isArray(refreshed?.swimmers) ? refreshed.swimmers : [];
+								scopedSwimmers = refreshedSwimmers.filter((row) => {
+									const rowUsername = String(row?.swimmerAccountUsername || '').trim().toLowerCase();
+									const rowAccountEmail = String(row?.swimmerAccountEmail || '').trim().toLowerCase();
+									const rowEmail = String(row?.email || '').trim().toLowerCase();
+									if (authUsername && rowUsername === authUsername) return true;
+									if (authEmail && (rowAccountEmail === authEmail || rowEmail === authEmail)) return true;
+									return false;
+								});
+							}
+						} catch {
+							// Ignore auto-heal read-path failures and return empty scoped payload.
+						}
+					}
 					responsePayload = JSON.stringify({ swimmers: scopedSwimmers });
 				} catch {
 					responsePayload = JSON.stringify({ swimmers: [] });
@@ -4190,6 +4311,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 const server = app.listen(PORT, () => {
 	console.log(`Server running at http://localhost:${PORT}/db`);
 	console.log(`Website placeholders feed at http://localhost:${PORT}/content/placeholders`);
+	autoHealSwimmerBindingsAtStartup();
 });
 
 server.on('error', (error) => {
