@@ -21,6 +21,7 @@ const BILLING_CATALOG_BACKUP_DIR = path.join(__dirname, 'storage', 'billing-cata
 const AUTH_USERS_PATH = path.join(__dirname, 'storage', 'auth-users.json');
 const AUTH_USERS_BACKUP_PATH = path.join(__dirname, 'storage', 'auth-users.backup.json');
 const AUTH_INVITES_PATH = path.join(__dirname, 'storage', 'auth-invites.json');
+const SNAPSHOT_SUBMISSIONS_PATH = path.join(__dirname, 'storage', 'snapshot-submissions.json');
 const AUTH_AUDIT_DIR = path.join(__dirname, 'storage', 'auth-audit');
 const AUTH_AUDIT_ACTIVE_PATH = path.join(AUTH_AUDIT_DIR, 'events.jsonl');
 const AUTH_AUDIT_BACKUP_DIR = path.join(AUTH_AUDIT_DIR, 'backups');
@@ -44,6 +45,7 @@ const AUTH_ADMIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUT
 const AUTH_ALLOW_COACH_SIGNUP = String(process.env.AUTH_ALLOW_COACH_SIGNUP || 'false').toLowerCase() === 'true';
 const AUTH_ALLOW_COACH_INVITES = String(process.env.AUTH_ALLOW_COACH_INVITES || 'true').toLowerCase() === 'true';
 const AUTH_ENABLE_DEMO_SEED_USERS = String(process.env.AUTH_ENABLE_DEMO_SEED_USERS || 'false').toLowerCase() === 'true';
+const AUTH_PREVENT_USER_SHRINK = String(process.env.AUTH_PREVENT_USER_SHRINK || 'true').toLowerCase() !== 'false';
 const AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME = String(process.env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').trim().toLowerCase();
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
@@ -157,6 +159,7 @@ let authResetMailTransport = null;
 const authBootstrap = loadOrCreateAuthUsers();
 const authUsers = authBootstrap.users;
 const authInvites = loadOrCreateAuthInvites();
+let snapshotSubmissions = loadOrCreateSnapshotSubmissions();
 let billingCatalog = loadOrCreateBillingCatalog();
 
 if (!AUTH_REQUIRED) {
@@ -252,6 +255,157 @@ function readJsonFile(filePath) {
 	} catch {
 		return null;
 	}
+}
+
+function loadOrCreateSnapshotSubmissions() {
+	const parsed = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);
+	if (Array.isArray(parsed)) return parsed;
+	try {
+		writeAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, []);
+	} catch {
+		// Keep boot resilient when first-write fails.
+	}
+	return [];
+}
+
+function persistSnapshotSubmissions() {
+	writeAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, Array.isArray(snapshotSubmissions) ? snapshotSubmissions : []);
+}
+
+function clampPercent(value) {
+	const n = Number(value);
+	if (!Number.isFinite(n)) return 0;
+	return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function parseNumericValue(value) {
+	const text = String(value || '').trim();
+	if (!text) return 0;
+	const minutesMatch = text.match(/^(\d+)\s*[:m]\s*(\d+(?:\.\d+)?)$/i);
+	if (minutesMatch) {
+		const minutes = Number.parseFloat(minutesMatch[1]);
+		const seconds = Number.parseFloat(minutesMatch[2]);
+		if (Number.isFinite(minutes) && Number.isFinite(seconds)) {
+			return (minutes * 60) + seconds;
+		}
+	}
+	const direct = Number.parseFloat(text);
+	return Number.isFinite(direct) ? direct : 0;
+}
+
+function parseRepArray(rawValues) {
+	const values = Array.isArray(rawValues) ? rawValues : [];
+	return values
+		.map((value) => parseNumericValue(value))
+		.filter((value) => Number.isFinite(value) && value > 0);
+}
+
+function boundedRangeText(center, spread = 4) {
+	const low = clampPercent(center - spread);
+	const high = clampPercent(center + spread);
+	return `${low}-${high}`;
+}
+
+function buildSnapshotSummaryFromPayload(payload) {
+	const tests = payload && typeof payload.tests === 'object' ? payload.tests : {};
+	const maxEffortStrokeCounts = payload && typeof payload.maxEffortStrokeCounts === 'object' ? payload.maxEffortStrokeCounts : {};
+	const repTimes25 = parseRepArray(payload?.repTimes25?.reps);
+	const repTimes50 = parseRepArray(payload?.repTimes50?.reps);
+	const stroke25 = parseRepArray(payload?.strokeCounts25?.reps);
+	const stroke50 = parseRepArray(payload?.strokeCounts50?.reps);
+
+	const m25 = parseNumericValue(tests?.m25);
+	const m50 = parseNumericValue(tests?.m50);
+	const m100 = parseNumericValue(tests?.m100);
+	const m200 = parseNumericValue(tests?.m200);
+	const m400 = parseNumericValue(tests?.m400);
+
+	const avgRep25 = repTimes25.length > 0 ? repTimes25.reduce((sum, value) => sum + value, 0) / repTimes25.length : (m25 || 0);
+	const avgRep50 = repTimes50.length > 0 ? repTimes50.reduce((sum, value) => sum + value, 0) / repTimes50.length : (m50 || 0);
+	const firstRep50 = repTimes50.length > 0 ? repTimes50[0] : (m50 || 0);
+	const lastRep50 = repTimes50.length > 0 ? repTimes50[repTimes50.length - 1] : avgRep50;
+	const avgStroke25 = stroke25.length > 0 ? stroke25.reduce((sum, value) => sum + value, 0) / stroke25.length : parseNumericValue(maxEffortStrokeCounts?.m25);
+	const avgStroke50 = stroke50.length > 0 ? stroke50.reduce((sum, value) => sum + value, 0) / stroke50.length : parseNumericValue(maxEffortStrokeCounts?.m50);
+
+	const speedExpression = clampPercent(125 - (avgRep50 * 3));
+	const repeatabilityPenalty = avgRep50 > 0 ? ((lastRep50 - firstRep50) / avgRep50) * 100 : 0;
+	const repeatability = clampPercent(100 - (repeatabilityPenalty * 4));
+	const efficiency = clampPercent(115 - ((avgStroke50 * 3) + (avgStroke25 * 1.8)));
+	const firstBreak = Math.max(0, Math.round(parseNumericValue(maxEffortStrokeCounts?.m25) || 0));
+	const firstBreakPercent = clampPercent(firstBreak * 2);
+	const stability = clampPercent((repeatability * 0.6) + (efficiency * 0.4));
+	const drift = clampPercent(repeatabilityPenalty * 3);
+	const aerobicGap = (m400 > 0 && m100 > 0) ? Math.max(0, m400 - (m100 * 4)) : 0;
+	const aerobic = clampPercent(100 - (aerobicGap / 4));
+	const powerSpeed = clampPercent((speedExpression * 0.65) + (repeatability * 0.35));
+	const progression = clampPercent((efficiency * 0.35) + (aerobic * 0.35) + (repeatability * 0.3));
+
+	const metrics = {
+		speedExpression,
+		repeatability,
+		efficiency,
+		aerobic,
+		powerSpeed,
+		progression,
+		firstBreak,
+		firstBreakPercent,
+		stability,
+		drift,
+	};
+
+	const indicators = {
+		repeatabilityRange: boundedRangeText(repeatability, 5),
+		efficiencyRange: boundedRangeText(efficiency, 5),
+		firstBreakEstimate: `${firstBreak}m`,
+		stabilityRange: boundedRangeText(stability, 4),
+		driftRange: boundedRangeText(drift, 4),
+	};
+
+	const labels = [
+		'Technical Control',
+		'Efficiency',
+		'Robustness of Efficiency',
+		'Aerobic Capacity',
+		'Anaerobic Capacity',
+		'Power & Speed Expression',
+		'Performance Progression',
+		'Coach Assessment',
+	];
+	const capability = [
+		efficiency,
+		efficiency,
+		stability,
+		aerobic,
+		speedExpression,
+		powerSpeed,
+		progression,
+		0,
+	];
+	const displayCapabilityRadar = capability.map((value, index) => (index === 7 ? 0 : clampPercent(value)));
+
+	const interpretationText = [
+		`Speed expression is ${speedExpression}% and repeatability is ${repeatability}% based on your provided reps and test entries.`,
+		`Efficiency and stability indicate how consistently stroke count and split pace are being sustained across workload.`,
+		`Use this baseline snapshot to compare trend direction over future submissions.`,
+	].join(' ');
+
+	return {
+		metrics,
+		indicators,
+		interpretationText,
+		radar: {
+			labels,
+			isp: capability,
+			capability,
+			integrated: capability,
+			displayCapability: displayCapabilityRadar,
+			drift,
+		},
+		presentation: {
+			displayMetrics: metrics,
+			displayCapabilityRadar,
+		},
+	};
 }
 
 function hashPassword(plainPassword) {
@@ -1232,6 +1386,23 @@ function loadOrCreateAuthUsers() {
 
 	const fromFile = normalizeAuthUserRows(readJsonFile(AUTH_USERS_PATH));
 	const cleanedFromFile = sanitizeDemoUsers(fromFile);
+	const fromBackup = normalizeAuthUserRows(readJsonFile(AUTH_USERS_BACKUP_PATH));
+	const cleanedFromBackup = sanitizeDemoUsers(fromBackup);
+
+	if (
+		AUTH_PREVENT_USER_SHRINK
+		&& cleanedFromFile.length > 0
+		&& cleanedFromBackup.length > 0
+		&& cleanedFromFile.length < cleanedFromBackup.length
+	) {
+		console.warn(`[auth] Detected auth user shrink (${cleanedFromFile.length} < ${cleanedFromBackup.length}); restoring backup.`);
+		writeJsonFile(AUTH_USERS_PATH, cleanedFromBackup);
+		if (cleanedFromBackup.length !== fromBackup.length) {
+			writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromBackup);
+		}
+		return { users: cleanedFromBackup, source: 'backup-restore' };
+	}
+
 	if (cleanedFromFile.length > 0) {
 		if (cleanedFromFile.length !== fromFile.length) {
 			writeJsonFile(AUTH_USERS_PATH, cleanedFromFile);
@@ -1240,8 +1411,6 @@ function loadOrCreateAuthUsers() {
 		return { users: cleanedFromFile, source: 'file' };
 	}
 
-	const fromBackup = normalizeAuthUserRows(readJsonFile(AUTH_USERS_BACKUP_PATH));
-	const cleanedFromBackup = sanitizeDemoUsers(fromBackup);
 	if (cleanedFromBackup.length > 0) {
 		writeJsonFile(AUTH_USERS_PATH, cleanedFromBackup);
 		if (cleanedFromBackup.length !== fromBackup.length) {
@@ -3552,6 +3721,131 @@ app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req
 			details: error instanceof Error ? error.message : 'Unknown error',
 		});
 	}
+});
+
+app.post('/snapshot/instant', requireLoginRateLimit, (req, res) => {
+	const summary = buildSnapshotSummaryFromPayload(req.body || {});
+	res.status(200).json({
+		ok: true,
+		mode: 'instant',
+		summary,
+		storage: 'not-saved',
+		reliability: 'Instant mode is for quick feedback and does not save history.',
+	});
+});
+
+app.post('/snapshot/account', requireStrictAuth, (req, res) => {
+	const authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+	const role = String(authUser?.role || '').trim().toLowerCase();
+	if (role !== 'swimmer') {
+		res.status(403).json({ error: 'Snapshot account mode is available only for swimmer accounts.' });
+		return;
+	}
+
+	const summary = buildSnapshotSummaryFromPayload(req.body || {});
+	const username = String(authUser?.username || '').trim();
+	const rawEmail = String(req.body?.email || authUser?.email || '').trim().toLowerCase();
+	const email = AUTH_EMAIL_PATTERN.test(rawEmail) ? rawEmail : '';
+	const stroke = String(req.body?.stroke || 'freestyle').trim().toLowerCase() || 'freestyle';
+	const submission = {
+		id: `snapshot_${Date.now().toString(36)}_${crypto.randomBytes(3).toString('hex')}`,
+		mode: 'account',
+		userId: username,
+		username,
+		email,
+		stroke,
+		snapshotDate: new Date().toISOString(),
+		createdAt: new Date().toISOString(),
+		summary,
+		metrics: summary.metrics,
+		indicators: summary.indicators,
+		interpretationText: summary.interpretationText,
+		radar: summary.radar,
+		results: summary,
+	};
+
+	snapshotSubmissions.unshift(submission);
+	if (snapshotSubmissions.length > 5000) {
+		snapshotSubmissions.length = 5000;
+	}
+
+	try {
+		persistSnapshotSubmissions();
+		res.status(200).json({
+			ok: true,
+			mode: 'account',
+			submissionId: submission.id,
+			summary,
+			storage: 'saved',
+			reliability: 'Account mode stores your snapshot so it appears in history and viewer routes.',
+			emailNotificationsEnabled: Boolean(authUser?.snapshotEmailNotificationsEnabled !== false),
+		});
+	} catch (error) {
+		snapshotSubmissions = snapshotSubmissions.filter((row) => String(row?.id || '') !== submission.id);
+		res.status(500).json({
+			error: 'Could not save snapshot submission.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
+});
+
+app.get('/snapshot/account/history', requireStrictAuth, (req, res) => {
+	const username = String(req.auth?.username || '').trim().toLowerCase();
+	const rows = snapshotSubmissions
+		.filter((row) => String(row?.userId || row?.username || '').trim().toLowerCase() === username)
+		.slice(0, 300);
+	res.status(200).json({ ok: true, rows });
+});
+
+app.get('/snapshot/account/history/:submissionId', requireStrictAuth, (req, res) => {
+	const username = String(req.auth?.username || '').trim().toLowerCase();
+	const submissionId = String(req.params?.submissionId || '').trim();
+	if (!submissionId) {
+		res.status(400).json({ error: 'Submission id is required.' });
+		return;
+	}
+	const row = snapshotSubmissions.find((entry) => {
+		const entryId = String(entry?.id || '').trim();
+		const entryUser = String(entry?.userId || entry?.username || '').trim().toLowerCase();
+		return entryId === submissionId && entryUser === username;
+	});
+	if (!row) {
+		res.status(404).json({ error: 'Snapshot submission not found.' });
+		return;
+	}
+	res.status(200).json({ ok: true, row });
+});
+
+app.get('/snapshot/account/settings', requireStrictAuth, (req, res) => {
+	const authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+	res.status(200).json({
+		ok: true,
+		emailNotificationsEnabled: Boolean(authUser?.snapshotEmailNotificationsEnabled !== false),
+	});
+});
+
+app.post('/snapshot/account/settings', requireStrictAuth, (req, res) => {
+	const username = String(req.auth?.username || '').trim().toLowerCase();
+	const enabled = req.body?.emailNotificationsEnabled !== false;
+	const index = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === username);
+	if (index >= 0) {
+		const previous = authUsers[index];
+		authUsers[index] = {
+			...previous,
+			snapshotEmailNotificationsEnabled: Boolean(enabled),
+		};
+		try {
+			persistAuthUsers();
+		} catch (error) {
+			authUsers[index] = previous;
+			res.status(500).json({
+				error: 'Could not save snapshot settings.',
+				details: error instanceof Error ? error.message : 'Unknown error',
+			});
+			return;
+		}
+	}
+	res.status(200).json({ ok: true, emailNotificationsEnabled: Boolean(enabled) });
 });
 
 function normalizeNameKey(value) {
