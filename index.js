@@ -46,6 +46,13 @@ const AUTH_ALLOW_COACH_SIGNUP = String(process.env.AUTH_ALLOW_COACH_SIGNUP || 'f
 const AUTH_ALLOW_COACH_INVITES = String(process.env.AUTH_ALLOW_COACH_INVITES || 'true').toLowerCase() === 'true';
 const AUTH_ENABLE_DEMO_SEED_USERS = String(process.env.AUTH_ENABLE_DEMO_SEED_USERS || 'false').toLowerCase() === 'true';
 const AUTH_PREVENT_USER_SHRINK = String(process.env.AUTH_PREVENT_USER_SHRINK || 'true').toLowerCase() !== 'false';
+const AUTH_FAIL_ON_MISSING_STORE = String(process.env.AUTH_FAIL_ON_MISSING_STORE || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
+const AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION = String(process.env.AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
+const AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS = String(process.env.AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
+const AUTH_REQUIRED_PRODUCTION_USERS = String(process.env.AUTH_REQUIRED_PRODUCTION_USERS || 'softwareowner,demo.coach,demo.researcher')
+	.split(',')
+	.map((value) => String(value || '').trim().toLowerCase())
+	.filter(Boolean);
 const AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME = String(process.env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').trim().toLowerCase();
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
@@ -161,6 +168,8 @@ const authUsers = authBootstrap.users;
 const authInvites = loadOrCreateAuthInvites();
 let snapshotSubmissions = loadOrCreateSnapshotSubmissions();
 let billingCatalog = loadOrCreateBillingCatalog();
+
+assertProductionAuthInvariants(authBootstrap, authUsers);
 
 if (!AUTH_REQUIRED) {
 	console.warn('[auth] Authentication is disabled (AUTH_REQUIRED=false).');
@@ -1379,6 +1388,10 @@ function getNowEpochSeconds() {
 function loadOrCreateAuthUsers() {
 	ensureStorageLayout();
 
+	if (AUTH_FAIL_ON_MISSING_STORE && !fs.existsSync(AUTH_USERS_PATH)) {
+		throw new Error(`[auth] Required auth store is missing at ${AUTH_USERS_PATH}. Refusing to bootstrap in production.`);
+	}
+
 	const sanitizeDemoUsers = (rows) => {
 		if (AUTH_ENABLE_DEMO_SEED_USERS) return rows;
 		return rows.filter((row) => !DEMO_SEED_USERNAMES.has(String(row?.username || '').trim().toLowerCase()));
@@ -1426,6 +1439,45 @@ function loadOrCreateAuthUsers() {
 	writeJsonFile(AUTH_USERS_PATH, fromDefaults);
 	writeJsonFile(AUTH_USERS_BACKUP_PATH, fromDefaults);
 	return { users: fromDefaults, source: 'defaults' };
+}
+
+function assertProductionAuthInvariants(authBootstrapState, authRows) {
+	if (!IS_PRODUCTION || !AUTH_REQUIRED) return;
+
+	if (AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION && String(authBootstrapState?.source || '') !== 'file') {
+		throw new Error(`[auth] Startup blocked: expected auth source=file, received ${String(authBootstrapState?.source || 'unknown')}.`);
+	}
+
+	if (!AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS) return;
+
+	const users = Array.isArray(authRows) ? authRows : [];
+	const byUsername = new Map(
+		users.map((row) => [String(row?.username || '').trim().toLowerCase(), row])
+	);
+
+	const missing = AUTH_REQUIRED_PRODUCTION_USERS.filter((username) => !byUsername.has(username));
+	if (missing.length > 0) {
+		throw new Error(`[auth] Startup blocked: missing required production user(s): ${missing.join(', ')}.`);
+	}
+
+	const owner = byUsername.get(AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME) || null;
+	const ownerTenant = owner ? resolveTenantKeyFromUser(owner) : '';
+	if (ownerTenant !== 'global-owner') {
+		throw new Error(`[auth] Startup blocked: ${AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME} must resolve to tenant global-owner.`);
+	}
+
+	const demoCoach = byUsername.get('demo.coach') || null;
+	const demoResearcher = byUsername.get('demo.researcher') || null;
+	if (demoCoach && demoResearcher) {
+		const coachTenant = resolveTenantKeyFromUser(demoCoach);
+		const researcherTenant = resolveTenantKeyFromUser(demoResearcher);
+		if (!coachTenant || !researcherTenant || coachTenant !== researcherTenant) {
+			throw new Error('[auth] Startup blocked: demo coach/researcher tenant mapping is inconsistent.');
+		}
+		if (coachTenant === 'global-owner') {
+			throw new Error('[auth] Startup blocked: demo accounts cannot resolve to global-owner tenant.');
+		}
+	}
 }
 
 function toBase64Url(value) {
