@@ -1395,12 +1395,7 @@ function loadOrCreateAuthUsers() {
 		&& cleanedFromBackup.length > 0
 		&& cleanedFromFile.length < cleanedFromBackup.length
 	) {
-		console.warn(`[auth] Detected auth user shrink (${cleanedFromFile.length} < ${cleanedFromBackup.length}); restoring backup.`);
-		writeJsonFile(AUTH_USERS_PATH, cleanedFromBackup);
-		if (cleanedFromBackup.length !== fromBackup.length) {
-			writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromBackup);
-		}
-		return { users: cleanedFromBackup, source: 'backup-restore' };
+		console.warn(`[auth] Detected auth user shrink (${cleanedFromFile.length} < ${cleanedFromBackup.length}); keeping primary store and refreshing backup.`);
 	}
 
 	if (cleanedFromFile.length > 0) {
