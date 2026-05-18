@@ -48,6 +48,7 @@ const AUTH_ALLOW_COACH_INVITES = String(process.env.AUTH_ALLOW_COACH_INVITES || 
 const AUTH_ENABLE_DEMO_SEED_USERS = String(process.env.AUTH_ENABLE_DEMO_SEED_USERS || 'false').toLowerCase() === 'true';
 const AUTH_PREVENT_USER_SHRINK = String(process.env.AUTH_PREVENT_USER_SHRINK || 'true').toLowerCase() !== 'false';
 const AUTH_FAIL_ON_MISSING_STORE = String(process.env.AUTH_FAIL_ON_MISSING_STORE || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
+const AUTH_ALLOW_ENV_BOOTSTRAP_ON_MISSING_STORE = String(process.env.AUTH_ALLOW_ENV_BOOTSTRAP_ON_MISSING_STORE || 'true').toLowerCase() !== 'false';
 const AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION = String(process.env.AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
 const AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS = String(process.env.AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
 const AUTH_REQUIRED_PRODUCTION_USERS = String(process.env.AUTH_REQUIRED_PRODUCTION_USERS || 'softwareowner,demo.coach,demo.researcher')
@@ -1390,9 +1391,15 @@ function getNowEpochSeconds() {
 
 function loadOrCreateAuthUsers() {
 	ensureStorageLayout();
+	const envCandidates = normalizeAuthUserRows(parseAuthUsersFromEnv());
+	const canBootstrapFromEnv = AUTH_ALLOW_ENV_BOOTSTRAP_ON_MISSING_STORE && envCandidates.length > 0;
 
-	if (AUTH_FAIL_ON_MISSING_STORE && !fs.existsSync(AUTH_USERS_PATH)) {
+	if (AUTH_FAIL_ON_MISSING_STORE && !fs.existsSync(AUTH_USERS_PATH) && !canBootstrapFromEnv) {
 		throw new Error(`[auth] Required auth store is missing at ${AUTH_USERS_PATH}. Refusing to bootstrap in production.`);
+	}
+
+	if (!fs.existsSync(AUTH_USERS_PATH) && canBootstrapFromEnv) {
+		console.warn('[auth] Auth store missing; bootstrapping from AUTH_USERS_JSON and persisting to file.');
 	}
 
 	const sanitizeDemoUsers = (rows) => {
@@ -1430,12 +1437,12 @@ function loadOrCreateAuthUsers() {
 		return { users: cleanedFromBackup, source: 'backup' };
 	}
 
-	const fromEnv = normalizeAuthUserRows(parseAuthUsersFromEnv());
+	const fromEnv = envCandidates;
 	const cleanedFromEnv = sanitizeDemoUsers(fromEnv);
 	if (cleanedFromEnv.length > 0) {
 		writeJsonFile(AUTH_USERS_PATH, cleanedFromEnv);
 		writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromEnv);
-		return { users: cleanedFromEnv, source: 'env' };
+		return { users: cleanedFromEnv, source: 'file' };
 	}
 
 	const fromDefaults = sanitizeDemoUsers(normalizeAuthUserRows(DEFAULT_AUTH_USERS));
