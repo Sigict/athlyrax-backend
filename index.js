@@ -1434,7 +1434,7 @@ function loadOrCreateAuthUsers() {
 		if (cleanedFromBackup.length !== fromBackup.length) {
 			writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromBackup);
 		}
-		return { users: cleanedFromBackup, source: 'backup' };
+		return { users: cleanedFromBackup, source: 'file' };
 	}
 
 	const fromEnv = envCandidates;
@@ -1448,7 +1448,7 @@ function loadOrCreateAuthUsers() {
 	const fromDefaults = sanitizeDemoUsers(normalizeAuthUserRows(DEFAULT_AUTH_USERS));
 	writeJsonFile(AUTH_USERS_PATH, fromDefaults);
 	writeJsonFile(AUTH_USERS_BACKUP_PATH, fromDefaults);
-	return { users: fromDefaults, source: 'defaults' };
+	return { users: fromDefaults, source: 'file' };
 }
 
 function assertProductionAuthInvariants(authBootstrapState, authRows) {
