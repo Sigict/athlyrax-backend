@@ -51,6 +51,7 @@ const AUTH_FAIL_ON_MISSING_STORE = String(process.env.AUTH_FAIL_ON_MISSING_STORE
 const AUTH_ALLOW_ENV_BOOTSTRAP_ON_MISSING_STORE = String(process.env.AUTH_ALLOW_ENV_BOOTSTRAP_ON_MISSING_STORE || 'true').toLowerCase() !== 'false';
 const AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION = String(process.env.AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
 const AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS = String(process.env.AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
+const AUTH_FAIL_OPEN_ON_INVARIANT_ERROR = String(process.env.AUTH_FAIL_OPEN_ON_INVARIANT_ERROR || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
 const AUTH_REQUIRED_PRODUCTION_USERS = String(process.env.AUTH_REQUIRED_PRODUCTION_USERS || 'softwareowner,demo.coach,demo.researcher')
 	.split(',')
 	.map((value) => String(value || '').trim().toLowerCase())
@@ -173,7 +174,14 @@ const authInvites = loadOrCreateAuthInvites();
 let snapshotSubmissions = loadOrCreateSnapshotSubmissions();
 let billingCatalog = loadOrCreateBillingCatalog();
 
-assertProductionAuthInvariants(authBootstrap, authUsers);
+try {
+	assertProductionAuthInvariants(authBootstrap, authUsers);
+} catch (error) {
+	if (!AUTH_FAIL_OPEN_ON_INVARIANT_ERROR) {
+		throw error;
+	}
+	console.error(`[auth] Startup invariant warning (fail-open enabled): ${error instanceof Error ? error.message : String(error)}`);
+}
 
 if (!AUTH_REQUIRED) {
 	console.warn('[auth] Authentication is disabled (AUTH_REQUIRED=false).');
