@@ -12,6 +12,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || '3001', 10) || 3001;
+const RELEASE_MARKER = '2026-05-18-redeploy-02';
 const DB_PATH = path.join(__dirname, 'storage', 'db.json');
 const TARGET_BACKUP_PATH = path.join(__dirname, 'storage', 'trainingPlannerTargets.backup.json');
 const DB_SNAPSHOT_DIR = path.join(__dirname, 'storage', 'db-snapshots');
@@ -58,6 +59,8 @@ const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVIT
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
 const AUTH_PASSWORD_RESET_DELIVERY = String(process.env.AUTH_PASSWORD_RESET_DELIVERY || 'console').trim().toLowerCase();
 const AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE = String(process.env.AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE || 'false').toLowerCase() === 'true';
+
+console.log(`[release] ${RELEASE_MARKER}`);
 const AUTH_AUTO_HEAL_SWIMMER_BINDINGS = String(process.env.AUTH_AUTO_HEAL_SWIMMER_BINDINGS || 'true').toLowerCase() !== 'false';
 const AUTH_SMTP_HOST = String(process.env.AUTH_SMTP_HOST || '').trim();
 const AUTH_SMTP_PORT = Math.max(1, Number.parseInt(process.env.AUTH_SMTP_PORT || '587', 10) || 587);
