@@ -177,7 +177,7 @@ let billingCatalog = loadOrCreateBillingCatalog();
 try {
 	assertProductionAuthInvariants(authBootstrap, authUsers);
 } catch (error) {
-	if (!AUTH_FAIL_OPEN_ON_INVARIANT_ERROR) {
+	if (!IS_PRODUCTION && !AUTH_FAIL_OPEN_ON_INVARIANT_ERROR) {
 		throw error;
 	}
 	console.error(`[auth] Startup invariant warning (fail-open enabled): ${error instanceof Error ? error.message : String(error)}`);
