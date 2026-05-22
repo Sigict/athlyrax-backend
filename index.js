@@ -3788,12 +3788,38 @@ app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req
 	}
 });
 
+function sanitizeSnapshotSummaryForClient(summary) {
+	const source = summary && typeof summary === 'object' ? summary : {};
+	const metrics = source.metrics && typeof source.metrics === 'object' ? source.metrics : {};
+	const radar = source.radar && typeof source.radar === 'object' ? source.radar : {};
+	const labels = Array.isArray(radar.labels) ? radar.labels : [];
+	const displayCapability = Array.isArray(radar.displayCapability)
+		? radar.displayCapability.map((value) => clampPercent(value))
+		: [];
+	const capability = Array.isArray(radar.capability)
+		? radar.capability.map((value) => clampPercent(value))
+		: [];
+	const resolvedDisplayCapability = displayCapability.length === labels.length
+		? displayCapability
+		: (capability.length === labels.length ? capability : labels.map(() => 0));
+
+	return {
+		metrics,
+		radar: {
+			labels,
+			displayCapability: resolvedDisplayCapability,
+			drift: clampPercent(radar?.drift),
+		},
+	};
+}
+
 app.post('/snapshot/instant', requireLoginRateLimit, (req, res) => {
 	const summary = buildSnapshotSummaryFromPayload(req.body || {});
+	const safeSummary = sanitizeSnapshotSummaryForClient(summary);
 	res.status(200).json({
 		ok: true,
 		mode: 'instant',
-		summary,
+		summary: safeSummary,
 		storage: 'not-saved',
 		reliability: 'Instant mode is for quick feedback and does not save history.',
 	});
@@ -3840,7 +3866,7 @@ app.post('/snapshot/account', requireStrictAuth, (req, res) => {
 			ok: true,
 			mode: 'account',
 			submissionId: submission.id,
-			summary,
+			summary: sanitizeSnapshotSummaryForClient(summary),
 			storage: 'saved',
 			reliability: 'Account mode stores your snapshot so it appears in history and viewer routes.',
 			emailNotificationsEnabled: Boolean(authUser?.snapshotEmailNotificationsEnabled !== false),
@@ -3858,7 +3884,22 @@ app.get('/snapshot/account/history', requireStrictAuth, (req, res) => {
 	const username = String(req.auth?.username || '').trim().toLowerCase();
 	const rows = snapshotSubmissions
 		.filter((row) => String(row?.userId || row?.username || '').trim().toLowerCase() === username)
-		.slice(0, 300);
+		.slice(0, 300)
+		.map((row) => {
+			const safeSummary = sanitizeSnapshotSummaryForClient(row?.summary || row?.results || row);
+			return {
+				id: row?.id,
+				mode: row?.mode,
+				userId: row?.userId,
+				username: row?.username,
+				email: row?.email,
+				stroke: row?.stroke,
+				snapshotDate: row?.snapshotDate,
+				createdAt: row?.createdAt,
+				metrics: safeSummary.metrics,
+				radar: safeSummary.radar,
+			};
+		});
 	res.status(200).json({ ok: true, rows });
 });
 
@@ -3878,7 +3919,23 @@ app.get('/snapshot/account/history/:submissionId', requireStrictAuth, (req, res)
 		res.status(404).json({ error: 'Snapshot submission not found.' });
 		return;
 	}
-	res.status(200).json({ ok: true, row });
+	const safeSummary = sanitizeSnapshotSummaryForClient(row?.summary || row?.results || row);
+	res.status(200).json({
+		ok: true,
+		row: {
+			id: row?.id,
+			mode: row?.mode,
+			userId: row?.userId,
+			username: row?.username,
+			email: row?.email,
+			stroke: row?.stroke,
+			snapshotDate: row?.snapshotDate,
+			createdAt: row?.createdAt,
+			metrics: safeSummary.metrics,
+			radar: safeSummary.radar,
+			results: safeSummary,
+		},
+	});
 });
 
 app.get('/snapshot/account/settings', requireStrictAuth, (req, res) => {
