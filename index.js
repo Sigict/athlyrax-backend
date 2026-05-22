@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
+import { execFileSync } from 'child_process';
 import nodemailer from 'nodemailer';
 import Stripe from 'stripe';
 
@@ -12,15 +13,23 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || '3001', 10) || 3001;
-const RELEASE_MARKER = '2026-05-18-redeploy-02';
 const DB_PATH = path.join(__dirname, 'storage', 'db.json');
 const TARGET_BACKUP_PATH = path.join(__dirname, 'storage', 'trainingPlannerTargets.backup.json');
 const DB_SNAPSHOT_DIR = path.join(__dirname, 'storage', 'db-snapshots');
 const DB_TENANTS_DIR = path.join(__dirname, 'storage', 'tenants');
 const BILLING_CATALOG_PATH = path.join(__dirname, 'storage', 'billing-catalog.json');
 const BILLING_CATALOG_BACKUP_DIR = path.join(__dirname, 'storage', 'billing-catalog-backups');
-const AUTH_USERS_PATH = path.join(__dirname, 'storage', 'auth-users.json');
-const AUTH_USERS_BACKUP_PATH = path.join(__dirname, 'storage', 'auth-users.backup.json');
+const SHARED_AUTH_USERS_PATH = path.resolve(__dirname, '..', 'storage', 'auth', 'auth-users.json');
+const AUTH_USERS_PATH = (() => {
+	const overridePath = String(process.env.AUTH_USERS_PATH || '').trim();
+	if (overridePath) return path.resolve(overridePath);
+	return SHARED_AUTH_USERS_PATH;
+})();
+const AUTH_USERS_BACKUP_PATH = (() => {
+	const overridePath = String(process.env.AUTH_USERS_BACKUP_PATH || '').trim();
+	if (overridePath) return path.resolve(overridePath);
+	return path.join(path.dirname(AUTH_USERS_PATH), 'auth-users.backup.json');
+})();
 const AUTH_INVITES_PATH = path.join(__dirname, 'storage', 'auth-invites.json');
 const SNAPSHOT_SUBMISSIONS_PATH = path.join(__dirname, 'storage', 'snapshot-submissions.json');
 const AUTH_AUDIT_DIR = path.join(__dirname, 'storage', 'auth-audit');
@@ -46,23 +55,18 @@ const AUTH_ADMIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUT
 const AUTH_ALLOW_COACH_SIGNUP = String(process.env.AUTH_ALLOW_COACH_SIGNUP || 'false').toLowerCase() === 'true';
 const AUTH_ALLOW_COACH_INVITES = String(process.env.AUTH_ALLOW_COACH_INVITES || 'true').toLowerCase() === 'true';
 const AUTH_ENABLE_DEMO_SEED_USERS = String(process.env.AUTH_ENABLE_DEMO_SEED_USERS || 'false').toLowerCase() === 'true';
+const AUTH_ENFORCE_CANONICAL_STORE = String(process.env.AUTH_ENFORCE_CANONICAL_STORE || 'true').toLowerCase() !== 'false';
+// Demo auto-realignment is strictly non-production to avoid mutating live auth state.
+const DEMO_AUTO_REALIGN_ENABLED = false;
+const DEMO_AUTO_REALIGN_COOLDOWN_MS = Math.max(5000, Number.parseInt(process.env.DEMO_AUTO_REALIGN_COOLDOWN_MS || '15000', 10) || 15000);
+const DEMO_AUTO_REALIGN_SCRIPT_PATH = path.resolve(__dirname, '..', 'scripts', 'realign-demo-systems.mjs');
+const DEMO_AUTO_REALIGN_USERNAMES = new Set(['demo.coach', 'demo.swimmer', 'demo.researcher']);
 const AUTH_PREVENT_USER_SHRINK = String(process.env.AUTH_PREVENT_USER_SHRINK || 'true').toLowerCase() !== 'false';
-const AUTH_FAIL_ON_MISSING_STORE = String(process.env.AUTH_FAIL_ON_MISSING_STORE || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
-const AUTH_ALLOW_ENV_BOOTSTRAP_ON_MISSING_STORE = String(process.env.AUTH_ALLOW_ENV_BOOTSTRAP_ON_MISSING_STORE || 'true').toLowerCase() !== 'false';
-const AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION = String(process.env.AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
-const AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS = String(process.env.AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
-const AUTH_FAIL_OPEN_ON_INVARIANT_ERROR = String(process.env.AUTH_FAIL_OPEN_ON_INVARIANT_ERROR || (IS_PRODUCTION ? 'true' : 'false')).toLowerCase() === 'true';
-const AUTH_REQUIRED_PRODUCTION_USERS = String(process.env.AUTH_REQUIRED_PRODUCTION_USERS || 'softwareowner,demo.coach,demo.researcher')
-	.split(',')
-	.map((value) => String(value || '').trim().toLowerCase())
-	.filter(Boolean);
 const AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME = String(process.env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').trim().toLowerCase();
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
 const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.AUTH_PASSWORD_RESET_TTL_MINUTES || '20', 10) || 20);
 const AUTH_PASSWORD_RESET_DELIVERY = String(process.env.AUTH_PASSWORD_RESET_DELIVERY || 'console').trim().toLowerCase();
 const AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE = String(process.env.AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE || 'false').toLowerCase() === 'true';
-
-console.log(`[release] ${RELEASE_MARKER}`);
 const AUTH_AUTO_HEAL_SWIMMER_BINDINGS = String(process.env.AUTH_AUTO_HEAL_SWIMMER_BINDINGS || 'true').toLowerCase() !== 'false';
 const AUTH_SMTP_HOST = String(process.env.AUTH_SMTP_HOST || '').trim();
 const AUTH_SMTP_PORT = Math.max(1, Number.parseInt(process.env.AUTH_SMTP_PORT || '587', 10) || 587);
@@ -85,6 +89,10 @@ const BILLING_TRIAL_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_TRIAL
 const BILLING_BASE_TRIAL_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_BASE_TRIAL_DAYS || '28', 10) || 0);
 const BILLING_REFERRAL_BONUS_DAYS = Math.max(0, Number.parseInt(process.env.BILLING_REFERRAL_BONUS_DAYS || '14', 10) || 0);
 const BILLING_TIER_KEYS = ['tier-1', 'tier-2', 'tier-3'];
+const SWIMMER_SYNC_MAX_SNAPSHOTS = Math.max(50, Number.parseInt(process.env.SWIMMER_SYNC_MAX_SNAPSHOTS || '2000', 10) || 2000);
+const SWIMMER_SYNC_MAX_HISTORY_DAYS = Math.max(30, Number.parseInt(process.env.SWIMMER_SYNC_MAX_HISTORY_DAYS || '730', 10) || 730);
+const SWIMMER_SYNC_MAX_PB_ROWS = Math.max(10, Number.parseInt(process.env.SWIMMER_SYNC_MAX_PB_ROWS || '300', 10) || 300);
+const SWIMMER_SYNC_MAX_TEST_SETS = Math.max(5, Number.parseInt(process.env.SWIMMER_SYNC_MAX_TEST_SETS || '200', 10) || 200);
 const BILLING_PARTNER_COMMISSION_PERCENT = Math.max(0, Number.parseInt(process.env.BILLING_PARTNER_COMMISSION_PERCENT || '10', 10) || 0);
 const BILLING_PARTNER_COMMISSION_MONTHS = Math.max(0, Number.parseInt(process.env.BILLING_PARTNER_COMMISSION_MONTHS || '36', 10) || 0);
 const BILLING_EMAIL_NOTIFICATIONS_ENABLED = String(process.env.BILLING_EMAIL_NOTIFICATIONS_ENABLED || 'true').toLowerCase() !== 'false';
@@ -167,21 +175,52 @@ if (AUTH_REQUIRED && IS_PRODUCTION && AUTH_SECRET === 'athlyrax-dev-secret-chang
 
 let writeTail = Promise.resolve();
 let authResetMailTransport = null;
+let demoAutoRealignLastAt = 0;
+
+function isDemoAutoRealignTarget(identifier) {
+	const normalized = String(identifier || '').trim().toLowerCase();
+	return DEMO_AUTO_REALIGN_USERNAMES.has(normalized);
+}
+
+function runDemoAutoRealign(reason) {
+	if (!DEMO_AUTO_REALIGN_ENABLED) return false;
+	if (!fs.existsSync(DEMO_AUTO_REALIGN_SCRIPT_PATH)) {
+		console.warn(`[demo-auto-realign] Script not found: ${DEMO_AUTO_REALIGN_SCRIPT_PATH}`);
+		return false;
+	}
+	const now = Date.now();
+	if ((now - demoAutoRealignLastAt) < DEMO_AUTO_REALIGN_COOLDOWN_MS) {
+		return false;
+	}
+	try {
+		execFileSync(process.execPath, [DEMO_AUTO_REALIGN_SCRIPT_PATH], {
+			cwd: path.resolve(__dirname, '..'),
+			stdio: 'pipe',
+		});
+		demoAutoRealignLastAt = now;
+		console.info(`[demo-auto-realign] Completed (${reason}).`);
+		return true;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error || 'unknown error');
+		console.warn(`[demo-auto-realign] Failed (${reason}): ${message}`);
+		return false;
+	}
+}
+
+if (
+	AUTH_ENFORCE_CANONICAL_STORE
+	&& path.resolve(AUTH_USERS_PATH) !== path.resolve(SHARED_AUTH_USERS_PATH)
+) {
+	throw new Error(`[auth] Canonical auth store enforcement failed. Expected ${SHARED_AUTH_USERS_PATH}, received ${AUTH_USERS_PATH}.`);
+}
+
+runDemoAutoRealign('startup');
 
 const authBootstrap = loadOrCreateAuthUsers();
 const authUsers = authBootstrap.users;
 const authInvites = loadOrCreateAuthInvites();
 let snapshotSubmissions = loadOrCreateSnapshotSubmissions();
 let billingCatalog = loadOrCreateBillingCatalog();
-
-try {
-	assertProductionAuthInvariants(authBootstrap, authUsers);
-} catch (error) {
-	if (!IS_PRODUCTION && !AUTH_FAIL_OPEN_ON_INVARIANT_ERROR) {
-		throw error;
-	}
-	console.error(`[auth] Startup invariant warning (fail-open enabled): ${error instanceof Error ? error.message : String(error)}`);
-}
 
 if (!AUTH_REQUIRED) {
 	console.warn('[auth] Authentication is disabled (AUTH_REQUIRED=false).');
@@ -360,8 +399,30 @@ function buildSnapshotSummaryFromPayload(payload) {
 	const aerobic = clampPercent(100 - (aerobicGap / 4));
 	const powerSpeed = clampPercent((speedExpression * 0.65) + (repeatability * 0.35));
 	const progression = clampPercent((efficiency * 0.35) + (aerobic * 0.35) + (repeatability * 0.3));
+	const technicalControl = clampPercent((firstBreakPercent * 0.55) + (efficiency * 0.25) + (repeatability * 0.2));
+	const efficiencyCost = efficiency;
+	const robustnessOfEfficiency = stability;
+	const aerobicCapacity = aerobic;
+	const anaerobicCapacity = repeatability;
+	const speedExpressionCapability = speedExpression;
+	const performanceProgression = progression;
+	const coachObservation = clampPercent(parseNumericValue(
+		payload?.coach_observation
+		?? payload?.coachObservation
+		?? payload?.coach_assessment
+		?? payload?.coachAssessment
+		?? payload?.coach
+	));
 
 	const metrics = {
+		technical_control: technicalControl,
+		efficiency_cost: efficiencyCost,
+		robustness_of_efficiency: robustnessOfEfficiency,
+		aerobic_capacity: aerobicCapacity,
+		anaerobic_capacity: anaerobicCapacity,
+		speed_expression: speedExpressionCapability,
+		performance_progression: performanceProgression,
+		coach_observation: coachObservation,
 		speedExpression,
 		repeatability,
 		efficiency,
@@ -393,16 +454,16 @@ function buildSnapshotSummaryFromPayload(payload) {
 		'Coach Assessment',
 	];
 	const capability = [
-		efficiency,
-		efficiency,
-		stability,
-		aerobic,
-		speedExpression,
-		powerSpeed,
-		progression,
-		0,
+		technicalControl,
+		efficiencyCost,
+		robustnessOfEfficiency,
+		aerobicCapacity,
+		anaerobicCapacity,
+		speedExpressionCapability,
+		performanceProgression,
+		coachObservation,
 	];
-	const displayCapabilityRadar = capability.map((value, index) => (index === 7 ? 0 : clampPercent(value)));
+	const displayCapabilityRadar = capability.map((value) => clampPercent(value));
 
 	const interpretationText = [
 		`Speed expression is ${speedExpression}% and repeatability is ${repeatability}% based on your provided reps and test entries.`,
@@ -1399,16 +1460,6 @@ function getNowEpochSeconds() {
 
 function loadOrCreateAuthUsers() {
 	ensureStorageLayout();
-	const envCandidates = normalizeAuthUserRows(parseAuthUsersFromEnv());
-	const canBootstrapFromEnv = AUTH_ALLOW_ENV_BOOTSTRAP_ON_MISSING_STORE && envCandidates.length > 0;
-
-	if (AUTH_FAIL_ON_MISSING_STORE && !fs.existsSync(AUTH_USERS_PATH) && !canBootstrapFromEnv) {
-		throw new Error(`[auth] Required auth store is missing at ${AUTH_USERS_PATH}. Refusing to bootstrap in production.`);
-	}
-
-	if (!fs.existsSync(AUTH_USERS_PATH) && canBootstrapFromEnv) {
-		console.warn('[auth] Auth store missing; bootstrapping from AUTH_USERS_JSON and persisting to file.');
-	}
 
 	const sanitizeDemoUsers = (rows) => {
 		if (AUTH_ENABLE_DEMO_SEED_USERS) return rows;
@@ -1426,6 +1477,7 @@ function loadOrCreateAuthUsers() {
 		&& cleanedFromBackup.length > 0
 		&& cleanedFromFile.length < cleanedFromBackup.length
 	) {
+		// Warn only: restoring by count can resurrect stale/deleted users after legitimate admin changes.
 		console.warn(`[auth] Detected auth user shrink (${cleanedFromFile.length} < ${cleanedFromBackup.length}); keeping primary store and refreshing backup.`);
 	}
 
@@ -1442,60 +1494,21 @@ function loadOrCreateAuthUsers() {
 		if (cleanedFromBackup.length !== fromBackup.length) {
 			writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromBackup);
 		}
-		return { users: cleanedFromBackup, source: 'file' };
+		return { users: cleanedFromBackup, source: 'backup' };
 	}
 
-	const fromEnv = envCandidates;
+	const fromEnv = normalizeAuthUserRows(parseAuthUsersFromEnv());
 	const cleanedFromEnv = sanitizeDemoUsers(fromEnv);
 	if (cleanedFromEnv.length > 0) {
 		writeJsonFile(AUTH_USERS_PATH, cleanedFromEnv);
 		writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromEnv);
-		return { users: cleanedFromEnv, source: 'file' };
+		return { users: cleanedFromEnv, source: 'env' };
 	}
 
 	const fromDefaults = sanitizeDemoUsers(normalizeAuthUserRows(DEFAULT_AUTH_USERS));
 	writeJsonFile(AUTH_USERS_PATH, fromDefaults);
 	writeJsonFile(AUTH_USERS_BACKUP_PATH, fromDefaults);
-	return { users: fromDefaults, source: 'file' };
-}
-
-function assertProductionAuthInvariants(authBootstrapState, authRows) {
-	if (!IS_PRODUCTION || !AUTH_REQUIRED) return;
-
-	if (AUTH_REQUIRE_FILE_SOURCE_IN_PRODUCTION && String(authBootstrapState?.source || '') !== 'file') {
-		throw new Error(`[auth] Startup blocked: expected auth source=file, received ${String(authBootstrapState?.source || 'unknown')}.`);
-	}
-
-	if (!AUTH_ENFORCE_REQUIRED_PRODUCTION_USERS) return;
-
-	const users = Array.isArray(authRows) ? authRows : [];
-	const byUsername = new Map(
-		users.map((row) => [String(row?.username || '').trim().toLowerCase(), row])
-	);
-
-	const missing = AUTH_REQUIRED_PRODUCTION_USERS.filter((username) => !byUsername.has(username));
-	if (missing.length > 0) {
-		throw new Error(`[auth] Startup blocked: missing required production user(s): ${missing.join(', ')}.`);
-	}
-
-	const owner = byUsername.get(AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME) || null;
-	const ownerTenant = owner ? resolveTenantKeyFromUser(owner) : '';
-	if (ownerTenant !== 'global-owner') {
-		throw new Error(`[auth] Startup blocked: ${AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME} must resolve to tenant global-owner.`);
-	}
-
-	const demoCoach = byUsername.get('demo.coach') || null;
-	const demoResearcher = byUsername.get('demo.researcher') || null;
-	if (demoCoach && demoResearcher) {
-		const coachTenant = resolveTenantKeyFromUser(demoCoach);
-		const researcherTenant = resolveTenantKeyFromUser(demoResearcher);
-		if (!coachTenant || !researcherTenant || coachTenant !== researcherTenant) {
-			throw new Error('[auth] Startup blocked: demo coach/researcher tenant mapping is inconsistent.');
-		}
-		if (coachTenant === 'global-owner') {
-			throw new Error('[auth] Startup blocked: demo accounts cannot resolve to global-owner tenant.');
-		}
-	}
+	return { users: fromDefaults, source: 'defaults' };
 }
 
 function toBase64Url(value) {
@@ -2525,8 +2538,17 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	const user = findAuthUserByIdentifier(username);
-	if (!user || !verifyPassword(password, user.passwordHash)) {
+	let user = findAuthUserByIdentifier(username);
+	let loginValid = Boolean(user) && verifyPassword(password, user.passwordHash);
+	if (!loginValid && isDemoAutoRealignTarget(username)) {
+		if (runDemoAutoRealign('login-retry')) {
+			const refreshedAuthUsers = normalizeAuthUserRows(readJsonFile(AUTH_USERS_PATH));
+			authUsers.splice(0, authUsers.length, ...refreshedAuthUsers);
+			user = findAuthUserByIdentifier(username);
+			loginValid = Boolean(user) && verifyPassword(password, user?.passwordHash);
+		}
+	}
+	if (!loginValid || !user) {
 		appendAuthAuditEvent({
 			action: 'login_failed',
 			req,
@@ -3588,6 +3610,89 @@ app.get('/content/placeholders', (req, res) => {
 	});
 });
 
+function clampCapabilityScore(value) {
+	const n = Number(value);
+	if (!Number.isFinite(n)) return 0;
+	return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function normalizeCapabilityRows(rows) {
+	const source = Array.isArray(rows) ? rows : [];
+	return source.map((row, index) => ({
+		id: String(row?.id || `row_${index + 1}`),
+		sourceGroup: String(row?.sourceGroup || 'training').trim().toLowerCase(),
+		sourceKind: String(row?.sourceKind || row?.weightKind || 'training').trim().toLowerCase(),
+		score: clampCapabilityScore(row?.score),
+		axes: Array.isArray(row?.axes) ? row.axes.map((axis) => String(axis || '').trim()).filter(Boolean) : [],
+	}));
+}
+
+function calculateCapabilityAxisAverages(rows, mode) {
+	const keys = [
+		'technical_control',
+		'efficiency_cost',
+		'robustness_of_efficiency',
+		'aerobic_capacity',
+		'anaerobic_capacity',
+		'speed_expression',
+		'performance_progression',
+		'coach_observation',
+	];
+	const scores = Object.fromEntries(keys.map((key) => [key, 0]));
+	const counts = Object.fromEntries(keys.map((key) => [key, 0]));
+
+	for (const key of keys) {
+		const matching = rows.filter((row) => Array.isArray(row.axes) && row.axes.includes(key));
+		const eligible = matching.filter((row) => {
+			if (mode === 'training') return row.sourceGroup === 'training';
+			if (mode === 'validation') return row.sourceGroup === 'validation';
+			return true;
+		});
+		counts[key] = eligible.length;
+		if (!eligible.length) continue;
+		scores[key] = clampCapabilityScore(eligible.reduce((sum, row) => sum + clampCapabilityScore(row.score), 0) / eligible.length);
+	}
+
+	return { scores, counts };
+}
+
+app.post('/content/capability/score', requireAuth, (req, res) => {
+	try {
+		const trainingRows = normalizeCapabilityRows(req.body?.trainingRows);
+		const validationSignalRows = normalizeCapabilityRows(req.body?.validationSignalRows);
+		const capabilityBlendRows = normalizeCapabilityRows(req.body?.capabilityBlendRows);
+		const effectiveCoachRows = normalizeCapabilityRows(req.body?.effectiveCoachRows);
+		const integratedRows = normalizeCapabilityRows(req.body?.integratedRows);
+		const competitionSignalRows = normalizeCapabilityRows(req.body?.competitionSignalRows);
+		const previousValidationSignalRows = normalizeCapabilityRows(req.body?.previousValidationSignalRows);
+		const historyValidationSignalRows = normalizeCapabilityRows(req.body?.historyValidationSignalRows);
+		const previousIntegratedRows = normalizeCapabilityRows(req.body?.previousIntegratedRows);
+		const historyIntegratedRows = normalizeCapabilityRows(req.body?.historyIntegratedRows);
+
+		res.status(200).json({
+			ok: true,
+			scores: {
+				trainingCalc: calculateCapabilityAxisAverages(trainingRows, 'training'),
+				validationCalc: calculateCapabilityAxisAverages(validationSignalRows, 'validation'),
+				competitionCalc: calculateCapabilityAxisAverages(competitionSignalRows, 'validation'),
+				capabilityOnlyCalc: calculateCapabilityAxisAverages(capabilityBlendRows, 'integrated'),
+				coachOnlyCalc: calculateCapabilityAxisAverages(effectiveCoachRows, 'integrated'),
+				integratedCalc: calculateCapabilityAxisAverages(integratedRows, 'integrated'),
+				previousValidationCalc: calculateCapabilityAxisAverages(previousValidationSignalRows, 'validation'),
+				historyValidationCalc: calculateCapabilityAxisAverages(historyValidationSignalRows, 'validation'),
+				previousIntegratedCalc: calculateCapabilityAxisAverages(previousIntegratedRows, 'integrated'),
+				historyIntegratedCalc: calculateCapabilityAxisAverages(historyIntegratedRows, 'integrated'),
+			},
+			generatedAt: new Date().toISOString(),
+		});
+	} catch (error) {
+		res.status(500).json({
+			error: 'Could not compute capability scores.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
+});
+
 app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 	const identifier = String(req.body?.email || '').trim();
 	const password = String(req.body?.password || '');
@@ -4031,6 +4136,114 @@ function normalizeTargetHistoryRows(rows) {
 		.slice(0, 240);
 }
 
+function normalizeSwimmerPathway(value) {
+	return String(value || '').trim().toLowerCase() === 'club' ? 'club' : 'individual';
+}
+
+function normalizeCoachLinkStatus(value) {
+	const normalized = String(value || '').trim().toLowerCase();
+	if (normalized === 'pending' || normalized === 'approved') return normalized;
+	return 'none';
+}
+
+function normalizeIsoDateString(value) {
+	const raw = String(value || '').trim();
+	if (!raw) return '';
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
+	const ms = Date.parse(`${raw}T00:00:00Z`);
+	if (!Number.isFinite(ms)) return '';
+	return raw;
+}
+
+function ageFromDob(dob) {
+	const normalizedDob = normalizeIsoDateString(dob);
+	if (!normalizedDob) return null;
+	const date = new Date(`${normalizedDob}T00:00:00Z`);
+	if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+	const now = new Date();
+	let age = now.getUTCFullYear() - date.getUTCFullYear();
+	const monthDelta = now.getUTCMonth() - date.getUTCMonth();
+	if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < date.getUTCDate())) {
+		age -= 1;
+	}
+	return Number.isFinite(age) ? age : null;
+}
+
+function normalizeEmailField(value) {
+	const email = String(value || '').trim().toLowerCase();
+	if (!email) return '';
+	return AUTH_EMAIL_PATTERN.test(email) ? email : '';
+}
+
+function sanitizeSwimmerSyncPayload(sourcePayload = {}) {
+	const source = sourcePayload && typeof sourcePayload === 'object' ? sourcePayload : {};
+	const pathway = normalizeSwimmerPathway(source?.pathway);
+	const linkStatus = normalizeCoachLinkStatus(source?.coachLinkStatus);
+	const coachConnected = linkStatus === 'approved' ? true : Boolean(source?.coachConnected && linkStatus !== 'none');
+	const dob = normalizeIsoDateString(source?.dob);
+	const parent1 = normalizeEmailField(source?.parent1);
+	const parent2 = normalizeEmailField(source?.parent2);
+	const parent1Consent = source?.parent1Consent === true;
+	const parent2Consent = source?.parent2Consent === true;
+	const issues = [];
+
+	if (linkStatus === 'approved' && pathway !== 'club') {
+		issues.push('Approved coach links require club pathway.');
+	}
+
+	if (coachConnected && linkStatus !== 'approved') {
+		issues.push('Coach connected flag requires approved coach link status.');
+	}
+
+	if (linkStatus === 'pending') {
+		if (!String(source?.coachEmail || '').trim() && !String(source?.coachCode || '').trim()) {
+			issues.push('Pending coach links require coach email or club code.');
+		}
+	}
+
+	if (linkStatus === 'approved') {
+		if (!String(source?.coachReplyAt || '').trim()) {
+			issues.push('Approved coach links require a coach reply date.');
+		}
+		if (!String(source?.coachApprovalAt || '').trim()) {
+			issues.push('Approved coach links require an approval date.');
+		}
+	}
+
+	const age = ageFromDob(dob);
+	if (linkStatus === 'approved' && Number.isFinite(age) && age < 18) {
+		if (!parent1) issues.push('Under-18 approvals require parent email 1.');
+		if (!parent1Consent) issues.push('Under-18 approvals require parent 1 consent.');
+		if (parent2 && !parent2Consent) issues.push('Parent 2 consent is required when parent email 2 is provided.');
+	}
+
+	return {
+		issues,
+		payload: {
+			dob,
+			sex: String(source?.sex || '').trim(),
+			gender: String(source?.gender || source?.sex || '').trim(),
+			mainEvent: String(source?.mainEvent || '').trim(),
+			club: String(source?.club || '').trim(),
+			squad: String(source?.squad || '').trim(),
+			pathway,
+			coachConnected,
+			coachLinkStatus: linkStatus,
+			coachEmail: normalizeEmailField(source?.coachEmail),
+			coachCode: String(source?.coachCode || '').trim(),
+			coachPhase: String(source?.coachPhase || '').trim(),
+			coachRequestAt: normalizeIsoDateString(source?.coachRequestAt),
+			coachReplyAt: normalizeIsoDateString(source?.coachReplyAt),
+			coachApprovalAt: normalizeIsoDateString(source?.coachApprovalAt),
+			shareMode: String(source?.shareMode || '').trim(),
+			parent1,
+			parent2,
+			parent1Consent,
+			parent2Consent,
+		},
+	};
+}
+
 function resolveSwimmerRowIndex(swimmersRows, options = {}) {
 	const rows = Array.isArray(swimmersRows) ? swimmersRows : [];
 	if (rows.length < 1) return -1;
@@ -4197,7 +4410,7 @@ function clampScore(value) {
 function sanitizeAxisIds(axisIds) {
 	const fallback = [
 		'technical_control',
-		'efficiency',
+		'efficiency_cost',
 		'robustness_of_efficiency',
 		'aerobic_capacity',
 		'anaerobic_capacity',
@@ -4218,16 +4431,29 @@ function sanitizeAxisIds(axisIds) {
 
 function axisValueFromSnapshot(axisId, values = {}) {
 	const source = values && typeof values === 'object' ? values : {};
-	if (axisId === 'robustness_of_efficiency') {
+	const normalizedAxisId = String(axisId || '').trim();
+	if (normalizedAxisId === 'technical_control') {
+		return clampScore(source?.technical_control ?? source?.technicalControl ?? source?.first_break_percent ?? source?.firstBreakPercent ?? 0);
+	}
+	if (normalizedAxisId === 'efficiency_cost' || normalizedAxisId === 'efficiency') {
+		return clampScore(source?.efficiency_cost ?? source?.efficiencyCost ?? source?.efficiency ?? 0);
+	}
+	if (normalizedAxisId === 'robustness_of_efficiency') {
 		return clampScore(source?.robustness_of_efficiency ?? source?.technical_stability ?? source?.durability ?? 0);
 	}
-	if (axisId === 'speed_expression') {
+	if (normalizedAxisId === 'aerobic_capacity') {
+		return clampScore(source?.aerobic_capacity ?? source?.aerobicCapacity ?? source?.aerobic ?? 0);
+	}
+	if (normalizedAxisId === 'anaerobic_capacity') {
+		return clampScore(source?.anaerobic_capacity ?? source?.repeatability ?? 0);
+	}
+	if (normalizedAxisId === 'speed_expression') {
 		return clampScore(source?.speed_expression ?? source?.power_speed_expression ?? 0);
 	}
-	if (axisId === 'performance_progression') {
+	if (normalizedAxisId === 'performance_progression') {
 		return clampScore(source?.performance_progression ?? source?.progression ?? source?.performance_control ?? source?.control ?? 0);
 	}
-	if (axisId === 'coach_observation') {
+	if (normalizedAxisId === 'coach_observation') {
 		return clampScore(
 			source?.coach_observation ??
 			source?.coachObservation ??
@@ -4237,7 +4463,7 @@ function axisValueFromSnapshot(axisId, values = {}) {
 			0
 		);
 	}
-	return clampScore(source?.[axisId] ?? 0);
+	return clampScore(source?.[normalizedAxisId] ?? 0);
 }
 
 function capabilityScoreFromValues(valuesByAxis, axisIds) {
@@ -4396,23 +4622,43 @@ app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req
 app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, res) => {
 	const body = req.body && typeof req.body === 'object' ? req.body : {};
 	const swimmerPayload = body?.swimmer && typeof body.swimmer === 'object' ? body.swimmer : {};
-	const snapshots = Array.isArray(body?.snapshots) ? body.snapshots : [];
-	const history = Array.isArray(body?.history) ? body.history : [];
-	const pbRows = Array.isArray(body?.pbRows) ? body.pbRows : [];
+	const snapshots = Array.isArray(body?.snapshots) ? body.snapshots.slice(0, SWIMMER_SYNC_MAX_SNAPSHOTS) : [];
+	const history = Array.isArray(body?.history) ? body.history.slice(0, SWIMMER_SYNC_MAX_HISTORY_DAYS) : [];
+	const pbRows = Array.isArray(body?.pbRows) ? body.pbRows.slice(0, SWIMMER_SYNC_MAX_PB_ROWS) : [];
 	const pbSelectedSnapshotIds = Array.isArray(body?.pbSelectedSnapshotIds)
 		? body.pbSelectedSnapshotIds.map((id) => String(id || '').trim()).filter(Boolean)
 		: [];
 	const targetPreference = normalizeTargetPreference(body?.targetPreference);
 	const targetHistory = normalizeTargetHistoryRows(body?.targetHistory);
-	const customTestSets = Array.isArray(body?.customTestSets) ? body.customTestSets : [];
+	const customTestSets = Array.isArray(body?.customTestSets) ? body.customTestSets.slice(0, SWIMMER_SYNC_MAX_TEST_SETS) : [];
 	const ispProfile = body?.ispProfile && typeof body.ispProfile === 'object' ? body.ispProfile : null;
+	const sanitizedSync = sanitizeSwimmerSyncPayload(swimmerPayload);
+
+	if (sanitizedSync.issues.length) {
+		appendAuthAuditEvent({
+			action: 'swimmer_profile_sync_rejected',
+			req,
+			status: 'blocked',
+			reason: 'validation_failed',
+			details: {
+				issues: sanitizedSync.issues,
+				pathway: sanitizedSync.payload.pathway,
+				coachLinkStatus: sanitizedSync.payload.coachLinkStatus,
+			},
+		});
+		res.status(400).json({
+			error: 'Swimmer profile sync validation failed.',
+			issues: sanitizedSync.issues,
+		});
+		return;
+	}
 
 	const authUsername = String(req.auth?.username || '').trim();
 	const authUser = findAuthUser(authUsername) || {};
 	const authEmail = String(authUser?.email || '').trim();
 	const fullName = String(swimmerPayload?.name || swimmerPayload?.fullName || authUser?.fullName || authUsername).trim();
 	const splitName = splitFullName(fullName);
-	const email = String(swimmerPayload?.email || authEmail).trim();
+	const email = normalizeEmailField(swimmerPayload?.email || authEmail);
 	const swimmerId = String(swimmerPayload?.id || '').trim();
 
 	const storagePaths = resolveStoragePathsForAuth(req.auth);
@@ -4448,6 +4694,8 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 	const existingRow = swimmersRows[swimmerIndex] && typeof swimmersRows[swimmerIndex] === 'object'
 		? swimmersRows[swimmerIndex]
 		: {};
+	const previousCoachLinkStatus = String(existingRow?.coachLinkStatus || 'none').trim() || 'none';
+	const previousCoachConnected = Boolean(existingRow?.coachConnected);
 
 	swimmersRows[swimmerIndex] = {
 		...existingRow,
@@ -4456,18 +4704,26 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 		lastName: splitName.lastName || String(existingRow?.lastName || ''),
 		name: fullName || String(existingRow?.name || ''),
 		email: email || String(existingRow?.email || ''),
-		dob: String(swimmerPayload?.dob || existingRow?.dob || ''),
-		sex: String(swimmerPayload?.sex || existingRow?.sex || ''),
-		gender: String(swimmerPayload?.sex || existingRow?.gender || ''),
-		mainEvent: String(swimmerPayload?.mainEvent || existingRow?.mainEvent || ''),
-		club: String(swimmerPayload?.club || existingRow?.club || ''),
-		squad: String(swimmerPayload?.squad || existingRow?.squad || ''),
-		pathway: String(swimmerPayload?.pathway || existingRow?.pathway || 'individual'),
-		coachConnected: Boolean(swimmerPayload?.coachConnected),
-		coachLinkStatus: String(swimmerPayload?.coachLinkStatus || existingRow?.coachLinkStatus || 'none'),
-		coachEmail: String(swimmerPayload?.coachEmail || existingRow?.coachEmail || ''),
-		coachCode: String(swimmerPayload?.coachCode || existingRow?.coachCode || ''),
-		coachPhase: String(swimmerPayload?.coachPhase || existingRow?.coachPhase || ''),
+		dob: sanitizedSync.payload.dob || String(existingRow?.dob || ''),
+		sex: sanitizedSync.payload.sex || String(existingRow?.sex || ''),
+		gender: sanitizedSync.payload.gender || String(existingRow?.gender || ''),
+		mainEvent: sanitizedSync.payload.mainEvent || String(existingRow?.mainEvent || ''),
+		club: sanitizedSync.payload.club || String(existingRow?.club || ''),
+		squad: sanitizedSync.payload.squad || String(existingRow?.squad || ''),
+		pathway: sanitizedSync.payload.pathway,
+		coachConnected: sanitizedSync.payload.coachConnected,
+		coachLinkStatus: sanitizedSync.payload.coachLinkStatus,
+		coachEmail: sanitizedSync.payload.coachEmail || String(existingRow?.coachEmail || ''),
+		coachCode: sanitizedSync.payload.coachCode || String(existingRow?.coachCode || ''),
+		coachPhase: sanitizedSync.payload.coachPhase || String(existingRow?.coachPhase || ''),
+		coachRequestAt: sanitizedSync.payload.coachRequestAt || String(existingRow?.coachRequestAt || ''),
+		coachReplyAt: sanitizedSync.payload.coachReplyAt || String(existingRow?.coachReplyAt || ''),
+		coachApprovalAt: sanitizedSync.payload.coachApprovalAt || String(existingRow?.coachApprovalAt || ''),
+		shareMode: sanitizedSync.payload.shareMode || String(existingRow?.shareMode || ''),
+		parent1: sanitizedSync.payload.parent1 || String(existingRow?.parent1 || ''),
+		parent2: sanitizedSync.payload.parent2 || String(existingRow?.parent2 || ''),
+		parent1Consent: sanitizedSync.payload.parent1Consent === true,
+		parent2Consent: sanitizedSync.payload.parent2Consent === true,
 		snapshots,
 		history,
 		pbRows,
@@ -4485,11 +4741,37 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 	try {
 		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
 		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		appendAuthAuditEvent({
+			action: 'swimmer_profile_sync_saved',
+			req,
+			status: 'success',
+			target: String(swimmersRows[swimmerIndex]?.id || ''),
+			details: {
+				pathway: sanitizedSync.payload.pathway,
+				coachLinkStatusBefore: previousCoachLinkStatus,
+				coachLinkStatusAfter: sanitizedSync.payload.coachLinkStatus,
+				coachConnectedBefore: previousCoachConnected,
+				coachConnectedAfter: sanitizedSync.payload.coachConnected,
+				snapshotsCount: snapshots.length,
+				historyDaysCount: history.length,
+				pbRowsCount: pbRows.length,
+			},
+		});
 		res.status(200).json({
 			ok: true,
 			swimmerId: String(swimmersRows[swimmerIndex]?.id || ''),
 		});
 	} catch (error) {
+		appendAuthAuditEvent({
+			action: 'swimmer_profile_sync_failed',
+			req,
+			status: 'error',
+			target: String(swimmersRows[swimmerIndex]?.id || ''),
+			reason: 'write_failed',
+			details: {
+				message: error instanceof Error ? error.message : 'Unknown error',
+			},
+		});
 		res.status(500).json({
 			error: 'Could not sync swimmer profile data.',
 			details: error instanceof Error ? error.message : 'Unknown error',
@@ -4524,6 +4806,16 @@ app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (re
 	});
 
 	if (swimmerIndex < 0) {
+		appendAuthAuditEvent({
+			action: 'swimmer_coach_disconnect_failed',
+			req,
+			status: 'error',
+			reason: 'swimmer_not_found',
+			details: {
+				authUsername,
+				swimmerId,
+			},
+		});
 		res.status(404).json({
 			error: 'Could not match swimmer record for disconnect action.',
 		});
@@ -4575,12 +4867,33 @@ app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (re
 	try {
 		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
 		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		appendAuthAuditEvent({
+			action: 'swimmer_coach_disconnected',
+			req,
+			status: 'success',
+			target: String(swimmersRows[swimmerIndex]?.id || ''),
+			details: {
+				disconnectedAt,
+				previousCoachLinkStatus: String(existingRow?.coachLinkStatus || 'none').trim() || 'none',
+				previousCoachConnected: Boolean(existingRow?.coachConnected),
+			},
+		});
 		res.status(200).json({
 			ok: true,
 			swimmerId: String(swimmersRows[swimmerIndex]?.id || ''),
 			disconnectedAt,
 		});
 	} catch (error) {
+		appendAuthAuditEvent({
+			action: 'swimmer_coach_disconnect_failed',
+			req,
+			status: 'error',
+			target: String(swimmersRows[swimmerIndex]?.id || ''),
+			reason: 'write_failed',
+			details: {
+				message: error instanceof Error ? error.message : 'Unknown error',
+			},
+		});
 		res.status(500).json({
 			error: 'Could not disconnect coach connection.',
 			details: error instanceof Error ? error.message : 'Unknown error',
