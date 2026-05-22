@@ -2064,6 +2064,7 @@ function persistAuthUsers() {
 
 function writeJsonFile(filePath, data) {
 	try {
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
 		fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 		return true;
 	} catch {
@@ -2078,6 +2079,8 @@ function ensureStorageLayout(storagePaths = null) {
 	try {
 		fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 		fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+		fs.mkdirSync(path.dirname(AUTH_USERS_PATH), { recursive: true });
+		fs.mkdirSync(path.dirname(AUTH_USERS_BACKUP_PATH), { recursive: true });
 		fs.mkdirSync(snapshotDir, { recursive: true });
 		fs.mkdirSync(DB_TENANTS_DIR, { recursive: true });
 		fs.mkdirSync(BILLING_CATALOG_BACKUP_DIR, { recursive: true });
@@ -2090,6 +2093,7 @@ function ensureStorageLayout(storagePaths = null) {
 
 function writeAtomicJsonFile(filePath, data) {
 	const dir = path.dirname(filePath);
+	fs.mkdirSync(dir, { recursive: true });
 	const tmpPath = path.join(
 		dir,
 		`${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
