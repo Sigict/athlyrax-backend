@@ -56,6 +56,7 @@ const AUTH_ALLOW_COACH_SIGNUP = String(process.env.AUTH_ALLOW_COACH_SIGNUP || 'f
 const AUTH_ALLOW_COACH_INVITES = String(process.env.AUTH_ALLOW_COACH_INVITES || 'true').toLowerCase() === 'true';
 const AUTH_ENABLE_DEMO_SEED_USERS = String(process.env.AUTH_ENABLE_DEMO_SEED_USERS || 'false').toLowerCase() === 'true';
 const AUTH_ENFORCE_CANONICAL_STORE = String(process.env.AUTH_ENFORCE_CANONICAL_STORE || 'true').toLowerCase() !== 'false';
+const BACKEND_ASSET_ID = String(process.env.BACKEND_ASSET_ID || process.env.RENDER_SERVICE_ID || 'athlyrax-backend').trim();
 // Demo auto-realignment is strictly non-production to avoid mutating live auth state.
 const DEMO_AUTO_REALIGN_ENABLED = false;
 const DEMO_AUTO_REALIGN_COOLDOWN_MS = Math.max(5000, Number.parseInt(process.env.DEMO_AUTO_REALIGN_COOLDOWN_MS || '15000', 10) || 15000);
@@ -378,46 +379,373 @@ function boundedRangeText(center, spread = 4) {
 	return `${low}-${high}`;
 }
 
-function buildSnapshotSummaryFromPayload(payload) {
+const CANONICAL_AXIS_KEYS = [
+	'technical_control',
+	'efficiency_cost',
+	'robustness_of_efficiency',
+	'aerobic_capacity',
+	'anaerobic_capacity',
+	'speed_expression',
+	'performance_progression',
+	'coach_observation',
+];
+
+const CANONICAL_DEFAULTS = {
+	trainingBase: 40,
+	structuredBase: 60,
+	competitionBase: 70,
+	frequencyFloor: 0.5,
+	recencyK: 0.035,
+	coachCap: 0.15,
+	signal: {
+		weak: 0.5,
+		strong: 1.0,
+		minWeight: 0.35,
+		maxWeight: 1.4,
+	},
+	sourceWeights: {
+		training: 1,
+		test: 2,
+		competition: 1.5,
+		coach: 0.15,
+	},
+	exposureTargets: {
+		technical_control: 8,
+		efficiency_cost: 10,
+		robustness_of_efficiency: 10,
+		aerobic_capacity: 10,
+		anaerobic_capacity: 8,
+		speed_expression: 6,
+		performance_progression: 8,
+		coach_observation: 3,
+	},
+};
+
+function mergeCanonicalConfig(raw) {
+	const source = raw && typeof raw === 'object' ? raw : {};
+	const signalRaw = source?.signalNoise && typeof source.signalNoise === 'object'
+		? source.signalNoise
+		: (source?.signal && typeof source.signal === 'object' ? source.signal : {});
+	const sourceWeightsRaw = source?.sourceWeights && typeof source.sourceWeights === 'object' ? source.sourceWeights : {};
+	const exposureRaw = source?.exposureTargets && typeof source.exposureTargets === 'object' ? source.exposureTargets : {};
+	const next = {
+		trainingBase: parseNumericValue(source?.trainingBase) || CANONICAL_DEFAULTS.trainingBase,
+		structuredBase: parseNumericValue(source?.structuredBase) || CANONICAL_DEFAULTS.structuredBase,
+		competitionBase: parseNumericValue(source?.competitionBase) || CANONICAL_DEFAULTS.competitionBase,
+		frequencyFloor: Math.max(0.05, Math.min(1, parseNumericValue(source?.frequencyFloor) || CANONICAL_DEFAULTS.frequencyFloor)),
+		recencyK: Math.max(0, Math.min(0.25, parseNumericValue(source?.recencyK) || CANONICAL_DEFAULTS.recencyK)),
+		coachCap: Math.max(0, Math.min(1, parseNumericValue(source?.coachCap) || CANONICAL_DEFAULTS.coachCap)),
+		signal: {
+			weak: Math.max(0.1, Math.min(2, parseNumericValue(signalRaw?.weak) || CANONICAL_DEFAULTS.signal.weak)),
+			strong: Math.max(0.2, Math.min(3, parseNumericValue(signalRaw?.strong) || CANONICAL_DEFAULTS.signal.strong)),
+			minWeight: Math.max(0.1, Math.min(1, parseNumericValue(signalRaw?.minWeight) || CANONICAL_DEFAULTS.signal.minWeight)),
+			maxWeight: Math.max(1, Math.min(2.5, parseNumericValue(signalRaw?.maxWeight) || CANONICAL_DEFAULTS.signal.maxWeight)),
+		},
+		sourceWeights: {
+			training: Math.max(0, parseNumericValue(sourceWeightsRaw?.training) || CANONICAL_DEFAULTS.sourceWeights.training),
+			test: Math.max(0, parseNumericValue(sourceWeightsRaw?.test) || CANONICAL_DEFAULTS.sourceWeights.test),
+			competition: Math.max(0, parseNumericValue(sourceWeightsRaw?.competition) || CANONICAL_DEFAULTS.sourceWeights.competition),
+			coach: Math.max(0, parseNumericValue(sourceWeightsRaw?.coach) || CANONICAL_DEFAULTS.sourceWeights.coach),
+		},
+		exposureTargets: {},
+	};
+	for (const axisKey of CANONICAL_AXIS_KEYS) {
+		next.exposureTargets[axisKey] = Math.max(
+			1,
+			Math.round(parseNumericValue(exposureRaw?.[axisKey]) || CANONICAL_DEFAULTS.exposureTargets[axisKey] || 6)
+		);
+	}
+	if (next.signal.strong <= next.signal.weak) {
+		next.signal.strong = next.signal.weak + 0.01;
+	}
+	return next;
+}
+
+function canonicalSourceKind(row) {
+	const kind = String(row?.sourceKind || row?.weightKind || '').trim().toLowerCase();
+	if (kind === 'test' || kind === 'structured-set') return 'test';
+	if (kind === 'competition') return 'competition';
+	if (kind === 'coach') return 'coach';
+	return 'training';
+}
+
+function canonicalAgeDays(row, referenceTs) {
+	const dateText = String(row?.date || '').trim();
+	if (!dateText) return 0;
+	const rowTs = Date.parse(dateText);
+	if (!Number.isFinite(rowTs)) return 0;
+	const reference = Number.isFinite(referenceTs) ? referenceTs : Date.now();
+	const delta = Math.max(0, reference - rowTs);
+	return delta / (24 * 60 * 60 * 1000);
+}
+
+function canonicalSignalRatio(row) {
+	const reps = Math.max(1, parseNumericValue(row?.reps) || 1) * Math.max(1, parseNumericValue(row?.rounds) || 1);
+	let signal = 0;
+	let noise = 0.6;
+	if (row?.hasResult) signal += 1.0;
+	else noise += 0.5;
+	if (row?.hasSplit) signal += 0.35;
+	else noise += 0.2;
+	if (row?.hasStrokeCount) signal += 0.25;
+	else noise += 0.2;
+	const kind = canonicalSourceKind(row);
+	if (kind === 'competition') signal += 0.35;
+	if (kind === 'test') signal += 0.2;
+	if (kind === 'coach') {
+		signal += 0.15;
+		noise += 0.25;
+	}
+	signal += Math.min(0.4, reps / 20);
+	return signal / Math.max(0.1, noise);
+}
+
+function canonicalSignalFactor(row, config) {
+	const ratio = canonicalSignalRatio(row);
+	const weak = config.signal.weak;
+	const strong = config.signal.strong;
+	if (ratio <= weak) return config.signal.minWeight;
+	if (ratio >= strong) return config.signal.maxWeight;
+	const t = (ratio - weak) / Math.max(0.001, strong - weak);
+	return config.signal.minWeight + ((config.signal.maxWeight - config.signal.minWeight) * t);
+}
+
+function canonicalRowWeight(row, config, referenceTs) {
+	const sourceKind = canonicalSourceKind(row);
+	let sourceWeight = config.sourceWeights[sourceKind] ?? 1;
+	if (sourceKind === 'coach') sourceWeight = Math.min(sourceWeight, config.coachCap);
+	const recencyWeight = Math.exp(-config.recencyK * canonicalAgeDays(row, referenceTs));
+	const signalFactor = canonicalSignalFactor(row, config);
+	return Math.max(0, sourceWeight * recencyWeight * signalFactor);
+}
+
+function emptyAxisScoreMap() {
+	return Object.fromEntries(CANONICAL_AXIS_KEYS.map((axis) => [axis, 0]));
+}
+
+function calculateCanonicalAxisScores(rows, mode, config, referenceTs) {
+	const sourceRows = Array.isArray(rows) ? rows : [];
+	const scores = emptyAxisScoreMap();
+	const counts = emptyAxisScoreMap();
+
+	for (const axisKey of CANONICAL_AXIS_KEYS) {
+		const matching = sourceRows.filter((row) => Array.isArray(row?.axes) && row.axes.includes(axisKey));
+		const eligible = matching.filter((row) => {
+			if (mode === 'training') return String(row?.sourceGroup || '').trim().toLowerCase() === 'training';
+			if (mode === 'validation') return String(row?.sourceGroup || '').trim().toLowerCase() === 'validation';
+			return true;
+		});
+		counts[axisKey] = eligible.length;
+		if (!eligible.length) continue;
+
+		const exposureTarget = Math.max(1, parseNumericValue(config.exposureTargets[axisKey]) || 6);
+		const frequencyFactor = Math.max(config.frequencyFloor, Math.min(1, eligible.length / exposureTarget));
+		let weightedTotal = 0;
+		let weightTotal = 0;
+
+		for (const row of eligible) {
+			const m = clampPercent(row?.score);
+			const w = canonicalRowWeight(row, config, referenceTs) * frequencyFactor;
+			if (w <= 0) continue;
+			weightedTotal += m * w;
+			weightTotal += w;
+		}
+
+		if (weightTotal > 0) {
+			scores[axisKey] = clampPercent(weightedTotal / weightTotal);
+		}
+	}
+
+	return { scores, counts };
+}
+
+function calculateCanonicalIntegratedScores(rows, config, referenceTs) {
+	const sourceRows = Array.isArray(rows) ? rows : [];
+	const grouped = {
+		training: sourceRows.filter((row) => canonicalSourceKind(row) === 'training'),
+		test: sourceRows.filter((row) => canonicalSourceKind(row) === 'test'),
+		competition: sourceRows.filter((row) => canonicalSourceKind(row) === 'competition'),
+		coach: sourceRows.filter((row) => canonicalSourceKind(row) === 'coach'),
+	};
+	const perSource = {
+		training: calculateCanonicalAxisScores(grouped.training, 'integrated', config, referenceTs),
+		test: calculateCanonicalAxisScores(grouped.test, 'integrated', config, referenceTs),
+		competition: calculateCanonicalAxisScores(grouped.competition, 'integrated', config, referenceTs),
+		coach: calculateCanonicalAxisScores(grouped.coach, 'integrated', config, referenceTs),
+	};
+	const scores = emptyAxisScoreMap();
+	const counts = emptyAxisScoreMap();
+
+	for (const axisKey of CANONICAL_AXIS_KEYS) {
+		const components = [
+			{ key: 'training', weight: config.sourceWeights.training },
+			{ key: 'test', weight: config.sourceWeights.test },
+			{ key: 'competition', weight: config.sourceWeights.competition },
+			{ key: 'coach', weight: Math.min(config.sourceWeights.coach, config.coachCap) },
+		].filter((entry) => {
+			const count = parseNumericValue(perSource[entry.key]?.counts?.[axisKey]);
+			return entry.weight > 0 && count > 0;
+		});
+
+		if (!components.length) continue;
+		let weightedTotal = 0;
+		let weightTotal = 0;
+		for (const component of components) {
+			const axisScore = parseNumericValue(perSource[component.key]?.scores?.[axisKey]);
+			weightedTotal += axisScore * component.weight;
+			weightTotal += component.weight;
+			counts[axisKey] = Math.max(counts[axisKey], parseNumericValue(perSource[component.key]?.counts?.[axisKey]));
+		}
+		scores[axisKey] = clampPercent(weightedTotal / Math.max(0.001, weightTotal));
+	}
+
+	return { scores, counts };
+}
+
+function normalizeCapabilityRows(rows) {
+	const source = Array.isArray(rows) ? rows : [];
+	return source.map((row, index) => ({
+		id: String(row?.id || `row_${index + 1}`),
+		date: String(row?.date || '').trim(),
+		sourceGroup: String(row?.sourceGroup || 'training').trim().toLowerCase(),
+		sourceKind: String(row?.sourceKind || row?.weightKind || 'training').trim().toLowerCase(),
+		hasResult: row?.hasResult !== false,
+		hasSplit: row?.hasSplit === true,
+		hasStrokeCount: row?.hasStrokeCount === true,
+		reps: Math.max(1, parseNumericValue(row?.reps) || 1),
+		rounds: Math.max(1, parseNumericValue(row?.rounds) || 1),
+		score: clampPercent(row?.score),
+		axes: Array.isArray(row?.axes) ? row.axes.map((axis) => String(axis || '').trim()).filter(Boolean) : [],
+	}));
+}
+
+function deriveCapabilityRowScore(row, config) {
+	const preset = parseNumericValue(row?.score);
+	if (preset > 0) return clampPercent(preset);
+	const kind = canonicalSourceKind(row);
+	if (kind === 'coach') return clampPercent(row?.score);
+	let score = kind === 'competition'
+		? config.competitionBase
+		: kind === 'test'
+			? config.structuredBase
+			: config.trainingBase;
+	if (row?.hasResult) score += 8;
+	if (row?.hasSplit) score += 6;
+	if (row?.hasStrokeCount) score += 4;
+	if (kind === 'competition') score += 8;
+	return clampPercent(score);
+}
+
+function scoreCapabilityRows(rows, config) {
+	return normalizeCapabilityRows(rows).map((row) => ({
+		...row,
+		score: deriveCapabilityRowScore(row, config),
+	}));
+}
+
+function parseSnapshotPbRows(rawPbs) {
+	const source = Array.isArray(rawPbs) ? rawPbs : [];
+	return source
+		.map((row, index) => {
+			const event = String(row?.event || row?.race || '').trim();
+			const distance = parseNumericValue(row?.distance || event.match(/^(\d+)/)?.[1]);
+			const seconds = parseNumericValue(row?.seconds || row?.time);
+			if (!Number.isFinite(seconds) || seconds <= 0) return null;
+			return {
+				id: `pb_${index + 1}`,
+				event,
+				distance,
+				seconds,
+				time: String(row?.time || '').trim(),
+				stroke: String(row?.stroke || '').trim(),
+			};
+		})
+		.filter(Boolean);
+}
+
+function buildSnapshotEvidenceRows(payload, config) {
 	const tests = payload && typeof payload.tests === 'object' ? payload.tests : {};
 	const maxEffortStrokeCounts = payload && typeof payload.maxEffortStrokeCounts === 'object' ? payload.maxEffortStrokeCounts : {};
 	const repTimes25 = parseRepArray(payload?.repTimes25?.reps);
 	const repTimes50 = parseRepArray(payload?.repTimes50?.reps);
 	const stroke25 = parseRepArray(payload?.strokeCounts25?.reps);
 	const stroke50 = parseRepArray(payload?.strokeCounts50?.reps);
+	const pbRows = parseSnapshotPbRows(payload?.pbs);
+	const date = String(payload?.snapshotDate || payload?.date || new Date().toISOString()).trim();
+	const rows = [];
 
-	const m25 = parseNumericValue(tests?.m25);
-	const m50 = parseNumericValue(tests?.m50);
-	const m100 = parseNumericValue(tests?.m100);
-	const m200 = parseNumericValue(tests?.m200);
-	const m400 = parseNumericValue(tests?.m400);
+	for (const distance of [25, 50, 100, 200, 400]) {
+		const seconds = parseNumericValue(tests?.[`m${distance}`]);
+		if (!Number.isFinite(seconds) || seconds <= 0) continue;
+		const hasStrokeCount = parseNumericValue(maxEffortStrokeCounts?.[`m${distance}`]) > 0;
+		const baseScore = clampPercent(108 - (seconds * (distance <= 50 ? 2.3 : 0.8)) + (distance * 0.08));
+		rows.push({
+			id: `test_${distance}`,
+			date,
+			sourceGroup: 'validation',
+			sourceKind: 'test',
+			hasResult: true,
+			hasSplit: true,
+			hasStrokeCount,
+			reps: 1,
+			rounds: 1,
+			score: clampPercent((baseScore * 0.6) + (config.structuredBase * 0.4)),
+			axes: ['speed_expression', 'anaerobic_capacity', 'performance_progression', 'aerobic_capacity'],
+		});
+	}
 
-	const avgRep25 = repTimes25.length > 0 ? repTimes25.reduce((sum, value) => sum + value, 0) / repTimes25.length : (m25 || 0);
-	const avgRep50 = repTimes50.length > 0 ? repTimes50.reduce((sum, value) => sum + value, 0) / repTimes50.length : (m50 || 0);
-	const firstRep50 = repTimes50.length > 0 ? repTimes50[0] : (m50 || 0);
-	const lastRep50 = repTimes50.length > 0 ? repTimes50[repTimes50.length - 1] : avgRep50;
-	const avgStroke25 = stroke25.length > 0 ? stroke25.reduce((sum, value) => sum + value, 0) / stroke25.length : parseNumericValue(maxEffortStrokeCounts?.m25);
-	const avgStroke50 = stroke50.length > 0 ? stroke50.reduce((sum, value) => sum + value, 0) / stroke50.length : parseNumericValue(maxEffortStrokeCounts?.m50);
+	if (repTimes25.length > 0 || stroke25.length > 0) {
+		const avg = repTimes25.length > 0 ? repTimes25.reduce((sum, value) => sum + value, 0) / repTimes25.length : 0;
+		rows.push({
+			id: 'reps_25',
+			date,
+			sourceGroup: 'validation',
+			sourceKind: 'structured-set',
+			hasResult: repTimes25.length > 0,
+			hasSplit: repTimes25.length > 0,
+			hasStrokeCount: stroke25.length > 0,
+			reps: Math.max(2, repTimes25.length || stroke25.length),
+			rounds: 1,
+			score: clampPercent((config.structuredBase * 0.7) + clampPercent(95 - (avg * 1.8)) * 0.3),
+			axes: ['technical_control', 'efficiency_cost', 'robustness_of_efficiency', 'anaerobic_capacity'],
+		});
+	}
 
-	const speedExpression = clampPercent(125 - (avgRep50 * 3));
-	const repeatabilityPenalty = avgRep50 > 0 ? ((lastRep50 - firstRep50) / avgRep50) * 100 : 0;
-	const repeatability = clampPercent(100 - (repeatabilityPenalty * 4));
-	const efficiency = clampPercent(115 - ((avgStroke50 * 3) + (avgStroke25 * 1.8)));
-	const firstBreak = Math.max(0, Math.round(parseNumericValue(maxEffortStrokeCounts?.m25) || 0));
-	const firstBreakPercent = clampPercent(firstBreak * 2);
-	const stability = clampPercent((repeatability * 0.6) + (efficiency * 0.4));
-	const drift = clampPercent(repeatabilityPenalty * 3);
-	const aerobicGap = (m400 > 0 && m100 > 0) ? Math.max(0, m400 - (m100 * 4)) : 0;
-	const aerobic = clampPercent(100 - (aerobicGap / 4));
-	const powerSpeed = clampPercent((speedExpression * 0.65) + (repeatability * 0.35));
-	const progression = clampPercent((efficiency * 0.35) + (aerobic * 0.35) + (repeatability * 0.3));
-	const technicalControl = clampPercent((firstBreakPercent * 0.55) + (efficiency * 0.25) + (repeatability * 0.2));
-	const efficiencyCost = efficiency;
-	const robustnessOfEfficiency = stability;
-	const aerobicCapacity = aerobic;
-	const anaerobicCapacity = repeatability;
-	const speedExpressionCapability = speedExpression;
-	const performanceProgression = progression;
+	if (repTimes50.length > 0 || stroke50.length > 0) {
+		const avg = repTimes50.length > 0 ? repTimes50.reduce((sum, value) => sum + value, 0) / repTimes50.length : 0;
+		rows.push({
+			id: 'reps_50',
+			date,
+			sourceGroup: 'validation',
+			sourceKind: 'structured-set',
+			hasResult: repTimes50.length > 0,
+			hasSplit: repTimes50.length > 0,
+			hasStrokeCount: stroke50.length > 0,
+			reps: Math.max(2, repTimes50.length || stroke50.length),
+			rounds: 1,
+			score: clampPercent((config.structuredBase * 0.7) + clampPercent(112 - (avg * 1.6)) * 0.3),
+			axes: ['technical_control', 'efficiency_cost', 'robustness_of_efficiency', 'aerobic_capacity'],
+		});
+	}
+
+	for (let index = 0; index < pbRows.length; index += 1) {
+		const pb = pbRows[index];
+		const pbScore = clampPercent((config.competitionBase * 0.7) + clampPercent(115 - (pb.seconds * 0.65)) * 0.3);
+		rows.push({
+			id: `pb_${index + 1}`,
+			date,
+			sourceGroup: 'validation',
+			sourceKind: 'competition',
+			hasResult: true,
+			hasSplit: false,
+			hasStrokeCount: false,
+			reps: 1,
+			rounds: 1,
+			score: pbScore,
+			axes: ['speed_expression', 'performance_progression', 'anaerobic_capacity', 'aerobic_capacity'],
+		});
+	}
+
 	const coachObservation = clampPercent(parseNumericValue(
 		payload?.coach_observation
 		?? payload?.coachObservation
@@ -425,16 +753,57 @@ function buildSnapshotSummaryFromPayload(payload) {
 		?? payload?.coachAssessment
 		?? payload?.coach
 	));
+	if (coachObservation > 0) {
+		rows.push({
+			id: 'coach_observation',
+			date,
+			sourceGroup: 'coach',
+			sourceKind: 'coach',
+			hasResult: true,
+			hasSplit: false,
+			hasStrokeCount: false,
+			reps: 1,
+			rounds: 1,
+			score: coachObservation,
+			axes: ['coach_observation'],
+		});
+	}
+
+	return { rows, tests, repTimes25, repTimes50, stroke25, stroke50, maxEffortStrokeCounts, coachObservation };
+}
+
+function toRadarSeries(scores) {
+	return CANONICAL_AXIS_KEYS.map((axisKey) => clampPercent(scores?.[axisKey]));
+}
+
+function buildSnapshotSummaryFromPayload(payload) {
+	const config = mergeCanonicalConfig(payload?.calibration);
+	const referenceTs = Date.now();
+	const evidence = buildSnapshotEvidenceRows(payload, config);
+	const validationCalc = calculateCanonicalAxisScores(evidence.rows, 'validation', config, referenceTs);
+	const integratedCalc = calculateCanonicalIntegratedScores(evidence.rows, config, referenceTs);
+
+	const integrated = integratedCalc.scores;
+	const speedExpression = clampPercent(integrated.speed_expression);
+	const repeatability = clampPercent(integrated.anaerobic_capacity);
+	const efficiency = clampPercent(integrated.efficiency_cost);
+	const stability = clampPercent(integrated.robustness_of_efficiency);
+	const aerobic = clampPercent(integrated.aerobic_capacity);
+	const progression = clampPercent(integrated.performance_progression);
+	const powerSpeed = clampPercent((speedExpression * 0.65) + (repeatability * 0.35));
+	const firstBreak = Math.max(0, Math.round(parseNumericValue(evidence.maxEffortStrokeCounts?.m25) || 0));
+	const firstBreakPercent = clampPercent(firstBreak * 2);
+	const drift = clampPercent(100 - stability);
 
 	const metrics = {
-		technical_control: technicalControl,
-		efficiency_cost: efficiencyCost,
-		robustness_of_efficiency: robustnessOfEfficiency,
-		aerobic_capacity: aerobicCapacity,
-		anaerobic_capacity: anaerobicCapacity,
-		speed_expression: speedExpressionCapability,
-		performance_progression: performanceProgression,
-		coach_observation: coachObservation,
+		technical_control: clampPercent(integrated.technical_control),
+		efficiency_cost: efficiency,
+		robustness_of_efficiency: stability,
+		aerobic_capacity: aerobic,
+		anaerobic_capacity: repeatability,
+		speed_expression: speedExpression,
+		performance_progression: progression,
+		coach_observation: clampPercent(evidence.coachObservation),
 		speedExpression,
 		repeatability,
 		efficiency,
@@ -465,21 +834,13 @@ function buildSnapshotSummaryFromPayload(payload) {
 		'Performance Progression',
 		'Coach Assessment',
 	];
-	const capability = [
-		technicalControl,
-		efficiencyCost,
-		robustnessOfEfficiency,
-		aerobicCapacity,
-		anaerobicCapacity,
-		speedExpressionCapability,
-		performanceProgression,
-		coachObservation,
-	];
+	const capability = toRadarSeries(integrated);
+	const isp = toRadarSeries(validationCalc.scores);
 	const displayCapabilityRadar = capability.map((value) => clampPercent(value));
 
 	const interpretationText = [
-		`Speed expression is ${speedExpression}% and repeatability is ${repeatability}% based on your provided reps and test entries.`,
-		`Efficiency and stability indicate how consistently stroke count and split pace are being sustained across workload.`,
+		`Integrated capability uses weighted source evidence with exposure, recency, and signal-quality factors.`,
+		`Coach contribution is capped and blended into the final axis profile only when coach evidence exists.`,
 		`Use this baseline snapshot to compare trend direction over future submissions.`,
 	].join(' ');
 
@@ -489,7 +850,7 @@ function buildSnapshotSummaryFromPayload(payload) {
 		interpretationText,
 		radar: {
 			labels,
-			isp: capability,
+			isp,
 			capability,
 			integrated: capability,
 			displayCapability: displayCapabilityRadar,
@@ -545,6 +906,35 @@ function findAuthUserByIdentifier(identifier) {
 		const email = String(row?.email || '').trim().toLowerCase();
 		return username.toLowerCase() === normalizedLower || (email && email === normalizedLower);
 	}) || null;
+}
+
+function resolveLoginUserByIdentifier(identifier) {
+	const normalized = String(identifier || '').trim();
+	if (!normalized) {
+		return { user: null, reason: 'missing_identifier' };
+	}
+	const normalizedLower = normalized.toLowerCase();
+	const usernameMatches = authUsers.filter((row) => String(row?.username || '').trim().toLowerCase() === normalizedLower);
+	if (usernameMatches.length > 1) {
+		return { user: null, reason: 'duplicate_username' };
+	}
+	if (usernameMatches.length === 1) {
+		return { user: usernameMatches[0], reason: '' };
+	}
+
+	if (!normalizedLower.includes('@')) {
+		return { user: null, reason: 'unknown_identifier' };
+	}
+
+	const emailMatches = authUsers.filter((row) => String(row?.email || '').trim().toLowerCase() === normalizedLower);
+	if (emailMatches.length > 1) {
+		return { user: null, reason: 'ambiguous_email' };
+	}
+	if (emailMatches.length === 1) {
+		return { user: emailMatches[0], reason: '' };
+	}
+
+	return { user: null, reason: 'unknown_identifier' };
 }
 
 function getAuthResetMailTransport() {
@@ -2467,6 +2857,7 @@ app.get('/auth/config', (req, res) => {
 		requireInviteCode: !AUTH_ALLOW_COACH_SIGNUP,
 		allowCoachInvites: AUTH_ALLOW_COACH_INVITES,
 		securityMode: IS_PRODUCTION ? 'production' : 'development',
+		assetId: BACKEND_ASSET_ID,
 	});
 });
 
@@ -2712,15 +3103,26 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	let user = findAuthUserByIdentifier(username);
+	let { user, reason: loginResolveReason } = resolveLoginUserByIdentifier(username);
 	let loginValid = Boolean(user) && verifyPassword(password, user.passwordHash);
 	if (!loginValid && isDemoAutoRealignTarget(username)) {
 		if (runDemoAutoRealign('login-retry')) {
 			const refreshedAuthUsers = normalizeAuthUserRows(readJsonFile(AUTH_USERS_PATH));
 			authUsers.splice(0, authUsers.length, ...refreshedAuthUsers);
-			user = findAuthUserByIdentifier(username);
+			({ user, reason: loginResolveReason } = resolveLoginUserByIdentifier(username));
 			loginValid = Boolean(user) && verifyPassword(password, user?.passwordHash);
 		}
+	}
+	if (loginResolveReason === 'ambiguous_email' || loginResolveReason === 'duplicate_username') {
+		appendAuthAuditEvent({
+			action: 'login_blocked',
+			req,
+			status: 'blocked',
+			target: username,
+			reason: loginResolveReason,
+		});
+		res.status(409).json({ error: 'This sign-in identifier matches multiple accounts. Contact support to resolve account identity.' });
+		return;
 	}
 	if (!loginValid || !user) {
 		appendAuthAuditEvent({
@@ -3801,79 +4203,41 @@ app.get('/content/placeholders', (req, res) => {
 	});
 });
 
-function clampCapabilityScore(value) {
-	const n = Number(value);
-	if (!Number.isFinite(n)) return 0;
-	return Math.max(0, Math.min(100, Math.round(n)));
-}
+function buildCapabilityEngineScores(payload) {
+	const config = mergeCanonicalConfig(payload?.calibration);
+	const referenceTsRaw = Date.parse(String(payload?.referenceDate || '').trim());
+	const referenceTs = Number.isFinite(referenceTsRaw) ? referenceTsRaw : Date.now();
 
-function normalizeCapabilityRows(rows) {
-	const source = Array.isArray(rows) ? rows : [];
-	return source.map((row, index) => ({
-		id: String(row?.id || `row_${index + 1}`),
-		sourceGroup: String(row?.sourceGroup || 'training').trim().toLowerCase(),
-		sourceKind: String(row?.sourceKind || row?.weightKind || 'training').trim().toLowerCase(),
-		score: clampCapabilityScore(row?.score),
-		axes: Array.isArray(row?.axes) ? row.axes.map((axis) => String(axis || '').trim()).filter(Boolean) : [],
-	}));
-}
+	const trainingRows = scoreCapabilityRows(payload?.trainingRows, config);
+	const validationSignalRows = scoreCapabilityRows(payload?.validationSignalRows, config);
+	const capabilityBlendRows = scoreCapabilityRows(payload?.capabilityBlendRows, config);
+	const effectiveCoachRows = scoreCapabilityRows(payload?.effectiveCoachRows, config);
+	const integratedRows = scoreCapabilityRows(payload?.integratedRows, config);
+	const competitionSignalRows = scoreCapabilityRows(payload?.competitionSignalRows, config);
+	const previousValidationSignalRows = scoreCapabilityRows(payload?.previousValidationSignalRows, config);
+	const historyValidationSignalRows = scoreCapabilityRows(payload?.historyValidationSignalRows, config);
+	const previousIntegratedRows = scoreCapabilityRows(payload?.previousIntegratedRows, config);
+	const historyIntegratedRows = scoreCapabilityRows(payload?.historyIntegratedRows, config);
 
-function calculateCapabilityAxisAverages(rows, mode) {
-	const keys = [
-		'technical_control',
-		'efficiency_cost',
-		'robustness_of_efficiency',
-		'aerobic_capacity',
-		'anaerobic_capacity',
-		'speed_expression',
-		'performance_progression',
-		'coach_observation',
-	];
-	const scores = Object.fromEntries(keys.map((key) => [key, 0]));
-	const counts = Object.fromEntries(keys.map((key) => [key, 0]));
-
-	for (const key of keys) {
-		const matching = rows.filter((row) => Array.isArray(row.axes) && row.axes.includes(key));
-		const eligible = matching.filter((row) => {
-			if (mode === 'training') return row.sourceGroup === 'training';
-			if (mode === 'validation') return row.sourceGroup === 'validation';
-			return true;
-		});
-		counts[key] = eligible.length;
-		if (!eligible.length) continue;
-		scores[key] = clampCapabilityScore(eligible.reduce((sum, row) => sum + clampCapabilityScore(row.score), 0) / eligible.length);
-	}
-
-	return { scores, counts };
+	return {
+		trainingCalc: calculateCanonicalAxisScores(trainingRows, 'training', config, referenceTs),
+		validationCalc: calculateCanonicalAxisScores(validationSignalRows, 'validation', config, referenceTs),
+		competitionCalc: calculateCanonicalAxisScores(competitionSignalRows, 'validation', config, referenceTs),
+		capabilityOnlyCalc: calculateCanonicalAxisScores(capabilityBlendRows, 'integrated', config, referenceTs),
+		coachOnlyCalc: calculateCanonicalAxisScores(effectiveCoachRows, 'integrated', config, referenceTs),
+		integratedCalc: calculateCanonicalIntegratedScores(integratedRows, config, referenceTs),
+		previousValidationCalc: calculateCanonicalAxisScores(previousValidationSignalRows, 'validation', config, referenceTs),
+		historyValidationCalc: calculateCanonicalAxisScores(historyValidationSignalRows, 'validation', config, referenceTs),
+		previousIntegratedCalc: calculateCanonicalIntegratedScores(previousIntegratedRows, config, referenceTs),
+		historyIntegratedCalc: calculateCanonicalIntegratedScores(historyIntegratedRows, config, referenceTs),
+	};
 }
 
 app.post('/content/capability/score', requireAuth, (req, res) => {
 	try {
-		const trainingRows = normalizeCapabilityRows(req.body?.trainingRows);
-		const validationSignalRows = normalizeCapabilityRows(req.body?.validationSignalRows);
-		const capabilityBlendRows = normalizeCapabilityRows(req.body?.capabilityBlendRows);
-		const effectiveCoachRows = normalizeCapabilityRows(req.body?.effectiveCoachRows);
-		const integratedRows = normalizeCapabilityRows(req.body?.integratedRows);
-		const competitionSignalRows = normalizeCapabilityRows(req.body?.competitionSignalRows);
-		const previousValidationSignalRows = normalizeCapabilityRows(req.body?.previousValidationSignalRows);
-		const historyValidationSignalRows = normalizeCapabilityRows(req.body?.historyValidationSignalRows);
-		const previousIntegratedRows = normalizeCapabilityRows(req.body?.previousIntegratedRows);
-		const historyIntegratedRows = normalizeCapabilityRows(req.body?.historyIntegratedRows);
-
 		res.status(200).json({
 			ok: true,
-			scores: {
-				trainingCalc: calculateCapabilityAxisAverages(trainingRows, 'training'),
-				validationCalc: calculateCapabilityAxisAverages(validationSignalRows, 'validation'),
-				competitionCalc: calculateCapabilityAxisAverages(competitionSignalRows, 'validation'),
-				capabilityOnlyCalc: calculateCapabilityAxisAverages(capabilityBlendRows, 'integrated'),
-				coachOnlyCalc: calculateCapabilityAxisAverages(effectiveCoachRows, 'integrated'),
-				integratedCalc: calculateCapabilityAxisAverages(integratedRows, 'integrated'),
-				previousValidationCalc: calculateCapabilityAxisAverages(previousValidationSignalRows, 'validation'),
-				historyValidationCalc: calculateCapabilityAxisAverages(historyValidationSignalRows, 'validation'),
-				previousIntegratedCalc: calculateCapabilityAxisAverages(previousIntegratedRows, 'integrated'),
-				historyIntegratedCalc: calculateCapabilityAxisAverages(historyIntegratedRows, 'integrated'),
-			},
+			scores: buildCapabilityEngineScores(req.body || {}),
 			generatedAt: new Date().toISOString(),
 		});
 	} catch (error) {
