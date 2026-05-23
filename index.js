@@ -5149,6 +5149,78 @@ app.get('/db/ownership-summary', requireAuth, (req, res) => {
 	}
 });
 
+app.post('/db/ownership-backfill', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, res) => {
+	const storagePaths = resolveStoragePathsForAuth(req.auth);
+	ensureStorageLayout(storagePaths);
+
+	enqueueWrite(async () => {
+		const actorUsername = String(req.auth?.username || '').trim().toLowerCase() || 'unknown-actor';
+		const actorTenantId = String(resolveAuthTenantId(req.auth) || '').trim().toLowerCase();
+		const nowIsoValue = new Date().toISOString();
+		const currentDb = readJsonFile(storagePaths.dbPath);
+		const nextDb = currentDb && typeof currentDb === 'object' ? { ...currentDb } : {};
+
+		let rowsBackfilled = 0;
+		const collections = [];
+
+		for (const key of OWNERSHIP_TRACKED_COLLECTION_KEYS) {
+			const rows = Array.isArray(nextDb?.[key]) ? nextDb[key] : null;
+			if (!rows) continue;
+			let collectionRowsBackfilled = 0;
+			nextDb[key] = rows.map((row) => {
+				if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+				const createdByUserId = String(row?.createdByUserId || '').trim().toLowerCase();
+				if (createdByUserId && createdByUserId !== 'legacy-unattributed') return row;
+				collectionRowsBackfilled += 1;
+				rowsBackfilled += 1;
+				return {
+					...row,
+					createdByUserId: actorUsername,
+					createdAt: String(row?.createdAt || nowIsoValue).trim() || nowIsoValue,
+					updatedByUserId: actorUsername,
+					updatedAt: nowIsoValue,
+					tenantId: String(row?.tenantId || actorTenantId).trim() || actorTenantId,
+					attributionStatus: 'attributed-backfilled',
+				};
+			});
+			if (collectionRowsBackfilled > 0) {
+				collections.push({ key, rowsBackfilled: collectionRowsBackfilled });
+			}
+		}
+
+		nextDb.__meta = {
+			...(nextDb?.__meta && typeof nextDb.__meta === 'object' ? nextDb.__meta : {}),
+			ownershipVersion: 'v1',
+			ownershipUpdatedAt: nowIsoValue,
+			ownershipUpdatedBy: actorUsername,
+			ownershipBackfilledAt: nowIsoValue,
+			ownershipBackfilledBy: actorUsername,
+		};
+
+		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
+
+		return {
+			rowsBackfilled,
+			collections,
+		};
+	})
+		.then((result) => {
+			res.status(200).json({
+				ok: true,
+				tenant: storagePaths.tenantKey,
+				rowsBackfilled: result.rowsBackfilled,
+				collections: result.collections,
+			});
+		})
+		.catch((error) => {
+			res.status(500).json({
+				error: 'Could not backfill ownership metadata.',
+				details: error instanceof Error ? error.message : 'Unknown error',
+			});
+		});
+});
+
 app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, res) => {
 	const body = req.body;
 	if (!body || typeof body !== 'object' || Array.isArray(body)) {
