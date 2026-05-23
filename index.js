@@ -61,6 +61,9 @@ const DEMO_AUTO_REALIGN_ENABLED = false;
 const DEMO_AUTO_REALIGN_COOLDOWN_MS = Math.max(5000, Number.parseInt(process.env.DEMO_AUTO_REALIGN_COOLDOWN_MS || '15000', 10) || 15000);
 const DEMO_AUTO_REALIGN_SCRIPT_PATH = path.resolve(__dirname, '..', 'scripts', 'realign-demo-systems.mjs');
 const DEMO_AUTO_REALIGN_USERNAMES = new Set(['demo.coach', 'demo.swimmer', 'demo.researcher']);
+const CANONICAL_TENANT_BY_USERNAME = Object.freeze({
+	'demo.coach': 'demo-company',
+});
 const AUTH_PREVENT_USER_SHRINK = String(process.env.AUTH_PREVENT_USER_SHRINK || 'true').toLowerCase() !== 'false';
 const AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME = String(process.env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').trim().toLowerCase();
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
@@ -664,6 +667,8 @@ function isPrimarySoftwareOwnerAccount(user) {
 
 function resolveTenantKeyFromUser(user) {
 	const username = slugTenantPart(String(user?.username || '').trim(), 'unknown-user');
+	const canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[String(user?.username || '').trim().toLowerCase()];
+	if (canonicalTenantId) return canonicalTenantId;
 	if (isPrimarySoftwareOwnerAccount(user)) return 'global-owner';
 
 	const explicitTenantId = normalizeTenantId(user?.tenantId);
@@ -1098,10 +1103,11 @@ function buildBillingAccessForUser(user) {
 function buildAuthUserPayload(user) {
 	const normalizedUser = user && typeof user === 'object' ? user : {};
 	const access = buildBillingAccessForUser(normalizedUser);
+	const resolvedTenantId = resolveTenantKeyFromUser(normalizedUser);
 	return {
 		username: String(normalizedUser?.username || '').trim(),
 		role: String(normalizedUser?.role || 'viewer').trim() || 'viewer',
-		tenantId: String(normalizedUser?.tenantId || resolveTenantKeyFromUser(normalizedUser) || '').trim(),
+		tenantId: String(resolvedTenantId || '').trim(),
 		onboardingRequired: Boolean(normalizedUser?.onboardingCompletedAt ? false : true),
 		billing: access.billing,
 		access,
