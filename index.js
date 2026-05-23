@@ -139,7 +139,15 @@ const DEFAULT_BILLING_CATALOG = {
 };
 const DEFAULT_AUTH_USERS = [
 	{ username: 'softwareowner', password: 'softwareowner123', role: 'software-owner', createdVia: 'seed' },
-	{ username: 'demo.coach', password: 'DemoCoach123!', role: 'head-coach', createdVia: 'seed' },
+	{
+		username: 'demo.coach',
+		password: 'DemoCoach123!',
+		role: 'head-coach',
+		tenantId: 'demo-company',
+		swimClub: 'Demo Company',
+		teamName: 'Demo Team',
+		createdVia: 'seed',
+	},
 	...(AUTH_ENABLE_DEMO_SEED_USERS
 		? [
 			{ username: 'headcoach', password: 'headcoach123', role: 'head-coach', createdVia: 'seed' },
