@@ -2354,7 +2354,7 @@ function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 				createdAt: String(row?.createdAt || nowIsoValue).trim() || nowIsoValue,
 				updatedByUserId: actorUsername,
 				updatedAt: nowIsoValue,
-				tenantId: String(row?.tenantId || actorTenantId).trim() || actorTenantId,
+				tenantId: actorTenantId,
 				attributionStatus,
 			};
 		});
@@ -2368,6 +2368,26 @@ function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 	};
 
 	return nextShape;
+}
+
+function collectForeignTenantRowViolations(dbShape, actorTenantId) {
+	const normalizedActorTenantId = normalizeTenantId(actorTenantId);
+	if (!normalizedActorTenantId) return [];
+
+	const violationsByCollection = new Map();
+	for (const key of OWNERSHIP_TRACKED_COLLECTION_KEYS) {
+		const rows = Array.isArray(dbShape?.[key]) ? dbShape[key] : null;
+		if (!rows) continue;
+		for (const row of rows) {
+			if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+			const rowTenantId = normalizeTenantId(row?.tenantId);
+			if (!rowTenantId || rowTenantId === normalizedActorTenantId) continue;
+			const current = violationsByCollection.get(key) || 0;
+			violationsByCollection.set(key, current + 1);
+		}
+	}
+
+	return Array.from(violationsByCollection.entries()).map(([key, rows]) => ({ key, rows }));
 }
 
 function buildOwnershipSummary(dbShape) {
@@ -5179,7 +5199,7 @@ app.post('/db/ownership-backfill', requireAuth, requireWriteRole, requireBilling
 					createdAt: String(row?.createdAt || nowIsoValue).trim() || nowIsoValue,
 					updatedByUserId: actorUsername,
 					updatedAt: nowIsoValue,
-					tenantId: String(row?.tenantId || actorTenantId).trim() || actorTenantId,
+					tenantId: actorTenantId,
 					attributionStatus: 'attributed-backfilled',
 				};
 			});
@@ -5225,6 +5245,26 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 	const body = req.body;
 	if (!body || typeof body !== 'object' || Array.isArray(body)) {
 		res.status(400).json({ error: 'Invalid payload. Expected JSON object.' });
+		return;
+	}
+	const actorTenantId = String(resolveAuthTenantId(req.auth) || '').trim().toLowerCase();
+	const foreignTenantViolations = collectForeignTenantRowViolations(body, actorTenantId);
+	if (foreignTenantViolations.length > 0) {
+		appendAuthAuditEvent({
+			action: 'unauthorized_access_blocked',
+			req,
+			status: 'blocked',
+			reason: 'cross_tenant_payload_rows',
+			details: {
+				tenantId: actorTenantId,
+				violations: foreignTenantViolations,
+			},
+		});
+		res.status(403).json({
+			error: 'Payload contains rows assigned to a different tenant.',
+			tenantId: actorTenantId,
+			violations: foreignTenantViolations,
+		});
 		return;
 	}
 	const storagePaths = resolveStoragePathsForAuth(req.auth);
