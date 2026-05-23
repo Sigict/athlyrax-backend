@@ -2591,6 +2591,23 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
+	const canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[String(user?.username || '').trim().toLowerCase()];
+	if (canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {
+		const userIndex = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === String(user?.username || '').trim().toLowerCase());
+		if (userIndex >= 0) {
+			authUsers[userIndex] = {
+				...authUsers[userIndex],
+				tenantId: canonicalTenantId,
+			};
+			user = authUsers[userIndex];
+			try {
+				persistAuthUsers();
+			} catch {
+				// Keep login flow available even if tenant self-heal persistence fails.
+			}
+		}
+	}
+
 	if (AUTH_AUTO_HEAL_SWIMMER_BINDINGS && String(user?.role || '').trim().toLowerCase() === 'swimmer') {
 		try {
 			ensureSwimmerAccountBindingInStorage(user);
