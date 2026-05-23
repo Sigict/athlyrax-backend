@@ -2281,6 +2281,141 @@ function getDbShapeUpdatedAtMs(dbShape) {
 	return Number.NaN;
 }
 
+const OWNERSHIP_TRACKED_COLLECTION_KEYS = Object.freeze([
+	'coaches',
+	'squads',
+	'swimmers',
+	'venues',
+	'sessionTypes',
+	'timetables',
+	'timetableSlots',
+	'schedule',
+	'trainingSessions',
+	'trainingSessionSets',
+	'templateSets',
+	'templateTests',
+	'trainingSetBlocks',
+	'seasonPlans',
+	'mesoCycles',
+	'microCycles',
+	'attendance',
+	'tests',
+	'fixtures',
+	'seasons',
+	'trainingPlannerWeeks',
+	'conflictResolutions',
+	'changeLog',
+	'auditLog',
+	'notifications',
+	'documents',
+]);
+
+function toRowId(value) {
+	const normalized = String(value || '').trim();
+	return normalized;
+}
+
+function buildExistingDbRowIdIndex(dbShape) {
+	const index = new Map();
+	for (const key of OWNERSHIP_TRACKED_COLLECTION_KEYS) {
+		const rows = Array.isArray(dbShape?.[key]) ? dbShape[key] : [];
+		const rowIds = new Set();
+		for (const row of rows) {
+			const rowId = toRowId(row?.id);
+			if (rowId) rowIds.add(rowId);
+		}
+		index.set(key, rowIds);
+	}
+	return index;
+}
+
+function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
+	const actorUsername = String(auth?.username || '').trim().toLowerCase() || 'unknown-actor';
+	const actorTenantId = String(resolveAuthTenantId(auth) || '').trim().toLowerCase();
+	const nowIsoValue = new Date().toISOString();
+	const nextShape = dbShape && typeof dbShape === 'object' ? { ...dbShape } : {};
+	const existingRowIdIndex = buildExistingDbRowIdIndex(existingDbShape);
+
+	for (const key of OWNERSHIP_TRACKED_COLLECTION_KEYS) {
+		const rows = Array.isArray(nextShape?.[key]) ? nextShape[key] : null;
+		if (!rows) continue;
+		const existingIds = existingRowIdIndex.get(key) || new Set();
+		nextShape[key] = rows.map((row) => {
+			if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+			const rowId = toRowId(row?.id);
+			const isExistingRow = Boolean(rowId && existingIds.has(rowId));
+			const existingCreatedBy = String(row?.createdByUserId || '').trim().toLowerCase();
+			const createdByUserId = existingCreatedBy
+				|| (isExistingRow ? 'legacy-unattributed' : actorUsername);
+			const attributionStatus = createdByUserId === 'legacy-unattributed' ? 'unattributed-legacy' : 'attributed';
+			return {
+				...row,
+				createdByUserId,
+				createdAt: String(row?.createdAt || nowIsoValue).trim() || nowIsoValue,
+				updatedByUserId: actorUsername,
+				updatedAt: nowIsoValue,
+				tenantId: String(row?.tenantId || actorTenantId).trim() || actorTenantId,
+				attributionStatus,
+			};
+		});
+	}
+
+	nextShape.__meta = {
+		...(nextShape?.__meta && typeof nextShape.__meta === 'object' ? nextShape.__meta : {}),
+		ownershipVersion: 'v1',
+		ownershipUpdatedAt: nowIsoValue,
+		ownershipUpdatedBy: actorUsername,
+	};
+
+	return nextShape;
+}
+
+function buildOwnershipSummary(dbShape) {
+	const collections = [];
+	const ownerTotals = new Map();
+	let totalRows = 0;
+	let attributedRows = 0;
+	let unattributedRows = 0;
+
+	for (const key of OWNERSHIP_TRACKED_COLLECTION_KEYS) {
+		const rows = Array.isArray(dbShape?.[key]) ? dbShape[key] : [];
+		let collectionAttributed = 0;
+		let collectionUnattributed = 0;
+		for (const row of rows) {
+			if (!row || typeof row !== 'object') continue;
+			const owner = String(row?.createdByUserId || '').trim().toLowerCase();
+			if (!owner || owner === 'legacy-unattributed') {
+				collectionUnattributed += 1;
+				continue;
+			}
+			collectionAttributed += 1;
+			ownerTotals.set(owner, Number(ownerTotals.get(owner) || 0) + 1);
+		}
+		const collectionTotal = rows.length;
+		totalRows += collectionTotal;
+		attributedRows += collectionAttributed;
+		unattributedRows += collectionUnattributed;
+		collections.push({
+			key,
+			totalRows: collectionTotal,
+			attributedRows: collectionAttributed,
+			unattributedRows: collectionUnattributed,
+		});
+	}
+
+	const ownerBreakdown = Array.from(ownerTotals.entries())
+		.map(([username, rows]) => ({ username, rows }))
+		.sort((a, b) => b.rows - a.rows || a.username.localeCompare(b.username));
+
+	return {
+		totalRows,
+		attributedRows,
+		unattributedRows,
+		collections,
+		ownerBreakdown,
+	};
+}
+
 app.use((req, res, next) => {
 	const requestOrigin = String(req.headers?.origin || '').trim();
 
@@ -4995,6 +5130,25 @@ app.get('/db', requireAuth, (req, res) => {
 	});
 });
 
+app.get('/db/ownership-summary', requireAuth, (req, res) => {
+	try {
+		const storagePaths = resolveStoragePathsForAuth(req.auth);
+		ensureStorageLayout(storagePaths);
+		const dbShape = readJsonFile(storagePaths.dbPath);
+		const summary = buildOwnershipSummary(dbShape);
+		res.status(200).json({
+			ok: true,
+			tenant: storagePaths.tenantKey,
+			summary,
+		});
+	} catch (error) {
+		res.status(500).json({
+			error: 'Could not build ownership summary.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
+});
+
 app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, res) => {
 	const body = req.body;
 	if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -5042,12 +5196,13 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 			...body,
 			trainingPlannerWeeks: merged.nextWeeks,
 		};
+			const ownershipStampedBody = applyOwnershipMetadataToDbShape(safeBody, currentDb, req.auth);
 
-		writeAtomicJsonFile(storagePaths.dbPath, safeBody);
+			writeAtomicJsonFile(storagePaths.dbPath, ownershipStampedBody);
 
 		const nextBackup = {
 			savedAt: new Date().toISOString(),
-			rows: extractPlannerTargetRows(safeBody),
+				rows: extractPlannerTargetRows(ownershipStampedBody),
 		};
 		writeAtomicJsonFile(storagePaths.backupPath, nextBackup);
 
