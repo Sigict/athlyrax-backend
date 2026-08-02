@@ -186,7 +186,16 @@ function removeExistingRepositoryStorage(repositoryStoragePath, bundledPath, fsM
     throw new Error(`Repository storage path is not a directory: ${repositoryStoragePath}`);
   }
   if (!fsModule.existsSync(bundledPath)) {
-    fsModule.renameSync(repositoryStoragePath, bundledPath);
+    try {
+      fsModule.renameSync(repositoryStoragePath, bundledPath);
+    } catch (error) {
+      if (error && error.code === 'EXDEV') {
+        // Cross-device rename can happen on Render when deploy storage and runtime FS differ.
+        fsModule.rmSync(repositoryStoragePath, { recursive: true, force: true });
+      } else {
+        throw error;
+      }
+    }
     return;
   }
   fsModule.rmSync(repositoryStoragePath, { recursive: true, force: true });
