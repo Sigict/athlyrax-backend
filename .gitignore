@@ -1,4 +1,8 @@
 node_modules
 storage/db-snapshots/*.json
+storage/tenants/*/db-snapshots/*.json
 storage/auth-audit/backups/*.jsonl
-
+storage/billing-catalog-backups/*.json
+storage/safety-backups/
+.athlyrax-safety-backups/
+.athlyrax-bundled-storage/
