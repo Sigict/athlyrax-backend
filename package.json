@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node index.js",
+    "start": "node scripts/safe-start.mjs",
+    "start:unsafe": "node index.js",
+    "check:storage-safety": "node scripts/check-storage-safety.mjs",
+    "test:storage-safety": "node --test tests/storage-safety.test.mjs",
+    "stage:storage-restore": "node scripts/stage-storage-restore.mjs",
+    "approve:storage-layout": "node scripts/approve-storage-layout.mjs",
     "smoke:prod": "node scripts/prod-isolation-smoke.mjs"
   },
   "dependencies": {
