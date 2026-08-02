@@ -16,9 +16,18 @@ function isInside(candidate, parent) {
 }
 
 function isRenderDeployPath(value) {
-  const resolved = path.resolve(value);
-  return resolved === '/opt/render/project'
-    || resolved.startsWith('/opt/render/project/');
+  const raw = clean(value);
+  if (!raw) return false;
+
+  const normalizedRaw = path.posix.normalize(raw.replace(/\\/g, '/'));
+  if (normalizedRaw === '/opt/render/project' || normalizedRaw.startsWith('/opt/render/project/')) {
+    return true;
+  }
+
+  const resolved = path.resolve(raw);
+  const normalizedResolved = path.posix.normalize(resolved.replace(/\\/g, '/'));
+  return normalizedResolved === '/opt/render/project'
+    || normalizedResolved.startsWith('/opt/render/project/');
 }
 
 function resolveConfiguredPath(raw, fallback) {
@@ -29,8 +38,10 @@ export function resolveStorageConfiguration(env = process.env, repoRoot = proces
   const production = clean(env.NODE_ENV).toLowerCase() === 'production';
   const storageFallback = path.join(repoRoot, 'storage');
   const backupFallback = path.join(repoRoot, '.athlyrax-safety-backups');
-  const storageRoot = resolveConfiguredPath(env.ATHLYRAX_STORAGE_ROOT, storageFallback);
-  const backupRoot = resolveConfiguredPath(env.ATHLYRAX_SAFETY_BACKUP_ROOT, backupFallback);
+  const configuredStorageRoot = clean(env.ATHLYRAX_STORAGE_ROOT);
+  const configuredBackupRoot = clean(env.ATHLYRAX_SAFETY_BACKUP_ROOT);
+  const storageRoot = resolveConfiguredPath(configuredStorageRoot, storageFallback);
+  const backupRoot = resolveConfiguredPath(configuredBackupRoot, backupFallback);
   const failures = [];
   const warnings = [];
 
@@ -40,10 +51,10 @@ export function resolveStorageConfiguration(env = process.env, repoRoot = proces
   if (production && !clean(env.ATHLYRAX_SAFETY_BACKUP_ROOT)) {
     failures.push('ATHLYRAX_SAFETY_BACKUP_ROOT is required in production.');
   }
-  if (production && isRenderDeployPath(storageRoot)) {
+  if (production && (isRenderDeployPath(configuredStorageRoot) || isRenderDeployPath(storageRoot))) {
     failures.push('Primary storage cannot be inside the Render deploy filesystem.');
   }
-  if (production && isRenderDeployPath(backupRoot)) {
+  if (production && (isRenderDeployPath(configuredBackupRoot) || isRenderDeployPath(backupRoot))) {
     failures.push('Safety backups cannot be inside the Render deploy filesystem.');
   }
   if (storageRoot === backupRoot) {

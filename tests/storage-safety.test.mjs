@@ -29,6 +29,42 @@ test('Render deploy filesystem is rejected for production storage', () => {
   assert.match(configuration.failures.join('\n'), /Render deploy filesystem/);
 });
 
+test('exact Render deploy root is rejected', () => {
+  const configuration = resolveStorageConfiguration({
+    NODE_ENV: 'production',
+    ATHLYRAX_STORAGE_ROOT: '/opt/render/project',
+    ATHLYRAX_SAFETY_BACKUP_ROOT: '/var/data/backups',
+  }, '/tmp/repo');
+  assert.match(configuration.failures.join('\n'), /Render deploy filesystem/);
+});
+
+test('Render deploy root with trailing slash is rejected', () => {
+  const configuration = resolveStorageConfiguration({
+    NODE_ENV: 'production',
+    ATHLYRAX_STORAGE_ROOT: '/opt/render/project/',
+    ATHLYRAX_SAFETY_BACKUP_ROOT: '/var/data/backups',
+  }, '/tmp/repo');
+  assert.match(configuration.failures.join('\n'), /Render deploy filesystem/);
+});
+
+test('allowed non-Render path is accepted', () => {
+  const configuration = resolveStorageConfiguration({
+    NODE_ENV: 'production',
+    ATHLYRAX_STORAGE_ROOT: '/var/data/athlyrax',
+    ATHLYRAX_SAFETY_BACKUP_ROOT: '/var/data/athlyrax-safety',
+  }, '/tmp/repo');
+  assert.doesNotMatch(configuration.failures.join('\n'), /Render deploy filesystem/);
+});
+
+test('misleading sibling path is not treated as Render deploy root', () => {
+  const configuration = resolveStorageConfiguration({
+    NODE_ENV: 'production',
+    ATHLYRAX_STORAGE_ROOT: '/opt/render/project-other',
+    ATHLYRAX_SAFETY_BACKUP_ROOT: '/var/data/backups',
+  }, '/tmp/repo');
+  assert.doesNotMatch(configuration.failures.join('\n'), /Render deploy filesystem/);
+});
+
 test('nested primary and backup roots are rejected', () => {
   const root = tempDir('athlyrax-nested-');
   const configuration = resolveStorageConfiguration({
