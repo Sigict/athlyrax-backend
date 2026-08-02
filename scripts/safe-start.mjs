@@ -9,8 +9,11 @@ import { installDbRevisionPutResponse } from './db-revision-put-response.mjs';
 import { runStorageSafetyCheck } from './storage-safety-lib.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
-const repoRoot = path.resolve(path.dirname(__filename), '..');
-const entryPath = path.join(repoRoot, 'index.js');
+const sourceRoot = path.resolve(path.dirname(__filename), '..');
+const repoRoot = path.basename(sourceRoot).toLowerCase() === 'src'
+  ? path.resolve(sourceRoot, '..')
+  : sourceRoot;
+const entryPath = path.join(sourceRoot, 'index.js');
 
 runStorageSafetyCheck({
   repoRoot,

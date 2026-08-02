@@ -120,9 +120,21 @@ export function ensureStorageDirectories(configuration, fsModule = fs) {
 }
 
 export function applyCanonicalAuthPaths(configuration, env = process.env) {
-  env.AUTH_USERS_PATH = clean(env.AUTH_USERS_PATH) || configuration.authUsersPath;
+  const repositoryAuthUsersPath = path.join(
+    configuration.repositoryStoragePath,
+    'auth',
+    'auth-users.json',
+  );
+  const repositoryAuthUsersBackupPath = path.join(
+    configuration.repositoryStoragePath,
+    'auth',
+    'auth-users.backup.json',
+  );
+
+  // Keep runtime auth paths aligned with the repository storage mount point.
+  env.AUTH_USERS_PATH = clean(env.AUTH_USERS_PATH) || repositoryAuthUsersPath;
   env.AUTH_USERS_BACKUP_PATH = clean(env.AUTH_USERS_BACKUP_PATH)
-    || configuration.authUsersBackupPath;
+    || repositoryAuthUsersBackupPath;
   return {
     authUsersPath: path.resolve(env.AUTH_USERS_PATH),
     authUsersBackupPath: path.resolve(env.AUTH_USERS_BACKUP_PATH),
@@ -142,7 +154,7 @@ export function validateRequiredStorageFiles(configuration, env = process.env, f
   const failures = [];
   const required = [
     path.join(configuration.storageRoot, 'db.json'),
-    path.resolve(clean(env.AUTH_USERS_PATH) || configuration.authUsersPath),
+    configuration.authUsersPath,
   ];
   const tenants = clean(env.ATHLYRAX_REQUIRED_TENANTS)
     .split(',')

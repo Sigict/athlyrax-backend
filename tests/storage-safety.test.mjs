@@ -102,7 +102,7 @@ test('production check succeeds only with marker, auth store, global DB and requ
     logger: { info() {}, warn() {} },
   });
   assert.equal(result.configuration.storageRoot, path.resolve(storageRoot));
-  assert.equal(env.AUTH_USERS_PATH, path.join(storageRoot, 'auth', 'auth-users.json'));
+  assert.equal(env.AUTH_USERS_PATH, path.join(path.resolve(repoRoot), 'storage', 'auth', 'auth-users.json'));
 });
 
 test('missing required tenant DB fails closed', () => {
