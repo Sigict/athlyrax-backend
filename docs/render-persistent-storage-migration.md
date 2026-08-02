@@ -45,20 +45,53 @@ Copy these without displaying their contents:
 
 The raw authentication files are essential because the API export intentionally excludes password hashes.
 
+## Critical preservation gate
+
+Do **not** upgrade, restart, redeploy, attach a disk, change the start command, or change environment variables merely to obtain shell access. Any action that replaces or restarts the current instance may destroy its ephemeral filesystem before the raw files are copied.
+
+Before any Render change, obtain written confirmation from Render Support of one of these supported options:
+
+1. temporary read-only access to the currently running instance without restarting or replacing it;
+2. a provider-created archive or snapshot of the current ephemeral filesystem; or
+3. another documented procedure that preserves the existing instance filesystem until the archive has been downloaded and verified.
+
+The support request must explicitly state that Render must not restart, redeploy, upgrade, replace, or modify the service without separate approval.
+
 ## Required safe sequence
 
 1. Keep the existing API backup unchanged and copy it to a second independent location.
-2. Upgrade the service only to obtain shell access. Do not change the start command yet.
-3. From the still-running old deployment, create and download a complete archive of the filesystem paths listed above.
-4. Verify the archive checksum outside Render.
-5. Attach the persistent disk.
-6. Restore the archived files into the chosen primary storage root.
-7. Use the API exports only to cross-check or replace the global and tenant `db.json` files when their checksums and record counts have been reviewed.
-8. Create the storage-ready marker with `approve-storage-layout.mjs`.
-9. Run `npm run check:storage-safety`.
-10. Only after the check returns `ATHLYRAX_STORAGE_SAFETY_OK`, merge this PR, configure the environment variables, change the Render start command and deploy.
-11. Verify both tenants, authentication, Planner targets, snapshots, billing and audit history.
-12. Perform one controlled restart and confirm the same checksums and record counts remain.
+2. Contact Render Support and obtain written confirmation of a preservation method that does not restart or replace the current instance before the archive exists.
+3. Do not perform any Render change until that confirmation is received and reviewed.
+4. Using the confirmed preservation method, create and download a complete archive of the filesystem paths listed above.
+5. Verify the archive checksum outside Render and keep a second encrypted copy.
+6. Only after the raw archive is safely preserved, select the paid service and persistent-disk migration procedure.
+7. Attach the persistent disk and restore the archived files into the chosen primary storage root.
+8. Use the API exports only to cross-check or replace the global and tenant `db.json` files when their checksums and record counts have been reviewed.
+9. Create the storage-ready marker with `approve-storage-layout.mjs`.
+10. Run `npm run check:storage-safety`.
+11. Only after the check returns `ATHLYRAX_STORAGE_SAFETY_OK`, merge this PR, configure the environment variables, change the Render start command and deploy.
+12. Verify both tenants, authentication, Planner targets, snapshots, billing and audit history.
+13. Perform one controlled restart and confirm the same checksums and record counts remain.
+
+## Render Support request
+
+Use this wording, replacing nothing except contact details when required:
+
+```text
+I have a Free web service using an ephemeral filesystem.
+
+Service ID: srv-d7rp137lk1mc73daq49g
+
+The currently running instance contains production files that must be preserved before any restart, redeployment, upgrade, replacement or persistent-disk change.
+
+Please confirm whether Render can provide one of the following without restarting or replacing the currently running instance:
+
+1. temporary read-only shell or filesystem access;
+2. a provider-created snapshot/archive of the current ephemeral filesystem; or
+3. another supported procedure that preserves the current instance filesystem until I can download and verify a complete archive.
+
+Do not restart, redeploy, upgrade, replace, attach a disk to, or otherwise modify the service without my separate explicit approval.
+```
 
 ## Suggested production configuration
 
