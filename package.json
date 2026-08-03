@@ -8,9 +8,12 @@
     "start:unsafe": "node index.js",
     "check:storage-safety": "node scripts/check-storage-safety.mjs",
     "test:storage-safety": "node --test tests/storage-safety.test.mjs",
+    "test:db-write-validation": "node --test tests/db-write-validation.test.mjs",
+    "test": "node --test tests/storage-safety.test.mjs tests/db-write-validation.test.mjs",
     "stage:storage-restore": "node scripts/stage-storage-restore.mjs",
     "approve:storage-layout": "node scripts/approve-storage-layout.mjs",
-    "smoke:prod": "node scripts/prod-isolation-smoke.mjs"
+    "smoke:prod": "node scripts/prod-isolation-smoke.mjs",
+    "audit:undated-sessions": "node scripts/undated-session-cleanup.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
