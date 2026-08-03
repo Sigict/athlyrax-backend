@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import nodemailer from 'nodemailer';
 import Stripe from 'stripe';
+import { validateDbWritePayload } from './scripts/db-write-validation.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -5635,6 +5636,28 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 	ensureStorageLayout(storagePaths);
 
 	const existingDb = readJsonFile(storagePaths.dbPath);
+	const writeValidation = validateDbWritePayload({
+		existingDb,
+		incomingDb: body,
+	});
+	if (!writeValidation.ok) {
+		appendAuthAuditEvent({
+			action: 'db_write_validation_rejected',
+			req,
+			status: 'blocked',
+			reason: 'invalid_training_session_payload',
+			details: {
+				invalidUndatedSessionIds: writeValidation.invalidUndatedSessionIds,
+				invalidTrainingSessionSetIds: writeValidation.invalidTrainingSessionSetIds,
+			},
+		});
+		res.status(400).json({
+			error: 'Payload contains invalid training sessions or session-set links.',
+			invalidUndatedSessionIds: writeValidation.invalidUndatedSessionIds,
+			invalidTrainingSessionSetIds: writeValidation.invalidTrainingSessionSetIds,
+		});
+		return;
+	}
 	if (hasUnauthorizedDocumentsChange(existingDb, body, req.auth)) {
 		appendAuthAuditEvent({
 			action: 'unauthorized_access_blocked',
