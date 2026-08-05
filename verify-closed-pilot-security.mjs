@@ -1,4 +1,5 @@
 import fs from 'fs';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -30,21 +31,60 @@ function checkWritableDir(dirPath) {
   }
 }
 
-function hasSeededUsers(storageRootPath) {
+const REJECTED_DEMO_USERNAMES = new Set(['headcoach', 'assistant', 'viewer']);
+const KNOWN_DEFAULT_PASSWORDS = new Map([
+  ['softwareowner', 'softwareowner123'],
+  ['demo.coach', 'DemoCoach123!'],
+  ['headcoach', 'headcoach123'],
+  ['assistant', 'assistant123'],
+  ['viewer', 'viewer123'],
+]);
+
+function verifyPassword(plainPassword, storedHash) {
+  const value = String(storedHash || '').trim();
+  if (!value.startsWith('scrypt$')) return false;
+  const parts = value.split('$');
+  if (parts.length !== 3) return false;
+  try {
+    const salt = Buffer.from(parts[1], 'base64');
+    const expected = Buffer.from(parts[2], 'base64');
+    const candidate = crypto.scryptSync(String(plainPassword || ''), salt, expected.length);
+    if (candidate.length !== expected.length) return false;
+    return crypto.timingSafeEqual(candidate, expected);
+  } catch {
+    return false;
+  }
+}
+
+function loadAuthUsers(storageRootPath) {
   try {
     const authUsersPath = path.join(storageRootPath, 'auth-users.json');
-    if (!fs.existsSync(authUsersPath)) return false;
+    if (!fs.existsSync(authUsersPath)) return [];
     const rows = JSON.parse(fs.readFileSync(authUsersPath, 'utf8'));
-    if (!Array.isArray(rows)) return false;
-    const forbiddenUsernames = new Set(['softwareowner', 'headcoach', 'assistant', 'viewer']);
-    return rows.some((row) => {
-      const username = String(row?.username || '').trim().toLowerCase();
-      const createdVia = String(row?.createdVia || '').trim().toLowerCase();
-      return forbiddenUsernames.has(username) || createdVia === 'seed';
-    });
+    if (Array.isArray(rows)) return rows;
+    if (rows && Array.isArray(rows.users)) return rows.users;
+    return [];
   } catch {
-    return true;
+    return null;
   }
+}
+
+function getDefaultCredentialFailures(users) {
+  const failures = [];
+  for (const row of users) {
+    const username = String(row?.username || '').trim().toLowerCase();
+    if (!username) continue;
+    if (REJECTED_DEMO_USERNAMES.has(username)) {
+      failures.push(`Demo/default account is present: ${username}`);
+      continue;
+    }
+    const defaultPassword = KNOWN_DEFAULT_PASSWORDS.get(username);
+    if (!defaultPassword) continue;
+    if (verifyPassword(defaultPassword, row?.passwordHash)) {
+      failures.push(`Known default password is still active for account: ${username}`);
+    }
+  }
+  return failures;
 }
 
 const failures = [];
@@ -74,7 +114,12 @@ if (!resolvedBackupRoot || !checkWritableDir(resolvedBackupRoot)) failures.push(
 if (resolvedBackupRoot && resolvedStorageRoot && resolvedBackupRoot === resolvedStorageRoot) {
   failures.push('Backup root must be separate from storage root');
 }
-if (hasSeededUsers(resolvedStorageRoot)) failures.push('Seeded/default users are present');
+const authUsers = loadAuthUsers(resolvedStorageRoot);
+if (authUsers === null) {
+  failures.push('Auth users file could not be parsed');
+} else {
+  failures.push(...getDefaultCredentialFailures(authUsers));
+}
 
 if (failures.length > 0) {
   console.error('ATHLYRAX_CLOSED_PILOT_SECURITY_FAIL');
