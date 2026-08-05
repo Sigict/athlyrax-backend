@@ -6,6 +6,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import nodemailer from 'nodemailer';
+import helmet from 'helmet';
 import Stripe from 'stripe';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,13 +14,18 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || '3001', 10) || 3001;
-const DB_PATH = path.join(__dirname, 'storage', 'db.json');
-const TARGET_BACKUP_PATH = path.join(__dirname, 'storage', 'trainingPlannerTargets.backup.json');
-const DB_SNAPSHOT_DIR = path.join(__dirname, 'storage', 'db-snapshots');
-const DB_TENANTS_DIR = path.join(__dirname, 'storage', 'tenants');
-const BILLING_CATALOG_PATH = path.join(__dirname, 'storage', 'billing-catalog.json');
-const BILLING_CATALOG_BACKUP_DIR = path.join(__dirname, 'storage', 'billing-catalog-backups');
-const SHARED_AUTH_USERS_PATH = path.resolve(__dirname, '..', 'storage', 'auth', 'auth-users.json');
+const STORAGE_ROOT = (() => {
+	const overridePath = String(process.env.ATHLYRAX_STORAGE_ROOT || '').trim();
+	if (overridePath) return path.resolve(overridePath);
+	return path.join(__dirname, 'storage');
+})();
+const DB_PATH = path.join(STORAGE_ROOT, 'db.json');
+const TARGET_BACKUP_PATH = path.join(STORAGE_ROOT, 'trainingPlannerTargets.backup.json');
+const DB_SNAPSHOT_DIR = path.join(STORAGE_ROOT, 'db-snapshots');
+const DB_TENANTS_DIR = path.join(STORAGE_ROOT, 'tenants', 'clubs');
+const BILLING_CATALOG_PATH = path.join(STORAGE_ROOT, 'billing-catalog.json');
+const BILLING_CATALOG_BACKUP_DIR = path.join(STORAGE_ROOT, 'billing-catalog-backups');
+const SHARED_AUTH_USERS_PATH = path.join(STORAGE_ROOT, 'auth-users.json');
 const AUTH_USERS_PATH = (() => {
 	const overridePath = String(process.env.AUTH_USERS_PATH || '').trim();
 	if (overridePath) return path.resolve(overridePath);
@@ -30,9 +36,9 @@ const AUTH_USERS_BACKUP_PATH = (() => {
 	if (overridePath) return path.resolve(overridePath);
 	return path.join(path.dirname(AUTH_USERS_PATH), 'auth-users.backup.json');
 })();
-const AUTH_INVITES_PATH = path.join(__dirname, 'storage', 'auth-invites.json');
-const SNAPSHOT_SUBMISSIONS_PATH = path.join(__dirname, 'storage', 'snapshot-submissions.json');
-const AUTH_AUDIT_DIR = path.join(__dirname, 'storage', 'auth-audit');
+const AUTH_INVITES_PATH = path.join(STORAGE_ROOT, 'auth-invites.json');
+const SNAPSHOT_SUBMISSIONS_PATH = path.join(STORAGE_ROOT, 'snapshot-submissions.json');
+const AUTH_AUDIT_DIR = path.join(STORAGE_ROOT, 'auth-audit');
 const AUTH_AUDIT_ACTIVE_PATH = path.join(AUTH_AUDIT_DIR, 'events.jsonl');
 const AUTH_AUDIT_BACKUP_DIR = path.join(AUTH_AUDIT_DIR, 'backups');
 const MAX_DB_SNAPSHOTS = 15;
@@ -72,6 +78,10 @@ const AUTH_PASSWORD_RESET_TTL_MINUTES = Math.max(5, Number.parseInt(process.env.
 const AUTH_PASSWORD_RESET_DELIVERY = String(process.env.AUTH_PASSWORD_RESET_DELIVERY || 'console').trim().toLowerCase();
 const AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE = String(process.env.AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE || 'false').toLowerCase() === 'true';
 const AUTH_AUTO_HEAL_SWIMMER_BINDINGS = String(process.env.AUTH_AUTO_HEAL_SWIMMER_BINDINGS || 'true').toLowerCase() !== 'false';
+const AUTH_SESSION_COOKIE_NAME = String(process.env.AUTH_SESSION_COOKIE_NAME || 'athlyrax_session').trim() || 'athlyrax_session';
+const AUTH_CSRF_COOKIE_NAME = String(process.env.AUTH_CSRF_COOKIE_NAME || 'athlyrax_csrf').trim() || 'athlyrax_csrf';
+const AUTH_CSRF_HEADER_NAME = 'x-csrf-token';
+const AUTH_ALLOW_BEARER_COMPAT = String(process.env.AUTH_ALLOW_BEARER_COMPAT || 'false').toLowerCase() === 'true';
 const AUTH_SMTP_HOST = String(process.env.AUTH_SMTP_HOST || '').trim();
 const AUTH_SMTP_PORT = Math.max(1, Number.parseInt(process.env.AUTH_SMTP_PORT || '587', 10) || 587);
 const AUTH_SMTP_SECURE = String(process.env.AUTH_SMTP_SECURE || 'false').toLowerCase() === 'true';
@@ -184,6 +194,10 @@ const stripeClient = BILLING_STRIPE_SECRET_KEY
 
 if (AUTH_REQUIRED && IS_PRODUCTION && AUTH_SECRET === 'athlyrax-dev-secret-change-me') {
 	console.warn('[auth] AUTH_SECRET is using the development default in production. Set a strong AUTH_SECRET immediately.');
+}
+
+if (IS_PRODUCTION && AUTH_ALLOW_BEARER_COMPAT) {
+	throw new Error('AUTH_ALLOW_BEARER_COMPAT must be false in production');
 }
 
 let writeTail = Promise.resolve();
@@ -319,6 +333,7 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 });
 
 app.use(express.json({ limit: '25mb' }));
+app.use(helmet());
 
 function readJsonFile(filePath) {
 	try {
@@ -1086,21 +1101,75 @@ function resolveStoragePathsForAuth(auth) {
 
 	const user = findAuthUser(String(auth?.username || '').trim()) || auth || {};
 	const tenantKey = resolveTenantKeyFromUser(user);
-	if (tenantKey === 'global-owner') {
+	return resolveStoragePathsForTenantKey(tenantKey);
+}
+
+function resolveStoragePathsForTenantKey(tenantKey) {
+	if (!PHASE1_TENANT_ISOLATION) {
 		return {
-			tenantKey,
+			tenantKey: 'global',
 			dbPath: DB_PATH,
 			backupPath: TARGET_BACKUP_PATH,
 			snapshotDir: DB_SNAPSHOT_DIR,
 		};
 	}
 
-	const tenantDir = path.join(DB_TENANTS_DIR, tenantKey);
+	const normalizedTenantKey = normalizeTenantId(tenantKey);
+	if (!normalizedTenantKey || normalizedTenantKey === 'global-owner') {
+		return {
+			tenantKey: 'global-owner',
+			dbPath: DB_PATH,
+			backupPath: TARGET_BACKUP_PATH,
+			snapshotDir: DB_SNAPSHOT_DIR,
+		};
+	}
+
+	const tenantDir = path.join(DB_TENANTS_DIR, normalizedTenantKey);
 	return {
-		tenantKey,
+		tenantKey: normalizedTenantKey,
 		dbPath: path.join(tenantDir, 'db.json'),
 		backupPath: path.join(tenantDir, 'trainingPlannerTargets.backup.json'),
 		snapshotDir: path.join(tenantDir, 'db-snapshots'),
+	};
+}
+
+function resolveStoragePathsForRequest(req) {
+	const baseTenantId = resolveAuthTenantId(req.auth);
+	const requestedTenantId = normalizeTenantId(req.headers?.['x-athlyrax-tenant']);
+	const reason = String(req.headers?.['x-athlyrax-tenant-reason'] || '').trim();
+
+	if (!requestedTenantId) {
+		return {
+			ok: true,
+			tenantId: baseTenantId,
+			overridden: false,
+			reason: '',
+			storagePaths: resolveStoragePathsForTenantKey(baseTenantId),
+		};
+	}
+
+	if (!isPrimarySoftwareOwnerAccount(req.auth)) {
+		return {
+			ok: false,
+			status: 403,
+			body: { error: 'Tenant override is only allowed for the primary software-owner account.' },
+		};
+	}
+
+	if (!reason) {
+		return {
+			ok: false,
+			status: 400,
+			body: { error: 'x-athlyrax-tenant-reason is required for software-owner tenant override.' },
+		};
+	}
+
+	return {
+		ok: true,
+		tenantId: requestedTenantId,
+		overridden: true,
+		reason,
+		storagePaths: resolveStoragePathsForTenantKey(requestedTenantId),
 	};
 }
 
@@ -1941,17 +2010,23 @@ function signTokenPayload(payloadBase64) {
 		.replace(/=+$/g, '');
 }
 
-function issueAuthToken(user) {
+function issueAuthToken(user, options = {}) {
 	const now = getNowEpochSeconds();
+	const issuedAt = Math.max(now, getTokenValidAfter(user) + 1);
+	const csrf = String(options?.csrf || '').trim() || crypto.randomBytes(16).toString('hex');
 	const payload = {
 		sub: String(user?.username || ''),
 		role: String(user?.role || 'viewer'),
-		iat: now,
-		exp: now + AUTH_TOKEN_TTL_SECONDS,
+		csrf,
+		iat: issuedAt,
+		exp: issuedAt + AUTH_TOKEN_TTL_SECONDS,
 	};
 	const payloadBase64 = toBase64Url(JSON.stringify(payload));
 	const signature = signTokenPayload(payloadBase64);
-	return `v1.${payloadBase64}.${signature}`;
+	return {
+		token: `v1.${payloadBase64}.${signature}`,
+		csrf,
+	};
 }
 
 function verifyAuthToken(token) {
@@ -1965,6 +2040,7 @@ function verifyAuthToken(token) {
 		const payload = JSON.parse(fromBase64Url(payloadBase64));
 		const now = getNowEpochSeconds();
 		if (!payload?.sub || !payload?.role) return null;
+		if (!payload?.csrf) return null;
 		if (!Number.isFinite(payload?.iat)) return null;
 		if (!Number.isFinite(payload?.exp) || payload.exp <= now) return null;
 		const user = findAuthUser(payload.sub);
@@ -1973,6 +2049,7 @@ function verifyAuthToken(token) {
 		return {
 			username: String(user.username),
 			role: String(user.role || 'viewer'),
+			csrf: String(payload.csrf),
 			iat: Number(payload.iat),
 			exp: Number(payload.exp),
 		};
@@ -1999,6 +2076,63 @@ function parseAllowedOrigins() {
 	);
 }
 
+function parseCookies(req) {
+	const raw = String(req?.headers?.cookie || '').trim();
+	if (!raw) return {};
+	const out = {};
+	for (const part of raw.split(';')) {
+		const [key, ...rest] = String(part || '').split('=');
+		const name = String(key || '').trim();
+		if (!name) continue;
+		const value = rest.join('=').trim();
+		out[name] = decodeURIComponent(value);
+	}
+	return out;
+}
+
+function buildCookieOptions() {
+	return {
+		httpOnly: true,
+		secure: IS_PRODUCTION,
+		sameSite: IS_PRODUCTION ? 'none' : 'lax',
+		path: '/',
+		maxAge: AUTH_TOKEN_TTL_SECONDS,
+	};
+}
+
+function serializeCookie(name, value, options = {}) {
+	const parts = [`${name}=${encodeURIComponent(String(value || ''))}`];
+	if (options.maxAge !== undefined) parts.push(`Max-Age=${Math.max(0, Number(options.maxAge) || 0)}`);
+	if (options.path) parts.push(`Path=${options.path}`);
+	if (options.httpOnly) parts.push('HttpOnly');
+	if (options.secure) parts.push('Secure');
+	if (options.sameSite) parts.push(`SameSite=${options.sameSite}`);
+	return parts.join('; ');
+}
+
+function setAuthCookies(res, { token, csrfToken }) {
+	const base = buildCookieOptions();
+	const authCookie = serializeCookie(AUTH_SESSION_COOKIE_NAME, token, {
+		...base,
+	});
+	const csrfCookie = serializeCookie(AUTH_CSRF_COOKIE_NAME, csrfToken, {
+		httpOnly: false,
+		secure: base.secure,
+		sameSite: base.sameSite,
+		path: '/',
+		maxAge: base.maxAge,
+	});
+	res.setHeader('Set-Cookie', [authCookie, csrfCookie]);
+}
+
+function clearAuthCookies(res) {
+	const base = buildCookieOptions();
+	res.setHeader('Set-Cookie', [
+		serializeCookie(AUTH_SESSION_COOKIE_NAME, '', { ...base, maxAge: 0 }),
+		serializeCookie(AUTH_CSRF_COOKIE_NAME, '', { httpOnly: false, secure: base.secure, sameSite: base.sameSite, path: '/', maxAge: 0 }),
+	]);
+}
+
 function isOriginAllowed(origin) {
 	if (!origin) return true;
 	return allowedOrigins.has(String(origin).trim());
@@ -2011,8 +2145,21 @@ function extractBearerToken(req) {
 }
 
 function attachAuthContext(req, _res, next) {
-	const token = extractBearerToken(req);
+	const cookies = parseCookies(req);
+	const cookieToken = String(cookies?.[AUTH_SESSION_COOKIE_NAME] || '').trim();
+	const headerToken = extractBearerToken(req);
+	const bearerAllowed = AUTH_ALLOW_BEARER_COMPAT && !IS_PRODUCTION;
+	const token = cookieToken || (bearerAllowed ? headerToken : '');
+	if (headerToken && !bearerAllowed && !cookieToken) {
+		req.auth = null;
+		req.cookies = cookies;
+		req.authSource = 'denied-bearer';
+		next();
+		return;
+	}
 	req.auth = token ? verifyAuthToken(token) : null;
+	req.cookies = cookies;
+	req.authSource = cookieToken ? 'cookie' : (headerToken ? 'bearer' : 'none');
 	if (req.auth?.username) {
 		authPresenceByUser.set(String(req.auth.username), Date.now());
 	}
@@ -2116,6 +2263,25 @@ function requireBillingWriteAccess(req, res, next) {
 		error: 'Active subscription required for write operations.',
 		access,
 	});
+}
+
+function requireCsrf(req, res, next) {
+	const method = String(req.method || '').toUpperCase();
+	if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+	if (!req.auth) return next();
+	if (String(req.authSource || 'none') !== 'cookie') return next();
+	const headerToken = String(req.headers?.[AUTH_CSRF_HEADER_NAME] || '').trim();
+	const cookieToken = String(req.cookies?.[AUTH_CSRF_COOKIE_NAME] || '').trim();
+	const authToken = String(req.auth?.csrf || '').trim();
+	if (!headerToken || !cookieToken || !authToken) {
+		res.status(403).json({ error: 'CSRF token is required.' });
+		return;
+	}
+	if (!safeEqualText(headerToken, cookieToken) || !safeEqualText(headerToken, authToken)) {
+		res.status(403).json({ error: 'Invalid CSRF token.' });
+		return;
+	}
+	next();
 }
 
 function requireStrictAuth(req, res, next) {
@@ -2837,10 +3003,11 @@ app.use((req, res, next) => {
 	if (requestOrigin) {
 		res.setHeader('Access-Control-Allow-Origin', requestOrigin);
 		res.setHeader('Vary', 'Origin');
+		res.setHeader('Access-Control-Allow-Credentials', 'true');
 	}
 
 	res.setHeader('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-	res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+	res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token');
 	if (req.method === 'OPTIONS') {
 		res.status(204).end();
 		return;
@@ -2849,6 +3016,7 @@ app.use((req, res, next) => {
 });
 
 app.use(attachAuthContext);
+app.use(requireCsrf);
 
 app.get('/auth/config', (req, res) => {
 	res.status(200).json({
@@ -2857,6 +3025,8 @@ app.get('/auth/config', (req, res) => {
 		requireInviteCode: !AUTH_ALLOW_COACH_SIGNUP,
 		allowCoachInvites: AUTH_ALLOW_COACH_INVITES,
 		securityMode: IS_PRODUCTION ? 'production' : 'development',
+		bearerCompatEnabled: AUTH_ALLOW_BEARER_COMPAT && !IS_PRODUCTION,
+		csrfHeaderName: AUTH_CSRF_HEADER_NAME,
 		assetId: BACKEND_ASSET_ID,
 	});
 });
@@ -3070,10 +3240,13 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 			details: { role, email, swimClub, teamName, invited: Boolean(usableInvite), isApproved },
 		});
 
-		const token = issueAuthToken({ username, role });
+		const session = issueAuthToken({ username, role });
+		setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
 		res.status(201).json({
 			ok: true,
-			token,
+			token: session.token,
+			csrfToken: session.csrf,
+			csrfHeaderName: AUTH_CSRF_HEADER_NAME,
 			user: buildAuthUserPayload({ username, role, onboardingCompletedAt: '', billing: getDefaultBillingState() }),
 		});
 	} catch (error) {
@@ -3173,7 +3346,8 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		}
 	}
 
-	const token = issueAuthToken(user);
+	const session = issueAuthToken(user);
+	setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
 	appendAuthAuditEvent({
 		action: 'login_success',
 		req,
@@ -3189,7 +3363,9 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		},
 	});
 	res.status(200).json({
-		token,
+		token: session.token,
+		csrfToken: session.csrf,
+		csrfHeaderName: AUTH_CSRF_HEADER_NAME,
 		user: buildAuthUserPayload(user),
 	});
 });
@@ -3308,7 +3484,7 @@ app.post('/auth/password-reset/confirm', requireLoginRateLimit, (req, res) => {
 	authUsers[index] = {
 		...previous,
 		passwordHash: hashPassword(nextPassword),
-		tokenValidAfter: getNowEpochSeconds(),
+		tokenValidAfter: getNowEpochSeconds() + 1,
 	};
 
 	try {
@@ -3704,11 +3880,12 @@ app.post('/auth/logout', requireStrictAuth, (req, res) => {
 	const previous = authUsers[index];
 	authUsers[index] = {
 		...previous,
-		tokenValidAfter: getNowEpochSeconds(),
+		tokenValidAfter: getNowEpochSeconds() + 1,
 	};
 
 	try {
 		persistAuthUsers();
+		clearAuthCookies(res);
 		appendAuthAuditEvent({
 			action: 'logout',
 			req,
@@ -3755,8 +3932,16 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	}
 
 	const role = String(req.body?.role || 'assistant-coach').trim() || 'assistant-coach';
+	if (!['assistant-coach', 'viewer', 'swimmer', 'head-coach'].includes(role)) {
+		res.status(400).json({ error: 'Invite role is not allowed.' });
+		return;
+	}
+	if (String(req.auth?.role || '').trim() === 'head-coach' && role === 'head-coach') {
+		res.status(403).json({ error: 'Head coaches cannot create peer head-coach invites.' });
+		return;
+	}
 	const targetEmail = String(req.body?.email || '').trim();
-	const maxUses = Math.max(1, Number.parseInt(req.body?.maxUses || '1', 10) || 1);
+	const maxUses = 1;
 	const actor = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
 	const actorIsPrimaryOwner = isPrimarySoftwareOwnerAccount(actor);
 	const inviteSwimClub = actorIsPrimaryOwner
@@ -3768,10 +3953,6 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	const inviteTenantId = actorIsPrimaryOwner
 		? (normalizeTenantId(req.body?.tenantId) || resolveTenantKeyFromUser({ swimClub: inviteSwimClub, teamName: inviteTeamName }))
 		: resolveTenantKeyFromUser(actor);
-	if (!actorIsPrimaryOwner && !['assistant-coach', 'head-coach'].includes(role)) {
-		res.status(403).json({ error: 'Only assistant-coach or head-coach invites are allowed for tenant admins.' });
-		return;
-	}
 	if (role === 'head-coach') {
 		const sessionCoordinatorCapacityError = getSessionCoordinatorCapacityError(inviteTenantId, { includePendingInvites: true });
 		if (sessionCoordinatorCapacityError) {
@@ -3838,10 +4019,15 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	}
 });
 
-app.get('/auth/users', requireStrictAuth, requireSoftwareOwnerRole, requireAdminRateLimit, (_req, res) => {
-	res.status(200).json({
-		users: sanitizeAuthUsers(authUsers),
-	});
+app.get('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (_req, res) => {
+	const req = _req;
+	if (isPrimarySoftwareOwnerAccount(req.auth)) {
+		res.status(200).json({ users: sanitizeAuthUsers(authUsers) });
+		return;
+	}
+	const actorTenant = resolveAuthTenantId(req.auth);
+	const scoped = authUsers.filter((row) => resolveTenantKeyFromUser(row) === actorTenant);
+	res.status(200).json({ users: sanitizeAuthUsers(scoped) });
 });
 
 app.post('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {
@@ -3938,7 +4124,7 @@ app.put('/auth/users/:username/password', requireStrictAuth, requireAdminRole, r
 	authUsers[index] = {
 		...previous,
 		passwordHash: hashPassword(nextPassword),
-		tokenValidAfter: getNowEpochSeconds(),
+		tokenValidAfter: getNowEpochSeconds() + 1,
 	};
 
 	try {
@@ -3993,7 +4179,7 @@ app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requi
 	authUsers[index] = {
 		...previous,
 		role: nextRole,
-		tokenValidAfter: getNowEpochSeconds(),
+		tokenValidAfter: getNowEpochSeconds() + 1,
 	};
 
 	try {
@@ -4040,7 +4226,7 @@ app.put('/auth/users/:username/approval', requireStrictAuth, requireAdminRole, r
 	authUsers[index] = {
 		...previous,
 		isApproved: approved,
-		tokenValidAfter: getNowEpochSeconds(),
+		tokenValidAfter: getNowEpochSeconds() + 1,
 	};
 
 	try {
@@ -4320,10 +4506,10 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 
 		try {
 			persistAuthUsers();
-			const token = issueAuthToken({ username, role: 'swimmer' });
+			const session = issueAuthToken({ username, role: 'swimmer' });
 			res.status(201).json({
 				ok: true,
-				token,
+				token: session.token,
 				user: buildAuthUserPayload(findAuthUser(username)),
 			});
 		} catch (error) {
@@ -4342,8 +4528,8 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	const token = issueAuthToken(user);
-	res.status(200).json({ token, user: buildAuthUserPayload(user) });
+	const session = issueAuthToken(user);
+	res.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });
 });
 
 app.post('/snapshot/account/password-reset/request', requireLoginRateLimit, async (req, res) => {
@@ -4432,7 +4618,7 @@ app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req
 	authUsers[index] = {
 		...previous,
 		passwordHash: hashPassword(nextPassword),
-		tokenValidAfter: getNowEpochSeconds(),
+		tokenValidAfter: getNowEpochSeconds() + 1,
 	};
 
 	try {
@@ -5458,7 +5644,12 @@ app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (re
 
 // Serve db.json at /db
 app.get('/db', requireAuth, (req, res) => {
-	const storagePaths = resolveStoragePathsForAuth(req.auth);
+	const tenantScope = resolveStoragePathsForRequest(req);
+	if (!tenantScope.ok) {
+		res.status(tenantScope.status).json(tenantScope.body);
+		return;
+	}
+	const storagePaths = tenantScope.storagePaths;
 	ensureStorageLayout(storagePaths);
 	if (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {
 		writeAtomicJsonFile(storagePaths.dbPath, {});
@@ -5606,12 +5797,17 @@ app.post('/db/ownership-backfill', requireAuth, requireWriteRole, requireBilling
 });
 
 app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, res) => {
+	const tenantScope = resolveStoragePathsForRequest(req);
+	if (!tenantScope.ok) {
+		res.status(tenantScope.status).json(tenantScope.body);
+		return;
+	}
 	const body = req.body;
 	if (!body || typeof body !== 'object' || Array.isArray(body)) {
 		res.status(400).json({ error: 'Invalid payload. Expected JSON object.' });
 		return;
 	}
-	const actorTenantId = String(resolveAuthTenantId(req.auth) || '').trim().toLowerCase();
+	const actorTenantId = String(tenantScope.tenantId || '').trim().toLowerCase();
 	const foreignTenantViolations = collectForeignTenantRowViolations(body, actorTenantId);
 	if (foreignTenantViolations.length > 0) {
 		appendAuthAuditEvent({
@@ -5631,7 +5827,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		});
 		return;
 	}
-	const storagePaths = resolveStoragePathsForAuth(req.auth);
+	const storagePaths = tenantScope.storagePaths;
 	ensureStorageLayout(storagePaths);
 
 	const existingDb = readJsonFile(storagePaths.dbPath);
