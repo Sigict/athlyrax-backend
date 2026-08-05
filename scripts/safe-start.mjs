@@ -25,6 +25,8 @@ runStorageSafetyCheck({
   linkStorage: true,
 });
 
+process.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';
+
 installDataSafetyGuards();
 installExpressDbRevisionResponseGuard(express);
 installDbRevisionPutResponse(express);
