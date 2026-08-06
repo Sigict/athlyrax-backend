@@ -3,6 +3,8 @@ name: Verify production signup legal enforcement
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,13 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Checkout exact main commit
+      - name: Checkout exact commit
         uses: actions/checkout@v4
 
-      - name: Run signup legal acceptance tests
-        run: npm ci && npm run test:signup-legal-acceptance
+      - name: Install, patch production entrypoint and run tests
+        run: |
+          npm ci
+          grep -F "installSignupLegalAcceptanceGuard(express);" index.js
+          npm run test:signup-legal-acceptance
 
-      - name: Wait for exact backend deployment and verify rejection
+      - name: Wait for backend deployment and verify rejection
+        if: github.event_name != 'pull_request'
         env:
           BACKEND_URL: https://athlyrax-backend.onrender.com
         run: |
@@ -52,7 +58,7 @@ jobs:
               exit 0
             fi
 
-            echo "Attempt ${attempt}/36: config=${config_code}, register=${register_code}; waiting for Render deployment."
+            echo "Attempt ${attempt}/36: config=${config_code}, register=${register_code}; response=$(cat "${body_file}")"
             rm -f "${config_file}" "${body_file}"
             sleep 15
           done
