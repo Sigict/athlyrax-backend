@@ -23,8 +23,10 @@ function validBody() {
   };
 }
 
-test('signup legal confirmation is mandatory and version locked', () => {
+test('signup legal confirmation, club identity and current versions are mandatory', () => {
   assert.equal(validateSignupLegalAcceptance({}).ok, false);
+  assert.equal(validateSignupLegalAcceptance({ ...validBody(), swimClub: '' }).ok, false);
+  assert.equal(validateSignupLegalAcceptance({ ...validBody(), teamName: '' }).ok, false);
   assert.equal(validateSignupLegalAcceptance({ ...validBody(), dpaAccepted: false }).ok, false);
   assert.equal(validateSignupLegalAcceptance({
     ...validBody(),
