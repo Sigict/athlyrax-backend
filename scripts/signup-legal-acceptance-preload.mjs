@@ -1,0 +1,162 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+
+export const REQUIRED_SIGNUP_LEGAL_VERSIONS = Object.freeze({
+  terms: '2026-08-06',
+  dataProcessingAgreement: '2026-08-06',
+  clubDataProtection: '2026-08-06',
+});
+
+const PATCH_MARKER = Symbol.for('athlyrax.signupLegalAcceptanceGuardInstalled');
+
+function cleanText(value, maxLength = 250) {
+  return String(value || '').trim().slice(0, maxLength);
+}
+
+function normalizeTenantPart(value, fallback) {
+  const normalized = cleanText(value, 160)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+}
+
+function resolveRequestIp(req) {
+  const forwarded = cleanText(req?.headers?.['x-forwarded-for'], 300)
+    .split(',')
+    .map((value) => value.trim())
+    .find(Boolean);
+  return forwarded || cleanText(req?.ip || req?.socket?.remoteAddress, 120);
+}
+
+function resolveStorageRoot() {
+  const overridePath = cleanText(process.env.ATHLYRAX_STORAGE_ROOT, 1000);
+  return overridePath ? path.resolve(overridePath) : path.resolve('storage');
+}
+
+function resolveAcceptancePath() {
+  const overridePath = cleanText(process.env.AUTH_LEGAL_ACCEPTANCE_PATH, 1000);
+  return overridePath
+    ? path.resolve(overridePath)
+    : path.join(resolveStorageRoot(), 'legal-acceptances.jsonl');
+}
+
+function versionMatches(actual, expected) {
+  return cleanText(actual, 40) === expected;
+}
+
+export function validateSignupLegalAcceptance(body) {
+  const source = body && typeof body === 'object' ? body : {};
+  const versions = source?.legalDocumentVersions && typeof source.legalDocumentVersions === 'object'
+    ? source.legalDocumentVersions
+    : {};
+
+  if (source.dpaAccepted !== true || source.clubDataProtectionConfirmed !== true) {
+    return {
+      ok: false,
+      error: 'You must accept the AthlyraX Data Processing Agreement and confirm the club data-protection requirements.',
+    };
+  }
+
+  const versionsValid = Object.entries(REQUIRED_SIGNUP_LEGAL_VERSIONS)
+    .every(([key, expected]) => versionMatches(versions?.[key], expected));
+  if (!versionsValid) {
+    return {
+      ok: false,
+      error: 'The legal documents changed. Reload the signup page, review the current documents and confirm them again.',
+    };
+  }
+
+  return { ok: true, versions: { ...REQUIRED_SIGNUP_LEGAL_VERSIONS } };
+}
+
+export function buildSignupLegalAcceptanceRecord({ req, responsePayload, acceptedAt } = {}) {
+  const body = req?.body && typeof req.body === 'object' ? req.body : {};
+  const responseUser = responsePayload?.user && typeof responsePayload.user === 'object'
+    ? responsePayload.user
+    : {};
+  const username = cleanText(responseUser?.username || body?.username, 80).toLowerCase();
+  const swimClub = cleanText(responseUser?.swimClub || body?.swimClub, 180);
+  const teamName = cleanText(responseUser?.teamName || body?.teamName, 180);
+  const tenantId = cleanText(responseUser?.tenantId, 180)
+    || `${normalizeTenantPart(swimClub, 'club')}__${normalizeTenantPart(teamName, `user-${normalizeTenantPart(username, 'unknown')}`)}`;
+  const timestamp = cleanText(acceptedAt, 60) || new Date().toISOString();
+
+  return {
+    eventId: `legal_${crypto.randomUUID()}`,
+    eventType: 'signup-data-protection-acceptance',
+    acceptedAt: timestamp,
+    username,
+    email: cleanText(responseUser?.email || body?.email, 254).toLowerCase(),
+    tenantId,
+    swimClub,
+    teamName,
+    role: cleanText(responseUser?.role, 80),
+    documentVersions: { ...REQUIRED_SIGNUP_LEGAL_VERSIONS },
+    confirmations: {
+      authorisedClubRepresentativeAndDpa: true,
+      clubLawfulBasisAndPrivacyInformation: true,
+    },
+    ipAddress: resolveRequestIp(req),
+    userAgent: cleanText(req?.headers?.['user-agent'], 500),
+  };
+}
+
+export function appendSignupLegalAcceptanceRecord(record) {
+  const targetPath = resolveAcceptancePath();
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.appendFileSync(targetPath, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });
+  try {
+    fs.chmodSync(targetPath, 0o600);
+  } catch {
+    // Some hosted filesystems do not support chmod. The append remains valid.
+  }
+  return targetPath;
+}
+
+function signupLegalAcceptanceMiddleware(req, res, next) {
+  const validation = validateSignupLegalAcceptance(req?.body);
+  if (!validation.ok) {
+    res.status(400).json({ error: validation.error });
+    return;
+  }
+
+  let responsePayload = null;
+  const originalJson = typeof res?.json === 'function' ? res.json.bind(res) : null;
+  if (originalJson) {
+    res.json = (payload) => {
+      responsePayload = payload;
+      return originalJson(payload);
+    };
+  }
+
+  res.once?.('finish', () => {
+    const statusCode = Number(res?.statusCode || 0);
+    if (statusCode < 200 || statusCode >= 300) return;
+    try {
+      appendSignupLegalAcceptanceRecord(buildSignupLegalAcceptanceRecord({ req, responsePayload }));
+    } catch (error) {
+      console.error('[auth] Could not persist signup legal acceptance record:', error?.message || error);
+    }
+  });
+
+  next();
+}
+
+export function installSignupLegalAcceptanceGuard(expressModule) {
+  const application = expressModule?.application;
+  if (!application || typeof application.post !== 'function') {
+    throw new Error('Express application.post is unavailable for signup legal acceptance guard.');
+  }
+  if (application[PATCH_MARKER]) return;
+
+  const originalPost = application.post;
+  application.post = function patchedPost(routePath, ...handlers) {
+    if (String(routePath || '') === '/auth/register') {
+      return originalPost.call(this, routePath, signupLegalAcceptanceMiddleware, ...handlers);
+    }
+    return originalPost.call(this, routePath, ...handlers);
+  };
+  Object.defineProperty(application, PATCH_MARKER, { value: true, configurable: false });
+}
