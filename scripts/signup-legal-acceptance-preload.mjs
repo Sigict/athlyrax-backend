@@ -51,6 +51,15 @@ export function validateSignupLegalAcceptance(body) {
   const versions = source?.legalDocumentVersions && typeof source.legalDocumentVersions === 'object'
     ? source.legalDocumentVersions
     : {};
+  const swimClub = cleanText(source?.swimClub, 180);
+  const teamName = cleanText(source?.teamName, 180);
+
+  if (!swimClub || !teamName) {
+    return {
+      ok: false,
+      error: 'Swim club and team name are required for the Data Processing Agreement.',
+    };
+  }
 
   if (source.dpaAccepted !== true || source.clubDataProtectionConfirmed !== true) {
     return {
