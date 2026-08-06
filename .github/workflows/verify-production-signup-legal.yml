@@ -1,0 +1,61 @@
+name: Verify production signup legal enforcement
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact main commit
+        uses: actions/checkout@v4
+
+      - name: Run signup legal acceptance tests
+        run: npm ci && npm run test:signup-legal-acceptance
+
+      - name: Wait for exact backend deployment and verify rejection
+        env:
+          BACKEND_URL: https://athlyrax-backend.onrender.com
+        run: |
+          set -euo pipefail
+          expected_sha="${GITHUB_SHA}"
+          echo "Verifying backend commit ${expected_sha}"
+
+          for attempt in $(seq 1 36); do
+            config_file="$(mktemp)"
+            body_file="$(mktemp)"
+
+            config_code="$(curl --silent --show-error --location \
+              --connect-timeout 15 --max-time 30 \
+              --output "${config_file}" --write-out '%{http_code}' \
+              "${BACKEND_URL}/auth/config" || true)"
+
+            register_code="$(curl --silent --show-error --location \
+              --connect-timeout 15 --max-time 30 \
+              --header 'Content-Type: application/json' \
+              --data '{"username":"athlyrax-legal-deployment-probe","password":"NoAccountIsCreated123!"}' \
+              --output "${body_file}" --write-out '%{http_code}' \
+              "${BACKEND_URL}/auth/register" || true)"
+
+            if [[ "${config_code}" == "200" \
+              && "${register_code}" == "400" \
+              && $(grep -ciE 'Swim club and team name are required|Data Processing Agreement' "${body_file}" || true) -gt 0 ]]; then
+              echo "Production signup legal enforcement verified for ${expected_sha}."
+              cat "${config_file}"
+              cat "${body_file}"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/36: config=${config_code}, register=${register_code}; waiting for Render deployment."
+            rm -f "${config_file}" "${body_file}"
+            sleep 15
+          done
+
+          echo "Production did not expose the required signup legal guard within the verification window." >&2
+          exit 1
