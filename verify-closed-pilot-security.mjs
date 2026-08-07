@@ -19,6 +19,20 @@ const AUTH_ALLOW_BEARER_COMPAT = String(process.env.AUTH_ALLOW_BEARER_COMPAT || 
 const STORAGE_ROOT = String(process.env.ATHLYRAX_STORAGE_ROOT || '').trim();
 const SAFETY_BACKUP_ROOT = String(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();
 
+function exactHttpOrigin(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw === '*') return false;
+  try {
+    const parsed = new URL(raw);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:')
+      && parsed.origin === raw
+      && !parsed.username
+      && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
 function checkExistingWritableDir(dirPath) {
   try {
     if (!dirPath || !fs.existsSync(dirPath)) return false;
@@ -100,9 +114,7 @@ function getDefaultCredentialFailures(users) {
       continue;
     }
     const defaultPassword = KNOWN_DEFAULT_PASSWORDS.get(username);
-    if (defaultPassword && verifyPassword(defaultPassword, row?.passwordHash)) {
-      failures.push(`Known default password is still active for account: ${username}`);
-    }
+    if (defaultPassword && verifyPassword(defaultPassword, row?.passwordHash)) failures.push(`Known default password is still active for account: ${username}`);
   }
   return failures;
 }
@@ -111,17 +123,14 @@ const failures = [];
 if (!IS_PRODUCTION) failures.push('NODE_ENV must be production');
 failures.push(...verifyGuardedStartupContract());
 if (!AUTH_REQUIRED) failures.push('AUTH_REQUIRED must be true');
-if (!AUTH_SECRET || AUTH_SECRET.length < 32 || AUTH_SECRET === 'athlyrax-dev-secret-change-me') {
-  failures.push('AUTH_SECRET must be strong and non-default');
-}
+if (!AUTH_SECRET || AUTH_SECRET.length < 32 || AUTH_SECRET === 'athlyrax-dev-secret-change-me') failures.push('AUTH_SECRET must be strong and non-default');
 if (AUTH_ALLOW_COACH_SIGNUP) failures.push('Public signup must be disabled');
 if (AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE) failures.push('Reset dev-code response mode must be disabled');
-if (!FRONTEND_PUBLIC_ORIGIN || FRONTEND_PUBLIC_ORIGIN.includes('*')) failures.push('FRONTEND_PUBLIC_ORIGIN must be explicitly set');
-if (!ALLOWED_ORIGINS || ALLOWED_ORIGINS.includes('*')) failures.push('ALLOWED_ORIGINS cannot be empty or wildcard');
-if (ALLOWED_ORIGINS && FRONTEND_PUBLIC_ORIGIN) {
-  const parsed = ALLOWED_ORIGINS.split(',').map((v) => String(v || '').trim()).filter(Boolean);
-  if (!parsed.includes(FRONTEND_PUBLIC_ORIGIN)) failures.push('ALLOWED_ORIGINS must include FRONTEND_PUBLIC_ORIGIN');
-}
+if (!exactHttpOrigin(FRONTEND_PUBLIC_ORIGIN)) failures.push('FRONTEND_PUBLIC_ORIGIN must be an exact http/https origin');
+const parsedOrigins = ALLOWED_ORIGINS.split(',').map((v) => String(v || '').trim()).filter(Boolean);
+if (parsedOrigins.length < 1) failures.push('ALLOWED_ORIGINS must contain at least one explicit origin for the closed-pilot verification');
+if (parsedOrigins.some((origin) => !exactHttpOrigin(origin))) failures.push('ALLOWED_ORIGINS contains an invalid, wildcard, path, query, fragment, or credential-bearing origin');
+if (parsedOrigins.length > 0 && FRONTEND_PUBLIC_ORIGIN && !parsedOrigins.includes(FRONTEND_PUBLIC_ORIGIN)) failures.push('ALLOWED_ORIGINS must include FRONTEND_PUBLIC_ORIGIN');
 if (AUTH_ALLOW_BEARER_COMPAT) failures.push('Bearer compatibility must be disabled');
 if (!STORAGE_ROOT) failures.push('ATHLYRAX_STORAGE_ROOT must be set');
 if (!SAFETY_BACKUP_ROOT) failures.push('ATHLYRAX_SAFETY_BACKUP_ROOT must be set');
@@ -130,14 +139,10 @@ const resolvedStorageRoot = STORAGE_ROOT ? path.resolve(STORAGE_ROOT) : path.joi
 const resolvedBackupRoot = SAFETY_BACKUP_ROOT ? path.resolve(SAFETY_BACKUP_ROOT) : '';
 const canonical = canonicalStoragePaths({ sourceRoot: __dirname, storageRoot: resolvedStorageRoot });
 const configuredAuthPath = String(process.env.AUTH_USERS_PATH || '').trim();
-if (configuredAuthPath && path.resolve(configuredAuthPath) !== canonical.authUsers) {
-  failures.push(`AUTH_USERS_PATH must equal canonical path: ${canonical.authUsers}`);
-}
+if (configuredAuthPath && path.resolve(configuredAuthPath) !== canonical.authUsers) failures.push(`AUTH_USERS_PATH must equal canonical path: ${canonical.authUsers}`);
 if (!checkExistingWritableDir(resolvedStorageRoot)) failures.push('Storage root must already exist and be readable/writable');
 if (!resolvedBackupRoot || !checkExistingWritableDir(resolvedBackupRoot)) failures.push('Backup root must already exist and be readable/writable');
-if (resolvedBackupRoot && resolvedStorageRoot && resolvedBackupRoot === resolvedStorageRoot) {
-  failures.push('Backup root must be separate from storage root');
-}
+if (resolvedBackupRoot && resolvedStorageRoot && resolvedBackupRoot === resolvedStorageRoot) failures.push('Backup root must be separate from storage root');
 
 const authUsers = loadAuthUsers(canonical.authUsers);
 if (authUsers === null) failures.push('Auth users file could not be parsed');
