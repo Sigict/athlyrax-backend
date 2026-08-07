@@ -51,7 +51,7 @@ function validMeaningfulDatabase(filePath) {
 function assertTenantIdentity(payload, expectedTenantId, label) {
   const declaredRaw = String(payload?.__meta?.tenantId || '').trim();
   if (!declaredRaw) return;
-  const declared = normalizeTenantId(declaredRaw);
+  const declared = requireCanonicalTenantId(declaredRaw, 'declared tenant ID');
   const expected = requireCanonicalTenantId(expectedTenantId, 'expected tenant ID');
   if (declared !== expected) {
     throw new Error(`${label} declares tenant ${declared} but is being routed to ${expected}. Refusing cross-tenant migration or recovery.`);
@@ -176,7 +176,7 @@ export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRo
     migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes: copyExact(legacyAuthBackup, paths.authUsersBackup) });
   }
   if (fs.existsSync(paths.authUsers) && !fs.existsSync(paths.authUsersBackup)) {
-    migrated.push({ kind: 'auth-users-backup-baseline', from: paths.authUsers, to: paths.authUsersBackup, bytes: copyExact(paths.authUsers, paths.authUsersBackup) });
+    throw new Error('Authentication primary exists but no independent authentication backup is available. Refusing to manufacture a backup baseline from the primary store.');
   }
 
   const legacyTenantRoot = path.join(paths.storageRoot, 'tenants', 'clubs');
