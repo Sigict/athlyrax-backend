@@ -21,6 +21,21 @@ function isRenderDeployPath(value) {
   return normalizedResolved === '/opt/render/project' || normalizedResolved.startsWith('/opt/render/project/');
 }
 function resolveConfiguredPath(raw, fallback) { return path.resolve(clean(raw) || fallback); }
+function envFalse(value) { return clean(value).toLowerCase() === 'false'; }
+function envTrue(value) { return clean(value).toLowerCase() === 'true'; }
+function slugTenantPart(value, fallback = 'default') {
+  const normalized = clean(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || fallback;
+}
+function normalizeTenantId(value) {
+  return clean(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 export function resolveStorageConfiguration(env = process.env, repoRoot = process.cwd()) {
   const resolvedRepoRoot = path.resolve(repoRoot);
@@ -41,6 +56,25 @@ export function resolveStorageConfiguration(env = process.env, repoRoot = proces
   if (production && isRenderDeployPath(backupRoot)) failures.push('Safety backups cannot be inside the Render deploy filesystem.');
   if (storageRoot === backupRoot) failures.push('Primary storage and safety backup roots must be different directories.');
   if (isInside(storageRoot, backupRoot) || isInside(backupRoot, storageRoot)) failures.push('Primary storage and safety backup roots must not be nested.');
+
+  if (production) {
+    if (envFalse(env.AUTH_REQUIRED)) failures.push('AUTH_REQUIRED must not be false in production.');
+    if (envFalse(env.PHASE1_TENANT_ISOLATION)) failures.push('PHASE1_TENANT_ISOLATION must not be false in production.');
+    if (envFalse(env.AUTH_ENFORCE_CANONICAL_STORE)) failures.push('AUTH_ENFORCE_CANONICAL_STORE must not be false in production.');
+    if (envTrue(env.AUTH_ALLOW_BEARER_COMPAT)) failures.push('AUTH_ALLOW_BEARER_COMPAT must be false in production.');
+    if (envTrue(env.AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE)) failures.push('AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE must be false in production.');
+
+    const authSecret = clean(env.AUTH_SECRET);
+    if (!authSecret || authSecret === 'athlyrax-dev-secret-change-me' || authSecret.length < 32) {
+      failures.push('AUTH_SECRET must be explicitly configured with at least 32 characters in production.');
+    }
+
+    const stripeSecret = clean(env.STRIPE_SECRET_KEY);
+    const stripeWebhookSecret = clean(env.STRIPE_WEBHOOK_SECRET);
+    if (stripeSecret && !stripeWebhookSecret) {
+      failures.push('STRIPE_WEBHOOK_SECRET is required in production whenever STRIPE_SECRET_KEY is configured.');
+    }
+  }
 
   const canonicalOverrides = [
     ['AUTH_USERS_PATH', authUsersPath],
@@ -116,6 +150,10 @@ function readJsonForValidation(filePath, fsModule = fs) {
   catch (error) { return { ok: false, error }; }
 }
 
+function authUsersArrayFromParsed(value) {
+  return Array.isArray(value) ? value : (value && Array.isArray(value.users) ? value.users : null);
+}
+
 function validateDatabaseObject(filePath, label, fsModule = fs, requireNonEmpty = false) {
   if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
   const parsed = readJsonForValidation(filePath, fsModule);
@@ -129,10 +167,61 @@ function validateAuthStore(filePath, label = 'Authentication user store', fsModu
   if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
   const parsed = readJsonForValidation(filePath, fsModule);
   if (!parsed.ok) return [`${label} is not valid JSON: ${filePath}`];
-  const users = Array.isArray(parsed.value) ? parsed.value : (parsed.value && Array.isArray(parsed.value.users) ? parsed.value.users : null);
+  const users = authUsersArrayFromParsed(parsed.value);
   if (!users) return [`${label} must contain a users array: ${filePath}`];
   if (requireNonEmpty && users.length === 0) return [`${label} must contain at least one user in production: ${filePath}`];
   return [];
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
+  }
+  return value;
+}
+
+function validateAuthPrimaryBackupParity(configuration, fsModule = fs) {
+  const primaryParsed = readJsonForValidation(configuration.authUsersPath, fsModule);
+  const backupParsed = readJsonForValidation(configuration.authUsersBackupPath, fsModule);
+  if (!primaryParsed.ok || !backupParsed.ok) return [];
+  const primaryUsers = authUsersArrayFromParsed(primaryParsed.value);
+  const backupUsers = authUsersArrayFromParsed(backupParsed.value);
+  if (!primaryUsers || !backupUsers) return [];
+  const primary = JSON.stringify(canonicalJson(primaryUsers));
+  const backup = JSON.stringify(canonicalJson(backupUsers));
+  if (primary !== backup) return ['Authentication primary and backup stores differ. Refusing automatic overwrite or fallback.'];
+  return [];
+}
+
+function resolveTenantIdFromStoredUser(user) {
+  const role = clean(user?.role).toLowerCase();
+  const username = clean(user?.username).toLowerCase();
+  if (role === 'software-owner') return '';
+  const explicit = normalizeTenantId(user?.tenantId);
+  if (explicit) return explicit;
+  const swimClub = clean(user?.swimClub);
+  const teamName = clean(user?.teamName);
+  if (swimClub && teamName) return `${slugTenantPart(swimClub, 'club')}__${slugTenantPart(teamName, 'team')}`;
+  return username ? `user-${slugTenantPart(username, 'unknown-user')}` : '';
+}
+
+function validateAuthBoundTenantDatabases(configuration, fsModule = fs) {
+  const parsed = readJsonForValidation(configuration.authUsersPath, fsModule);
+  if (!parsed.ok) return [];
+  const users = authUsersArrayFromParsed(parsed.value);
+  if (!users) return [];
+  const failures = [];
+  const tenantIds = new Set();
+  for (const user of users) {
+    const tenantId = resolveTenantIdFromStoredUser(user);
+    if (tenantId) tenantIds.add(tenantId);
+  }
+  for (const tenantId of tenantIds) {
+    const tenantPath = path.join(configuration.tenantRootPath, tenantId, 'db.json');
+    failures.push(...validateDatabaseObject(tenantPath, `Auth-bound tenant database ${tenantId}`, fsModule, configuration.production));
+  }
+  return failures;
 }
 
 export function validateRequiredStorageFiles(configuration, env = process.env, fsModule = fs) {
@@ -141,6 +230,10 @@ export function validateRequiredStorageFiles(configuration, env = process.env, f
   failures.push(...validateDatabaseObject(configuration.globalDbPath, 'Global database', fsModule, strict));
   failures.push(...validateAuthStore(configuration.authUsersPath, 'Authentication user store', fsModule, strict));
   failures.push(...validateAuthStore(configuration.authUsersBackupPath, 'Authentication user backup', fsModule, strict));
+  if (strict) {
+    failures.push(...validateAuthPrimaryBackupParity(configuration, fsModule));
+    failures.push(...validateAuthBoundTenantDatabases(configuration, fsModule));
+  }
 
   const tenants = clean(env.ATHLYRAX_REQUIRED_TENANTS).split(',').map((value) => value.trim()).filter(Boolean);
   for (const tenantId of tenants) {
@@ -183,9 +276,12 @@ export function sha256File(filePath, fsModule = fs) {
   hash.update(fsModule.readFileSync(filePath));
   return hash.digest('hex');
 }
+
 export function writeStorageReadyMarker(storageRoot, details = {}, fsModule = fs) {
   const markerPath = path.join(storageRoot, STORAGE_READY_MARKER);
+  const tempPath = path.join(storageRoot, `${STORAGE_READY_MARKER}.${process.pid}.${Date.now()}.tmp`);
   const payload = { version: STORAGE_LAYOUT_VERSION, approved: true, createdAt: new Date().toISOString(), ...details };
-  fsModule.writeFileSync(markerPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  fsModule.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  fsModule.renameSync(tempPath, markerPath);
   return markerPath;
 }
