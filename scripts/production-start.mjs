@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveStorageConfiguration } from './storage-safety-lib.mjs';
 import { canonicalStoragePaths } from './storage-path-contract.mjs';
+import { readActiveMigrationTransaction } from './migration-transaction-state.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
 const __filename = fileURLToPath(import.meta.url);
@@ -25,19 +26,26 @@ if (approval && approval !== APPROVAL) {
 
 if (approval === APPROVAL) {
   const configuration = resolveStorageConfiguration(process.env, sourceRoot);
-  if (configuration.failures.length > 0) {
-    throw new Error(configuration.failures.join('\n'));
-  }
+  if (configuration.failures.length > 0) throw new Error(configuration.failures.join('\n'));
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot: configuration.storageRoot });
-  if (!migrationAlreadyCompleted(paths.legacyMigrationMarker)) {
-    console.log('[storage] Explicit one-time migration approval detected. Running canonical storage migration before normal startup.');
+  const interrupted = readActiveMigrationTransaction(configuration.backupRoot, fs);
+  const completed = migrationAlreadyCompleted(paths.legacyMigrationMarker);
+
+  // An active crash-recovery journal takes precedence over the finalized marker.
+  // A process can die after finalization but before the journal is cleared; in
+  // that case the explicit migration command must run again so it can restore
+  // the pre-migration transaction snapshot and retry cleanly.
+  if (interrupted || !completed) {
+    console.log(interrupted
+      ? '[storage] Interrupted migration transaction detected. Running approved recovery before normal startup.'
+      : '[storage] Explicit one-time migration approval detected. Running canonical storage migration before normal startup.');
     const result = spawnSync(
       process.execPath,
       [path.join(sourceRoot, 'scripts', 'migrate-storage-once.mjs'), '--approve', APPROVAL],
       { cwd: sourceRoot, env: process.env, stdio: 'inherit' },
     );
     if (result.error) throw result.error;
-    if (result.status !== 0) throw new Error(`Approved one-time storage migration failed with exit code ${result.status}.`);
+    if (result.status !== 0) throw new Error(`Approved one-time storage migration/recovery failed with exit code ${result.status}.`);
   } else {
     console.log('[storage] One-time storage migration is already finalized. No migration or recovery mutation will run.');
   }
