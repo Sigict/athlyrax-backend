@@ -36,6 +36,7 @@ const transforms = [
   'scripts/patch-revision-integrity.mjs',
   'scripts/patch-auth-tenant-integrity.mjs',
   'scripts/patch-migration-validation.mjs',
+  'scripts/patch-runtime-auth-billing-safety.mjs',
 ];
 
 for (const relative of transforms) {
