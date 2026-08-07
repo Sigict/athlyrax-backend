@@ -10,6 +10,14 @@ import {
 } from '../scripts/storage-safety-lib.mjs';
 
 function tempDir(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), prefix)); }
+function prepareValidStorage(storageRoot, tenantId = 'demo-company') {
+  fs.mkdirSync(path.join(storageRoot, 'auth'), { recursive: true });
+  fs.mkdirSync(path.join(storageRoot, 'tenants', tenantId), { recursive: true });
+  fs.writeFileSync(path.join(storageRoot, 'db.json'), '{}\n');
+  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), '[]\n');
+  fs.writeFileSync(path.join(storageRoot, 'tenants', tenantId, 'db.json'), '{"swimmers":[]}\n');
+  writeStorageReadyMarker(storageRoot, { requiredTenants: [tenantId] });
+}
 
 test('production requires explicit storage roots', () => {
   const repoRoot = tempDir('athlyrax-repo-');
@@ -57,13 +65,7 @@ test('production check succeeds only with marker, canonical auth store, global D
   const repoRoot = tempDir('athlyrax-repo-');
   const storageRoot = tempDir('athlyrax-storage-');
   const backupRoot = tempDir('athlyrax-backup-');
-  const tenantDb = path.join(storageRoot, 'tenants', 'demo-company', 'db.json');
-  fs.mkdirSync(path.dirname(tenantDb), { recursive: true });
-  fs.mkdirSync(path.join(storageRoot, 'auth'), { recursive: true });
-  fs.writeFileSync(path.join(storageRoot, 'db.json'), '{}\n');
-  fs.writeFileSync(tenantDb, '{"swimmers":[{"id":"demo"}]}\n');
-  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), '[]\n');
-  writeStorageReadyMarker(storageRoot, { requiredTenants: ['demo-company'] });
+  prepareValidStorage(storageRoot);
 
   const env = { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' };
   const result = runStorageSafetyCheck({ env, repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} } });
@@ -85,4 +87,40 @@ test('missing required tenant DB fails closed', () => {
     env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
     repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
   }), /demo-company/);
+});
+
+test('corrupt global database fails closed', () => {
+  const repoRoot = tempDir('athlyrax-repo-');
+  const storageRoot = tempDir('athlyrax-storage-');
+  const backupRoot = tempDir('athlyrax-backup-');
+  prepareValidStorage(storageRoot);
+  fs.writeFileSync(path.join(storageRoot, 'db.json'), '{invalid', 'utf8');
+  assert.throws(() => runStorageSafetyCheck({
+    env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
+    repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
+  }), /Global database is not valid JSON/);
+});
+
+test('corrupt authentication store fails closed', () => {
+  const repoRoot = tempDir('athlyrax-repo-');
+  const storageRoot = tempDir('athlyrax-storage-');
+  const backupRoot = tempDir('athlyrax-backup-');
+  prepareValidStorage(storageRoot);
+  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), '{invalid', 'utf8');
+  assert.throws(() => runStorageSafetyCheck({
+    env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
+    repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
+  }), /Authentication user store is not valid JSON/);
+});
+
+test('corrupt required tenant database fails closed', () => {
+  const repoRoot = tempDir('athlyrax-repo-');
+  const storageRoot = tempDir('athlyrax-storage-');
+  const backupRoot = tempDir('athlyrax-backup-');
+  prepareValidStorage(storageRoot);
+  fs.writeFileSync(path.join(storageRoot, 'tenants', 'demo-company', 'db.json'), '{invalid', 'utf8');
+  assert.throws(() => runStorageSafetyCheck({
+    env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
+    repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
+  }), /Tenant database demo-company is not valid JSON/);
 });
