@@ -44,6 +44,7 @@ const transforms = [
   'scripts/patch-account-lifecycle-integrity.mjs',
   'scripts/patch-swimmer-coach-authority.mjs',
   'scripts/patch-parent-notification-semantics.mjs',
+  'scripts/patch-coach-link-workflow.mjs',
   'scripts/patch-production-cors-origins.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
 ];
