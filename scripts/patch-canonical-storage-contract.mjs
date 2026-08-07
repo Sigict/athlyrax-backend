@@ -15,14 +15,8 @@ for (const importLine of [storageSafetyImport, storageContractImport]) {
 }
 
 const replacements = [
-  [
-    `const DB_TENANTS_DIR = path.join(STORAGE_ROOT, 'tenants', 'clubs');`,
-    `const DB_TENANTS_DIR = path.join(STORAGE_ROOT, 'tenants');`,
-  ],
-  [
-    `const SHARED_AUTH_USERS_PATH = path.join(STORAGE_ROOT, 'auth-users.json');`,
-    `const SHARED_AUTH_USERS_PATH = path.join(STORAGE_ROOT, 'auth', 'auth-users.json');`,
-  ],
+  [`const DB_TENANTS_DIR = path.join(STORAGE_ROOT, 'tenants', 'clubs');`, `const DB_TENANTS_DIR = path.join(STORAGE_ROOT, 'tenants');`],
+  [`const SHARED_AUTH_USERS_PATH = path.join(STORAGE_ROOT, 'auth-users.json');`, `const SHARED_AUTH_USERS_PATH = path.join(STORAGE_ROOT, 'auth', 'auth-users.json');`],
 ];
 for (const [legacy, canonical] of replacements) {
   if (source.includes(legacy)) source = source.replace(legacy, canonical);
@@ -31,15 +25,29 @@ for (const [legacy, canonical] of replacements) {
 
 const runtimeGuardMarker = `// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD`;
 const appAnchor = `const app = express();`;
-const runtimeGuard = `${runtimeGuardMarker}\nif (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {\n\tconst runtimeStorageRoot = String(process.env.ATHLYRAX_STORAGE_ROOT || '').trim();\n\tconst runtimeBackupRoot = String(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();\n\tif (runtimeStorageRoot && runtimeBackupRoot) {\n\t\trestoreBundledDemoTenantIfNeeded({\n\t\t\tsourceRoot: __dirname,\n\t\t\tstorageRoot: runtimeStorageRoot,\n\t\t\tbackupRoot: runtimeBackupRoot,\n\t\t});\n\t}\n\trunStorageSafetyCheck({\n\t\trepoRoot: __dirname,\n\t\trequireFiles: true,\n\t\tcreateDirectories: true,\n\t});\n\tprocess.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';\n}\n\n${appAnchor}`;
+const runtimeGuard = `${runtimeGuardMarker}\nif (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {\n\tconst runtimeStorageRoot = String(process.env.ATHLYRAX_STORAGE_ROOT || '').trim();\n\tconst runtimeBackupRoot = String(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();\n\tif (runtimeStorageRoot && runtimeBackupRoot) {\n\t\trestoreBundledDemoTenantIfNeeded({ sourceRoot: __dirname, storageRoot: runtimeStorageRoot, backupRoot: runtimeBackupRoot });\n\t}\n\trunStorageSafetyCheck({ repoRoot: __dirname, requireFiles: true, createDirectories: true });\n\tprocess.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';\n}\n\n${appAnchor}`;
 if (!source.includes(runtimeGuardMarker)) {
   if (!source.includes(appAnchor)) throw new Error('Could not find Express app anchor for canonical runtime storage guard.');
   source = source.replace(appAnchor, runtimeGuard);
 }
 
-const unsafeCreateBlock = `\tensureStorageLayout(storagePaths);\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n\t\twriteAtomicJsonFile(storagePaths.dbPath, {});\n\t}`;
-const failClosedBlock = `\tensureStorageLayout(storagePaths);\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n\t\tappendAuthAuditEvent({\n\t\t\taction: 'tenant_database_missing',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: 'missing_existing_tenant_database',\n\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t});\n\t\tres.status(503).json({\n\t\t\terror: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',\n\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t});\n\t\treturn;\n\t}`;
-if (source.includes(unsafeCreateBlock)) source = source.replace(unsafeCreateBlock, failClosedBlock);
+const missingTenantResponse = `\t\tappendAuthAuditEvent({\n\t\t\taction: 'tenant_database_missing',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: 'missing_existing_tenant_database',\n\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t});\n\t\tres.status(503).json({\n\t\t\terror: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',\n\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t});\n\t\treturn;`;
+
+const unsafeGetBlock = `\tensureStorageLayout(storagePaths);\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n\t\twriteAtomicJsonFile(storagePaths.dbPath, {});\n\t}`;
+const safeGetBlock = `\tensureStorageLayout(storagePaths);\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n${missingTenantResponse}\n\t}`;
+if (source.includes(unsafeGetBlock)) source = source.replace(unsafeGetBlock, safeGetBlock);
+
+const putMarker = `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`;
+if (!source.includes(putMarker)) {
+  const putAnchor = `app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, res) => {`;
+  const putStart = source.indexOf(putAnchor);
+  if (putStart < 0) throw new Error('Could not find PUT /db route for missing-tenant guard.');
+  const existingAnchor = `\tconst existingDb = readJsonFile(storagePaths.dbPath);`;
+  const existingIndex = source.indexOf(existingAnchor, putStart);
+  if (existingIndex < 0) throw new Error('Could not find PUT /db existing database read anchor.');
+  const writeGuard = `${putMarker}\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n${missingTenantResponse}\n\t}\n\n`;
+  source = source.slice(0, existingIndex) + writeGuard + source.slice(existingIndex);
+}
 
 const forbidden = [
   `path.join(STORAGE_ROOT, 'tenants', 'clubs')`,
@@ -54,6 +62,7 @@ for (const token of [
   storageSafetyImport,
   storageContractImport,
   runtimeGuardMarker,
+  putMarker,
   `runStorageSafetyCheck({`,
   `restoreBundledDemoTenantIfNeeded({`,
   `path.join(STORAGE_ROOT, 'tenants')`,
