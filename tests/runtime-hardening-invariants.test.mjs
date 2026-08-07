@@ -24,6 +24,7 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_LAST_TENANT_ACCOUNT_DELETE_BLOCKED',
     'ATHLYRAX_SWIMMER_CANNOT_SELF_APPROVE_COACH_LINK',
     'ATHLYRAX_PARENT_NOTIFICATION_ONLY',
+    'ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
     'ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED',
     'ATHLYRAX_OWNERSHIP_SUMMARY_STRICT_DB_READ',
     'ATHLYRAX_NO_PRODUCTION_STARTUP_AUTOHEAL',
@@ -40,6 +41,8 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes('Under-18 approvals require parent email 1.'), false);
   assert.equal(source.includes('Under-18 approvals require parent 1 consent.'), false);
   assert.equal(source.includes('Parent 2 consent is required when parent email 2 is provided.'), false);
+  assert.ok(source.includes("'https://athlyrax.com'"));
+  assert.ok(source.includes("'https://www.athlyrax.com'"));
   assert.ok(source.includes("app.post('/db/ownership-backfill', requireAuth, requireAdminRole, requireBillingWriteAccess"));
   assert.ok(source.includes('Team storage already exists without an active membership. Automatic claiming is blocked'));
   assert.ok(source.includes('Each configured Stripe price ID may belong to only one billing plan.'));
