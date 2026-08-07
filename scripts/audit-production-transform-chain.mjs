@@ -26,6 +26,7 @@ const expectedTransforms = [
   'scripts/patch-auth-tenant-integrity.mjs',
   'scripts/patch-migration-validation.mjs',
   'scripts/patch-runtime-auth-billing-safety.mjs',
+  'scripts/patch-auth-persistence-transaction.mjs',
   'scripts/patch-runtime-identity-event-safety.mjs',
   'scripts/patch-ownership-integrity.mjs',
   'scripts/patch-orphan-tenant-safety.mjs',
@@ -68,6 +69,7 @@ for (const required of [
 
 const transformedIndex = read('index.js');
 for (const marker of [
+  'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE',
   'ATHLYRAX_COACH_LINK_WORKFLOW_V1',
   'ATHLYRAX_COACH_LINK_LIFECYCLE_V1',
@@ -77,7 +79,18 @@ for (const marker of [
   'ATHLYRAX_COACH_LINK_RECONNECT_V1',
   'ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB',
   'ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
-]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed coach-link marker ${marker}`);
+]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
+
+const authPersistencePatch = read('scripts/patch-auth-persistence-transaction.mjs');
+for (const token of [
+  'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION',
+  'writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);',
+  'writeAtomicJsonFile(AUTH_USERS_PATH, payload);',
+  'Authentication primary/backup verification failed after persistence.',
+  'restorePrevious(AUTH_USERS_PATH',
+  'restorePrevious(AUTH_USERS_BACKUP_PATH',
+  'rollback was incomplete',
+]) if (!authPersistencePatch.includes(token)) failures.push(`scripts/patch-auth-persistence-transaction.mjs: missing required token ${token}`);
 
 const pkg = JSON.parse(read('package.json') || '{}');
 const postinstall = String(pkg?.scripts?.postinstall || '');
@@ -95,6 +108,7 @@ for (const requiredTest of [
   'test:storage-safety',
   'test:data-safety',
   'test:persistence-integrity',
+  'test:auth-persistence-transaction',
   'test:storage-routing-safety',
   'test:storage-migration-identity',
   'test:storage-extra-invariants',
@@ -111,7 +125,7 @@ for (const requiredTest of [
 ]) {
   if (!storageAll.includes(requiredTest)) failures.push(`package.json: test:storage-all missing ${requiredTest}`);
 }
-for (const requiredTest of ['test:coach-link-workflow', 'audit:storage-paths']) {
+for (const requiredTest of ['test:auth-persistence-transaction', 'test:coach-link-workflow', 'audit:storage-paths']) {
   if (!securityVerify.includes(requiredTest)) failures.push(`package.json: verify:closed-pilot-security missing ${requiredTest}`);
 }
 
