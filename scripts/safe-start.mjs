@@ -13,6 +13,7 @@ import {
   resolveStorageConfiguration,
   validateRequiredStorageFiles,
 } from './storage-safety-lib.mjs';
+import { validateAuthStoreSemanticIntegrity } from './auth-store-integrity.mjs';
 import { assertCanonicalPathContract } from './storage-path-contract.mjs';
 import { assertNoSymlinkStorageLayout } from './storage-path-integrity.mjs';
 import { assertNoActiveMigrationTransaction } from './migration-transaction-state.mjs';
@@ -61,7 +62,10 @@ process.env.ATHLYRAX_STORAGE_ROOT = configuration.storageRoot;
 process.env.ATHLYRAX_SAFETY_BACKUP_ROOT = configuration.backupRoot;
 applyCanonicalAuthPaths(configuration, process.env);
 
-const storageFailures = validateRequiredStorageFiles(configuration, process.env, fs);
+const storageFailures = [
+  ...validateRequiredStorageFiles(configuration, process.env, fs),
+  ...validateAuthStoreSemanticIntegrity(configuration, process.env, fs),
+];
 if (storageFailures.length > 0) {
   const error = new Error(storageFailures.join('\n'));
   error.code = 'ATHLYRAX_STORAGE_NOT_READY';
