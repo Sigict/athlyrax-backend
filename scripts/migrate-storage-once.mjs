@@ -114,6 +114,19 @@ try {
   assertCanonicalPathContract({ sourceRoot, storageRoot: configuration.storageRoot, indexSource });
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot: configuration.storageRoot });
 
+  // Never manufacture an "independent backup" by merely cloning the primary
+  // authentication store. Migration may proceed only when a real canonical or
+  // legacy backup already exists.
+  const legacyAuthUsers = path.join(configuration.storageRoot, 'auth-users.json');
+  const legacyAuthBackup = path.join(configuration.storageRoot, 'auth-users.backup.json');
+  const anyAuthPrimaryExists = fs.existsSync(paths.authUsers) || fs.existsSync(legacyAuthUsers);
+  const anyIndependentAuthBackupExists = fs.existsSync(paths.authUsersBackup) || fs.existsSync(legacyAuthBackup);
+  if (anyAuthPrimaryExists && !anyIndependentAuthBackupExists) {
+    const error = new Error('Authentication data exists but no independent authentication backup exists. Refusing to manufacture a backup from the primary store.');
+    error.code = 'ATHLYRAX_AUTH_BACKUP_MISSING';
+    throw error;
+  }
+
   // The explicit migration is the only production path allowed to mutate layout.
   // Existing legacy bytes are preserved to the independent safety backup root by
   // migrateLegacyStorageIfNeeded before canonical copies are activated.
