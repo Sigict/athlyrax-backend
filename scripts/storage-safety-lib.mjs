@@ -110,6 +110,14 @@ export function ensureWritableDirectory(directory, label = 'Directory', fsModule
   finally { try { fsModule.unlinkSync(probe); } catch {} }
   return `${label} is writable.`;
 }
+function assertExistingWritableDirectory(directory, label = 'Directory', fsModule = fs) {
+  const resolved = path.resolve(directory);
+  if (!fsModule.existsSync(resolved)) throw new Error(`${label} is missing: ${resolved}`);
+  const stat = fsModule.statSync(resolved);
+  if (!stat.isDirectory()) throw new Error(`${label} is not a directory: ${resolved}`);
+  fsModule.accessSync(resolved, fsModule.constants.R_OK | fsModule.constants.W_OK);
+  return `${label} exists and has read/write permission.`;
+}
 export function ensureStorageDirectories(configuration, fsModule = fs) {
   for (const directory of [
     configuration.storageRoot, configuration.backupRoot, configuration.authRootPath, configuration.tenantRootPath,
@@ -291,9 +299,14 @@ export function runStorageSafetyCheck({ env = process.env, repoRoot = process.cw
   const failures = [...configuration.failures];
   for (const warning of configuration.warnings) logger.warn(`[storage-safety] ${warning}`);
   if (failures.length) { const error = new Error(failures.join('\n')); error.code = 'ATHLYRAX_STORAGE_CONFIGURATION_INVALID'; throw error; }
-  if (createDirectories) ensureStorageDirectories(configuration, fsModule);
-  ensureWritableDirectory(configuration.storageRoot, 'Primary storage root', fsModule);
-  ensureWritableDirectory(configuration.backupRoot, 'Safety backup root', fsModule);
+  if (createDirectories) {
+    ensureStorageDirectories(configuration, fsModule);
+    ensureWritableDirectory(configuration.storageRoot, 'Primary storage root', fsModule);
+    ensureWritableDirectory(configuration.backupRoot, 'Safety backup root', fsModule);
+  } else {
+    assertExistingWritableDirectory(configuration.storageRoot, 'Primary storage root', fsModule);
+    assertExistingWritableDirectory(configuration.backupRoot, 'Safety backup root', fsModule);
+  }
   env.ATHLYRAX_STORAGE_ROOT = configuration.storageRoot;
   env.ATHLYRAX_SAFETY_BACKUP_ROOT = configuration.backupRoot;
   applyCanonicalAuthPaths(configuration, env);
