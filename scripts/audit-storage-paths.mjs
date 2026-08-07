@@ -29,7 +29,7 @@ const indexSource = requireTokens('index.js', [
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
   `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
-  `ATHLYRAX_SAFE_START_ENFORCED`,
+  `globalThis[Symbol.for('athlyrax.safeStartEnforced')] === true`,
   `Direct index.js startup is refused.`,
   `crypto.createHmac('sha256', AUTH_SECRET).update(path.resolve(registrationTenantStorage.dbPath)).digest('hex')`,
 ]);
@@ -43,6 +43,7 @@ for (const forbidden of [
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `runStorageSafetyCheck({ repoRoot: __dirname, requireFiles: true, createDirectories: true })`,
   `const registrationTenantProvisioningToken = crypto.randomUUID();`,
+  `process.env.ATHLYRAX_SAFE_START_ENFORCED`,
 ]) if (indexSource.includes(forbidden)) failures.push(`index.js: forbidden legacy/destructive token remains: ${forbidden}`);
 
 const safeStart = requireTokens('scripts/safe-start.mjs', [
@@ -52,7 +53,7 @@ const safeStart = requireTokens('scripts/safe-start.mjs', [
   `validateRequiredStorageFiles(`,
   `applyCanonicalAuthPaths(`,
   `fs.accessSync(directory, fs.constants.R_OK | fs.constants.W_OK)`,
-  `ATHLYRAX_SAFE_START_ENFORCED`,
+  `globalThis[Symbol.for('athlyrax.safeStartEnforced')] = true`,
 ]);
 for (const forbidden of [
   'runStorageSafetyCheck(',
@@ -113,9 +114,10 @@ requireTokens('scripts/demo-data-sanitizer.mjs', [
   `Demo sanitization verification failed`,
 ]);
 requireTokens('scripts/patch-runtime-start-guard.mjs', [
-  `ATHLYRAX_SAFE_START_ENFORCED`,
+  `globalThis[Symbol.for('athlyrax.safeStartEnforced')] === true`,
   `Direct index.js startup is refused.`,
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
+  `process.env.ATHLYRAX_SAFE_START_ENFORCED`,
 ]);
 requireTokens('scripts/patch-provisioning-integrity.mjs', [
   `crypto.createHmac('sha256', authSecret).update(destination).digest('hex')`,
