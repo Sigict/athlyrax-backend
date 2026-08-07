@@ -32,11 +32,8 @@ export function canonicalStoragePaths({ sourceRoot, storageRoot } = {}) {
 }
 
 function readJson(filePath) {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
+  catch { return null; }
 }
 
 function readJsonObject(filePath) {
@@ -87,9 +84,7 @@ function copyExact(source, destination) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.copyFileSync(source, destination);
   const destinationBytes = fs.readFileSync(destination);
-  if (!sourceBytes.equals(destinationBytes)) {
-    throw new Error(`Verified copy failed: ${source} -> ${destination}`);
-  }
+  if (!sourceBytes.equals(destinationBytes)) throw new Error(`Verified copy failed: ${source} -> ${destination}`);
   return destinationBytes.length;
 }
 
@@ -104,12 +99,14 @@ function backupLegacySource(source, backupRoot, relativeLabel) {
 export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger = console } = {}) {
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot });
   const migrated = [];
-
   const legacyAuthUsers = path.join(paths.storageRoot, 'auth-users.json');
   const legacyAuthBackup = path.join(paths.storageRoot, 'auth-users.backup.json');
 
   if (fs.existsSync(paths.authUsers) && !validAuthStore(paths.authUsers)) {
     throw new Error(`Canonical auth users store is unreadable or invalid: ${paths.authUsers}`);
+  }
+  if (fs.existsSync(paths.authUsersBackup) && !validAuthStore(paths.authUsersBackup)) {
+    throw new Error(`Canonical auth users backup is unreadable or invalid: ${paths.authUsersBackup}`);
   }
   if (!fs.existsSync(paths.authUsers) && fs.existsSync(legacyAuthUsers)) {
     if (!validAuthStore(legacyAuthUsers)) throw new Error(`Legacy auth users store is unreadable or invalid: ${legacyAuthUsers}`);
@@ -123,15 +120,17 @@ export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRo
     const bytes = copyExact(legacyAuthBackup, paths.authUsersBackup);
     migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes });
   }
+  if (fs.existsSync(paths.authUsers) && !fs.existsSync(paths.authUsersBackup)) {
+    const bytes = copyExact(paths.authUsers, paths.authUsersBackup);
+    migrated.push({ kind: 'auth-users-backup-baseline', from: paths.authUsers, to: paths.authUsersBackup, bytes });
+  }
 
   const legacyTenantRoot = path.join(paths.storageRoot, 'tenants', 'clubs');
   if (fs.existsSync(legacyTenantRoot)) {
     for (const entry of fs.readdirSync(legacyTenantRoot, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const tenantId = String(entry.name || '').trim();
-      if (!/^[a-zA-Z0-9._-]+$/.test(tenantId)) {
-        throw new Error(`Unsafe legacy tenant directory name: ${tenantId}`);
-      }
+      if (!/^[a-zA-Z0-9._-]+$/.test(tenantId)) throw new Error(`Unsafe legacy tenant directory name: ${tenantId}`);
       const legacyDb = path.join(legacyTenantRoot, tenantId, 'db.json');
       if (!fs.existsSync(legacyDb)) continue;
       const legacyCandidate = validMeaningfulDatabase(legacyDb);
@@ -139,14 +138,10 @@ export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRo
 
       const canonicalDb = paths.tenantDb(tenantId);
       const canonicalState = classifyDatabase(canonicalDb);
-      if (canonicalState.state === 'invalid') {
-        throw new Error(`Canonical tenant database is unreadable or invalid JSON: ${canonicalDb}`);
-      }
+      if (canonicalState.state === 'invalid') throw new Error(`Canonical tenant database is unreadable or invalid JSON: ${canonicalDb}`);
       if (canonicalState.state === 'meaningful') continue;
 
-      if (fs.existsSync(canonicalDb)) {
-        backupLegacySource(canonicalDb, backupRoot, path.join('canonical-before-migration', tenantId, 'db.json'));
-      }
+      if (fs.existsSync(canonicalDb)) backupLegacySource(canonicalDb, backupRoot, path.join('canonical-before-migration', tenantId, 'db.json'));
       backupLegacySource(legacyDb, backupRoot, path.join('legacy-tenants', tenantId, 'db.json'));
       const bytes = copyExact(legacyDb, canonicalDb);
       migrated.push({ kind: 'tenant-db', tenantId, from: legacyDb, to: canonicalDb, bytes });
@@ -170,9 +165,7 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
   const bundledDemo = path.join(paths.repositoryStorage, 'tenants', 'demo-company', 'db.json');
   const legacyCandidate = validMeaningfulDatabase(legacyDemo);
   const bundledCandidate = validMeaningfulDatabase(bundledDemo);
-  if (bundledCandidate && !hasMeaningfulDemoData(bundledCandidate.payload)) {
-    throw new Error(`Bundled demo-company database contains no meaningful demo records: ${bundledDemo}`);
-  }
+  if (bundledCandidate && !hasMeaningfulDemoData(bundledCandidate.payload)) throw new Error(`Bundled demo-company database contains no meaningful demo records: ${bundledDemo}`);
   const sourceCandidate = legacyCandidate || bundledCandidate;
   if (!sourceCandidate) throw new Error('No valid demo-company recovery database is available.');
 
@@ -186,9 +179,7 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
 
   const bytes = copyExact(sourceCandidate.filePath, liveDemo);
   const restored = validMeaningfulDatabase(liveDemo);
-  if (!restored || restored.stat.size !== sourceCandidate.stat.size || !hasMeaningfulDemoData(restored.payload)) {
-    throw new Error('Demo-company recovery verification failed.');
-  }
+  if (!restored || restored.stat.size !== sourceCandidate.stat.size || !hasMeaningfulDemoData(restored.payload)) throw new Error('Demo-company recovery verification failed.');
 
   const sourceLabel = legacyCandidate ? 'legacy-live' : 'bundled-seed';
   logger.info(`[storage-path] Restored demo-company database from ${sourceLabel} source (${bytes} bytes).`);
