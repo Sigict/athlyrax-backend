@@ -14,6 +14,7 @@ import {
 } from './storage-safety-lib.mjs';
 import {
   assertCanonicalPathContract,
+  canonicalStoragePaths,
   finalizeLegacyStorageMigration,
   migrateLegacyStorageIfNeeded,
   restoreBundledDemoTenantIfNeeded,
@@ -41,6 +42,22 @@ assertCanonicalPathContract({
   storageRoot: initialStorageConfiguration.storageRoot,
   indexSource,
 });
+
+const canonicalPaths = canonicalStoragePaths({
+  sourceRoot,
+  storageRoot: initialStorageConfiguration.storageRoot,
+});
+const legacyAuthBackup = path.join(initialStorageConfiguration.storageRoot, 'auth-users.backup.json');
+if (
+  !fs.existsSync(canonicalPaths.legacyMigrationMarker)
+  && fs.existsSync(canonicalPaths.authUsers)
+  && !fs.existsSync(canonicalPaths.authUsersBackup)
+  && !fs.existsSync(legacyAuthBackup)
+) {
+  const error = new Error('Canonical authentication store exists but its backup is missing and no legacy backup is available. Refusing to manufacture a replacement backup.');
+  error.code = 'ATHLYRAX_AUTH_BACKUP_MISSING';
+  throw error;
+}
 
 const legacyMigration = migrateLegacyStorageIfNeeded({
   sourceRoot,
