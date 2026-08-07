@@ -22,6 +22,7 @@ const transforms = [
   'scripts/patch-runtime-data-retention.mjs',
   'scripts/patch-revision-integrity.mjs',
   'scripts/patch-auth-tenant-integrity.mjs',
+  'scripts/patch-migration-validation.mjs',
 ];
 
 for (const relative of transforms) {
@@ -29,8 +30,15 @@ for (const relative of transforms) {
   run(relative, [relative]);
 }
 
-run('data-safety preload syntax check', ['--check', 'scripts/data-safety-preload.mjs']);
-run('index.js syntax check', ['--check', 'index.js']);
+for (const relative of [
+  'scripts/data-safety-preload.mjs',
+  'scripts/index.js',
+  'scripts/migrate-storage-once.mjs',
+  'scripts/approve-storage-layout.mjs',
+]) {
+  const actual = relative === 'scripts/index.js' ? 'index.js' : relative;
+  run(`${actual} syntax check`, ['--check', actual]);
+}
 run('storage/path audit', ['scripts/audit-storage-paths.mjs']);
 
 for (const obsolete of [
