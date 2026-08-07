@@ -12,6 +12,11 @@ function route(startText) {
   return source.slice(start, next >= 0 ? next : source.length);
 }
 
+test('production runtime cannot activate built-in default auth users', () => {
+  assert.ok(source.includes('ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED'));
+  assert.ok(source.includes('const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : ['));
+});
+
 test('password reset request endpoints do not reveal delivery outcome or use first-match identity lookup', () => {
   for (const startText of [
     "app.post('/auth/password-reset/request'",
