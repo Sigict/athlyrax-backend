@@ -6,7 +6,6 @@
   "scripts": {
     "postinstall": "node scripts/patch-index-signup-legal.mjs && node scripts/patch-logout-csrf.mjs && node scripts/patch-canonical-storage-contract.mjs",
     "start": "npm run test:signup-legal-acceptance && npm run test:storage-path-contract && npm run audit:storage-paths && node scripts/safe-start.mjs",
-    "start:unsafe": "node index.js",
     "check:storage-safety": "node scripts/check-storage-safety.mjs",
     "audit:storage-paths": "node scripts/audit-storage-paths.mjs",
     "test:storage-safety": "node --test tests/storage-safety.test.mjs",
