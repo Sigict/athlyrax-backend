@@ -14,6 +14,7 @@ import {
   validateRequiredStorageFiles,
 } from './storage-safety-lib.mjs';
 import { assertCanonicalPathContract } from './storage-path-contract.mjs';
+import { assertNoSymlinkStorageLayout } from './storage-path-integrity.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const sourceRoot = path.resolve(path.dirname(__filename), '..');
@@ -51,6 +52,10 @@ for (const [directory, label] of [
   }
   fs.accessSync(directory, fs.constants.R_OK | fs.constants.W_OK);
 }
+
+// Path.resolve() alone does not protect against filesystem symlinks. Reject
+// symlinked primary/backup trees before any live file is trusted or written.
+assertNoSymlinkStorageLayout(configuration, fs);
 
 process.env.ATHLYRAX_STORAGE_ROOT = configuration.storageRoot;
 process.env.ATHLYRAX_SAFETY_BACKUP_ROOT = configuration.backupRoot;
