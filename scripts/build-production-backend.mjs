@@ -41,6 +41,7 @@ const transforms = [
   'scripts/patch-ownership-integrity.mjs',
   'scripts/patch-orphan-tenant-safety.mjs',
   'scripts/patch-billing-catalog-integrity.mjs',
+  'scripts/patch-account-lifecycle-integrity.mjs',
 ];
 
 for (const relative of transforms) {
