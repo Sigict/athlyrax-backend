@@ -109,7 +109,7 @@ for (const marker of [
   'ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
-  'ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS',
+  'ATHLYRAX_ONBOARDING_EMAIL_UNIQUE',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE',
   'ATHLYRAX_COACH_LINK_WORKFLOW_V1',
   'ATHLYRAX_COACH_LINK_LIFECYCLE_V1',
@@ -122,6 +122,7 @@ for (const marker of [
   'ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB',
   'ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
+if (transformedIndex.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) failures.push('index.js: duplicate onboarding email uniqueness guard remains.');
 
 const authPersistencePatch = read('scripts/patch-auth-persistence-transaction.mjs');
 for (const token of [
@@ -146,9 +147,10 @@ for (const token of [
   'ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
-  'ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS',
+  'ATHLYRAX_ONBOARDING_EMAIL_UNIQUE',
   'resolveLoginUserByIdentifier(identifier)',
 ]) if (!authEnumerationPatch.includes(token)) failures.push(`scripts/patch-auth-enumeration-safety.mjs: missing required token ${token}`);
+if (authEnumerationPatch.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) failures.push('scripts/patch-auth-enumeration-safety.mjs: duplicate onboarding email guard logic returned.');
 
 const coachTransactionPatch = read('scripts/patch-coach-link-transaction-integrity.mjs');
 for (const token of [
