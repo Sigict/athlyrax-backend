@@ -13,10 +13,11 @@ function tempDir(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), prefix))
 function prepareValidStorage(storageRoot, tenantId = 'demo-company') {
   fs.mkdirSync(path.join(storageRoot, 'auth'), { recursive: true });
   fs.mkdirSync(path.join(storageRoot, 'tenants', tenantId), { recursive: true });
-  fs.writeFileSync(path.join(storageRoot, 'db.json'), '{}\n');
-  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), '[]\n');
-  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), '[]\n');
-  fs.writeFileSync(path.join(storageRoot, 'tenants', tenantId, 'db.json'), '{"swimmers":[]}\n');
+  fs.writeFileSync(path.join(storageRoot, 'db.json'), '{"__meta":{"tenantId":"global-owner"}}\n');
+  const users = '[{"username":"owner","role":"software-owner","passwordHash":"test-hash"}]\n';
+  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), users);
+  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), users);
+  fs.writeFileSync(path.join(storageRoot, 'tenants', tenantId, 'db.json'), '{"__meta":{"tenantId":"demo-company"},"swimmers":[]}\n');
   writeStorageReadyMarker(storageRoot, { requiredTenants: [tenantId] });
 }
 
@@ -80,14 +81,42 @@ test('missing required tenant DB fails closed', () => {
   const storageRoot = tempDir('athlyrax-storage-');
   const backupRoot = tempDir('athlyrax-backup-');
   fs.mkdirSync(path.join(storageRoot, 'auth'), { recursive: true });
-  fs.writeFileSync(path.join(storageRoot, 'db.json'), '{}\n');
-  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), '[]\n');
-  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), '[]\n');
+  fs.writeFileSync(path.join(storageRoot, 'db.json'), '{"__meta":{"tenantId":"global-owner"}}\n');
+  const users = '[{"username":"owner","role":"software-owner","passwordHash":"test-hash"}]\n';
+  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), users);
+  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), users);
   writeStorageReadyMarker(storageRoot);
   assert.throws(() => runStorageSafetyCheck({
     env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
     repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
   }), /demo-company/);
+});
+
+test('empty production global database fails closed', () => {
+  const repoRoot = tempDir('athlyrax-repo-');
+  const storageRoot = tempDir('athlyrax-storage-');
+  const backupRoot = tempDir('athlyrax-backup-');
+  prepareValidStorage(storageRoot);
+  fs.writeFileSync(path.join(storageRoot, 'db.json'), '{}\n');
+  assert.throws(() => runStorageSafetyCheck({ env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' }, repoRoot, logger: { info() {}, warn() {} } }), /Global database must not be empty in production/);
+});
+
+test('empty production authentication store fails closed', () => {
+  const repoRoot = tempDir('athlyrax-repo-');
+  const storageRoot = tempDir('athlyrax-storage-');
+  const backupRoot = tempDir('athlyrax-backup-');
+  prepareValidStorage(storageRoot);
+  fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), '[]\n');
+  assert.throws(() => runStorageSafetyCheck({ env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' }, repoRoot, logger: { info() {}, warn() {} } }), /at least one user in production/);
+});
+
+test('empty production required tenant database fails closed', () => {
+  const repoRoot = tempDir('athlyrax-repo-');
+  const storageRoot = tempDir('athlyrax-storage-');
+  const backupRoot = tempDir('athlyrax-backup-');
+  prepareValidStorage(storageRoot);
+  fs.writeFileSync(path.join(storageRoot, 'tenants', 'demo-company', 'db.json'), '{}\n');
+  assert.throws(() => runStorageSafetyCheck({ env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' }, repoRoot, logger: { info() {}, warn() {} } }), /Tenant database demo-company must not be empty in production/);
 });
 
 test('missing authentication backup fails closed', () => {
@@ -108,10 +137,7 @@ test('corrupt global database fails closed', () => {
   const backupRoot = tempDir('athlyrax-backup-');
   prepareValidStorage(storageRoot);
   fs.writeFileSync(path.join(storageRoot, 'db.json'), '{invalid', 'utf8');
-  assert.throws(() => runStorageSafetyCheck({
-    env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
-    repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
-  }), /Global database is not valid JSON/);
+  assert.throws(() => runStorageSafetyCheck({ env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' }, repoRoot, logger: { info() {}, warn() {} } }), /Global database is not valid JSON/);
 });
 
 test('corrupt authentication store fails closed', () => {
@@ -120,10 +146,7 @@ test('corrupt authentication store fails closed', () => {
   const backupRoot = tempDir('athlyrax-backup-');
   prepareValidStorage(storageRoot);
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), '{invalid', 'utf8');
-  assert.throws(() => runStorageSafetyCheck({
-    env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
-    repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
-  }), /Authentication user store is not valid JSON/);
+  assert.throws(() => runStorageSafetyCheck({ env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' }, repoRoot, logger: { info() {}, warn() {} } }), /Authentication user store is not valid JSON/);
 });
 
 test('corrupt authentication backup fails closed', () => {
@@ -132,10 +155,7 @@ test('corrupt authentication backup fails closed', () => {
   const backupRoot = tempDir('athlyrax-backup-');
   prepareValidStorage(storageRoot);
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), '{invalid', 'utf8');
-  assert.throws(() => runStorageSafetyCheck({
-    env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
-    repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
-  }), /Authentication user backup is not valid JSON/);
+  assert.throws(() => runStorageSafetyCheck({ env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' }, repoRoot, logger: { info() {}, warn() {} } }), /Authentication user backup is not valid JSON/);
 });
 
 test('corrupt required tenant database fails closed', () => {
@@ -144,8 +164,5 @@ test('corrupt required tenant database fails closed', () => {
   const backupRoot = tempDir('athlyrax-backup-');
   prepareValidStorage(storageRoot);
   fs.writeFileSync(path.join(storageRoot, 'tenants', 'demo-company', 'db.json'), '{invalid', 'utf8');
-  assert.throws(() => runStorageSafetyCheck({
-    env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' },
-    repoRoot, createDirectories: true, requireFiles: true, logger: { info() {}, warn() {} },
-  }), /Tenant database demo-company is not valid JSON/);
+  assert.throws(() => runStorageSafetyCheck({ env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_REQUIRED_TENANTS: 'demo-company' }, repoRoot, logger: { info() {}, warn() {} } }), /Tenant database demo-company is not valid JSON/);
 });
