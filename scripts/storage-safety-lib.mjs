@@ -163,6 +163,18 @@ function validateDatabaseObject(filePath, label, fsModule = fs, requireNonEmpty 
   return [];
 }
 
+function validateTenantDatabaseIdentity(filePath, expectedTenantId, label, fsModule = fs) {
+  const parsed = readJsonForValidation(filePath, fsModule);
+  if (!parsed.ok || !parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) return [];
+  const declaredTenantId = normalizeTenantId(parsed.value?.__meta?.tenantId);
+  if (!declaredTenantId) return [];
+  const expected = normalizeTenantId(expectedTenantId);
+  if (declaredTenantId !== expected) {
+    return [`${label} declares tenant ${declaredTenantId} but is stored at tenant ${expected}. Refusing cross-tenant data routing: ${filePath}`];
+  }
+  return [];
+}
+
 function validateAuthStore(filePath, label = 'Authentication user store', fsModule = fs, requireNonEmpty = false) {
   if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
   const parsed = readJsonForValidation(filePath, fsModule);
@@ -221,7 +233,9 @@ function validateAuthBoundTenantDatabases(configuration, env = process.env, fsMo
   }
   for (const tenantId of tenantIds) {
     const tenantPath = path.join(configuration.tenantRootPath, tenantId, 'db.json');
-    failures.push(...validateDatabaseObject(tenantPath, `Auth-bound tenant database ${tenantId}`, fsModule, configuration.production));
+    const label = `Auth-bound tenant database ${tenantId}`;
+    failures.push(...validateDatabaseObject(tenantPath, label, fsModule, configuration.production));
+    failures.push(...validateTenantDatabaseIdentity(tenantPath, tenantId, label, fsModule));
   }
   return failures;
 }
@@ -244,12 +258,17 @@ export function validateRequiredStorageFiles(configuration, env = process.env, f
       continue;
     }
     const tenantPath = path.join(configuration.tenantRootPath, tenantId, 'db.json');
-    failures.push(...validateDatabaseObject(tenantPath, `Tenant database ${tenantId}`, fsModule, strict));
+    const label = `Tenant database ${tenantId}`;
+    failures.push(...validateDatabaseObject(tenantPath, label, fsModule, strict));
+    failures.push(...validateTenantDatabaseIdentity(tenantPath, tenantId, label, fsModule));
   }
 
   if (configuration.production) {
     const marker = readReadyMarker(configuration.readyMarkerPath, fsModule);
     if (!marker || marker.version !== STORAGE_LAYOUT_VERSION || marker.approved !== true) failures.push(`Storage approval marker is missing or invalid: ${configuration.readyMarkerPath}`);
+    if (marker?.storageRoot && path.resolve(marker.storageRoot) !== configuration.storageRoot) {
+      failures.push(`Storage approval marker belongs to a different storage root: ${marker.storageRoot}`);
+    }
   }
   return failures;
 }
@@ -280,10 +299,36 @@ export function sha256File(filePath, fsModule = fs) {
 }
 
 export function writeStorageReadyMarker(storageRoot, details = {}, fsModule = fs) {
-  const markerPath = path.join(storageRoot, STORAGE_READY_MARKER);
-  const tempPath = path.join(storageRoot, `${STORAGE_READY_MARKER}.${process.pid}.${Date.now()}.tmp`);
-  const payload = { version: STORAGE_LAYOUT_VERSION, approved: true, createdAt: new Date().toISOString(), ...details };
-  fsModule.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-  fsModule.renameSync(tempPath, markerPath);
+  const resolvedStorageRoot = path.resolve(storageRoot);
+  fsModule.mkdirSync(resolvedStorageRoot, { recursive: true });
+  const markerPath = path.join(resolvedStorageRoot, STORAGE_READY_MARKER);
+  const tempPath = path.join(resolvedStorageRoot, `${STORAGE_READY_MARKER}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  const payload = {
+    ...details,
+    version: STORAGE_LAYOUT_VERSION,
+    approved: true,
+    storageRoot: resolvedStorageRoot,
+    createdAt: new Date().toISOString(),
+  };
+  let fileHandle = null;
+  try {
+    fileHandle = fsModule.openSync(tempPath, 'wx', 0o600);
+    fsModule.writeFileSync(fileHandle, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    fsModule.fsyncSync(fileHandle);
+  } finally {
+    if (fileHandle !== null) fsModule.closeSync(fileHandle);
+  }
+  try {
+    fsModule.renameSync(tempPath, markerPath);
+  } catch (error) {
+    try { fsModule.unlinkSync(tempPath); } catch {}
+    throw error;
+  }
+  try {
+    const directoryHandle = fsModule.openSync(resolvedStorageRoot, 'r');
+    try { fsModule.fsyncSync(directoryHandle); } finally { fsModule.closeSync(directoryHandle); }
+  } catch {
+    // Some hosted filesystems do not permit directory fsync.
+  }
   return markerPath;
 }
