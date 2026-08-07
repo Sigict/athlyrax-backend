@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   assertCanonicalPathContract,
   canonicalStoragePaths,
+  finalizeLegacyStorageMigration,
   migrateLegacyStorageIfNeeded,
   restoreBundledDemoTenantIfNeeded,
 } from '../scripts/storage-path-contract.mjs';
@@ -30,6 +31,7 @@ test('all live stores have one canonical path template', () => {
   assert.equal(paths.billingCatalog, path.join(storage, 'billing-catalog.json'));
   assert.equal(paths.snapshotSubmissions, path.join(storage, 'snapshot-submissions.json'));
   assert.equal(paths.authAuditDir, path.join(storage, 'auth-audit'));
+  assert.equal(paths.legacyMigrationMarker, path.join(storage, '.athlyrax-legacy-storage-migration-v1.json'));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -56,7 +58,7 @@ test('fully canonical backend source passes the contract', () => {
   }));
 });
 
-test('legacy root auth files and every legacy tenant database migrate to canonical paths without deleting sources', () => {
+test('legacy auth plus all tenant files migrate to canonical paths and backups', () => {
   const root = tempDir('athlyrax-legacy-all-');
   const sourceRoot = path.join(root, 'source');
   const storageRoot = path.join(root, 'persistent');
@@ -68,20 +70,37 @@ test('legacy root auth files and every legacy tenant database migrate to canonic
   fs.writeFileSync(path.join(storageRoot, 'auth-users.backup.json'), `${JSON.stringify(users)}\n`, 'utf8');
 
   for (const tenantId of ['tenant-a', 'tenant-b']) {
-    const legacyDb = path.join(storageRoot, 'tenants', 'clubs', tenantId, 'db.json');
-    fs.mkdirSync(path.dirname(legacyDb), { recursive: true });
-    fs.writeFileSync(legacyDb, `${JSON.stringify({ swimmers: [{ id: `${tenantId}-swimmer` }] })}\n`, 'utf8');
+    const legacyDir = path.join(storageRoot, 'tenants', 'clubs', tenantId);
+    fs.mkdirSync(path.join(legacyDir, 'db-snapshots'), { recursive: true });
+    fs.writeFileSync(path.join(legacyDir, 'db.json'), `${JSON.stringify({ swimmers: [{ id: `${tenantId}-swimmer` }] })}\n`, 'utf8');
+    fs.writeFileSync(path.join(legacyDir, 'trainingPlannerTargets.backup.json'), `${JSON.stringify({ rows: [{ id: `${tenantId}-target` }] })}\n`, 'utf8');
+    fs.writeFileSync(path.join(legacyDir, 'db-snapshots', 'db-old.json'), `${JSON.stringify({ swimmers: [{ id: `${tenantId}-snapshot` }] })}\n`, 'utf8');
   }
 
   const result = migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } });
-  assert.equal(result.count, 4);
+  assert.equal(result.count, 8);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), 'utf8')), users);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), 'utf8')), users);
   for (const tenantId of ['tenant-a', 'tenant-b']) {
     assert.equal(fs.existsSync(path.join(storageRoot, 'tenants', tenantId, 'db.json')), true);
+    assert.equal(fs.existsSync(path.join(storageRoot, 'tenants', tenantId, 'trainingPlannerTargets.backup.json')), true);
+    assert.equal(fs.existsSync(path.join(storageRoot, 'tenants', tenantId, 'db-snapshots', 'db-old.json')), true);
     assert.equal(fs.existsSync(path.join(storageRoot, 'tenants', 'clubs', tenantId, 'db.json')), true);
   }
   assert.equal(fs.existsSync(path.join(backupRoot, 'legacy-storage-migration')), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('legacy migration creates a canonical auth backup baseline when old backup is absent', () => {
+  const root = tempDir('athlyrax-auth-baseline-');
+  const storageRoot = path.join(root, 'persistent');
+  const backupRoot = path.join(root, 'backup');
+  fs.mkdirSync(storageRoot, { recursive: true });
+  const users = [{ username: 'coach-a', role: 'head-coach' }];
+  fs.writeFileSync(path.join(storageRoot, 'auth-users.json'), `${JSON.stringify(users)}\n`, 'utf8');
+  const result = migrateLegacyStorageIfNeeded({ sourceRoot: root, storageRoot, backupRoot, logger: { info() {} } });
+  assert.equal(result.count, 2);
+  assert.equal(fs.readFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), 'utf8'), fs.readFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), 'utf8'));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -102,6 +121,26 @@ test('legacy migration never overwrites a meaningful canonical tenant database',
   const result = migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } });
   assert.equal(result.count, 0);
   assert.deepEqual(JSON.parse(fs.readFileSync(canonicalDb, 'utf8')), canonicalPayload);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('finalized legacy migration prevents stale legacy data from being reused on future startups', () => {
+  const root = tempDir('athlyrax-legacy-finalized-');
+  const sourceRoot = path.join(root, 'source');
+  const storageRoot = path.join(root, 'persistent');
+  const backupRoot = path.join(root, 'backup');
+  const legacyDb = path.join(storageRoot, 'tenants', 'clubs', 'tenant-a', 'db.json');
+  fs.mkdirSync(path.dirname(legacyDb), { recursive: true });
+  fs.writeFileSync(legacyDb, `${JSON.stringify({ swimmers: [{ id: 'legacy' }] })}\n`, 'utf8');
+  const first = migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } });
+  assert.equal(first.count, 1);
+  const finalized = finalizeLegacyStorageMigration({ storageRoot, migrationResult: first, logger: { info() {} } });
+  assert.equal(finalized.finalized, true);
+  const canonicalDb = path.join(storageRoot, 'tenants', 'tenant-a', 'db.json');
+  fs.writeFileSync(canonicalDb, '{}\n', 'utf8');
+  const second = migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } });
+  assert.equal(second.skipped, true);
+  assert.equal(fs.readFileSync(canonicalDb, 'utf8'), '{}\n');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -153,6 +192,25 @@ test('meaningful legacy demo database is preferred and preserved before bundled 
   assert.deepEqual(JSON.parse(fs.readFileSync(live, 'utf8')), legacyPayload);
   const preserved = fs.readdirSync(path.join(backupRoot, 'demo-bootstrap-replaced'));
   assert.ok(preserved.some((name) => name.includes('legacy-demo-source-preserved')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('finalized migration makes demo recovery ignore stale legacy demo data and use bundled seed', () => {
+  const root = tempDir('athlyrax-demo-marker-');
+  const sourceRoot = path.join(root, 'source');
+  const storageRoot = path.join(root, 'persistent');
+  const backupRoot = path.join(root, 'backup');
+  const bundled = path.join(sourceRoot, 'storage', 'tenants', 'demo-company', 'db.json');
+  const legacy = path.join(storageRoot, 'tenants', 'clubs', 'demo-company', 'db.json');
+  fs.mkdirSync(path.dirname(bundled), { recursive: true });
+  fs.mkdirSync(path.dirname(legacy), { recursive: true });
+  fs.writeFileSync(bundled, `${JSON.stringify(meaningfulPayload('bundle-'))}\n`, 'utf8');
+  fs.writeFileSync(legacy, `${JSON.stringify(meaningfulPayload('legacy-'))}\n`, 'utf8');
+  const migration = migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } });
+  finalizeLegacyStorageMigration({ storageRoot, migrationResult: migration, logger: { info() {} } });
+  fs.unlinkSync(path.join(storageRoot, 'tenants', 'demo-company', 'db.json'));
+  const result = restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } });
+  assert.equal(result.source, 'bundled-seed');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
