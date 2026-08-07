@@ -47,12 +47,27 @@ forbidAll('index.js', [
 requireAll('scripts/patch-canonical-storage-contract.mjs', [
   `globalThis[Symbol.for('athlyrax.safeStartEnforced')] === true`,
   `CANONICAL_STORAGE_CONTRACT_OK`,
-  `registrationTenantProvisioningToken`,
+  `Refusing startup-time auth mutation.`,
+  `Authentication invite store is missing. Refusing startup-time creation.`,
+  `ATHLYRAX_NO_PRODUCTION_STARTUP_AUTOHEAL`,
+  `ATHLYRAX_PRODUCTION_BILLING_EMAIL_NO_CONSOLE`,
+  `crypto.createHmac('sha256', AUTH_SECRET).update(path.resolve(registrationTenantStorage.dbPath)).digest('hex')`,
 ]);
 forbidAll('scripts/patch-canonical-storage-contract.mjs', [
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `process.env.ATHLYRAX_SAFE_START_ENFORCED`,
   `crypto.randomUUID();`,
+]);
+
+requireAll('scripts/patch-persistence-integrity.mjs', [
+  `ATHLYRAX_PRODUCTION_STORAGE_LAYOUT_READ_ONLY`,
+  `if (IS_PRODUCTION) return;`,
+  `ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`,
+  `Snapshot submissions store is missing. Refusing startup-time creation.`,
+  `ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
+  `ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED`,
+  `Refusing startup-time recovery, normalization or default bootstrap.`,
+  `ATHLYRAX_PRODUCTION_PASSWORD_RESET_NO_CONSOLE`,
 ]);
 
 requireAll('scripts/safe-start.mjs', [
@@ -61,64 +76,57 @@ requireAll('scripts/safe-start.mjs', [
   `globalThis[Symbol.for('athlyrax.safeStartEnforced')] = true`,
 ]);
 forbidAll('scripts/safe-start.mjs', [
-  'runStorageSafetyCheck(',
-  'migrateLegacyStorageIfNeeded(',
-  'restoreBundledDemoTenantIfNeeded(',
-  'finalizeLegacyStorageMigration(',
-  'writeStorageReadyMarker(',
-  'writeFileSync(',
-  'copyFileSync(',
-  'mkdirSync(',
-  'renameSync(',
-  'unlinkSync(',
+  'runStorageSafetyCheck(', 'migrateLegacyStorageIfNeeded(', 'restoreBundledDemoTenantIfNeeded(',
+  'finalizeLegacyStorageMigration(', 'writeStorageReadyMarker(', 'writeFileSync(', 'copyFileSync(',
+  'mkdirSync(', 'renameSync(', 'unlinkSync(',
+]);
+
+requireAll('scripts/storage-safety-lib.mjs', [
+  `authInvitesPath`,
+  `snapshotSubmissionsPath`,
+  `billingCatalogPath`,
+  `validateJsonArray(configuration.authInvitesPath`,
+  `validateJsonArray(configuration.snapshotSubmissionsPath`,
+  `validateBillingCatalog(configuration.billingCatalogPath`,
+  `validateAuthPrimaryBackupParity`,
+  `validateAuthBoundTenantDatabases`,
+  `Storage approval marker is not bound to this storage root`,
+  `AUTH_SECRET must be explicitly configured with at least 32 characters in production`,
+]);
+
+requireAll('scripts/approve-storage-layout.mjs', [
+  `assertJsonArray(paths.authInvites`,
+  `assertJsonArray(paths.snapshotSubmissions`,
+  `assertBillingCatalog(paths.billingCatalog`,
+  `authBoundTenants`,
+  `requiredTenants = [...new Set`,
+  `writeStorageReadyMarker`,
 ]);
 
 requireAll('scripts/production-start.mjs', [
-  `ATHLYRAX_STORAGE_MIGRATION_APPROVAL`,
-  `MIGRATE_CANONICAL_STORAGE_ONCE`,
-  `migrationAlreadyCompleted`,
-  `migrate-storage-once.mjs`,
-  `safe-start.mjs`,
+  `ATHLYRAX_STORAGE_MIGRATION_APPROVAL`, `MIGRATE_CANONICAL_STORAGE_ONCE`, `migrationAlreadyCompleted`,
+  `migrate-storage-once.mjs`, `safe-start.mjs`,
 ]);
 requireAll('scripts/migrate-storage-once.mjs', [
-  `MIGRATE_CANONICAL_STORAGE_ONCE`,
-  `migrateLegacyStorageIfNeeded({`,
-  `restoreBundledDemoTenantIfNeeded({`,
-  `sanitizeDemoTenantDatabase({`,
-  `writeStorageReadyMarker(`,
-  `runStorageSafetyCheck({`,
-  `finalizeLegacyStorageMigration({`,
-  `restorePreviousReadyMarker`,
+  `MIGRATE_CANONICAL_STORAGE_ONCE`, `migrateLegacyStorageIfNeeded({`, `restoreBundledDemoTenantIfNeeded({`,
+  `sanitizeDemoTenantDatabase({`, `writeStorageReadyMarker(`, `runStorageSafetyCheck({`,
+  `finalizeLegacyStorageMigration({`, `restorePreviousReadyMarker`,
 ]);
 requireAll('scripts/storage-path-contract.mjs', [
-  `legacy-migration-already-finalized`,
-  `Refusing cross-tenant migration or recovery`,
+  `legacy-migration-already-finalized`, `Refusing cross-tenant migration or recovery`,
   `Refusing to manufacture a backup baseline from the primary store`,
 ]);
 forbidAll('scripts/storage-path-contract.mjs', [`kind: 'auth-users-backup-baseline'`]);
 
 requireAll('scripts/data-safety-preload.mjs', [
-  `ATHLYRAX_MISSING_DB_CREATE_BLOCKED`,
-  `ATHLYRAX_CURRENT_DB_INVALID`,
-  `ATHLYRAX_INCOMING_DB_INVALID`,
-  `hasValidProvisioningProof`,
-  `timingSafeEqual`,
-  `provisioningToken: _discardedProvisioningToken`,
+  `ATHLYRAX_MISSING_DB_CREATE_BLOCKED`, `ATHLYRAX_CURRENT_DB_INVALID`, `ATHLYRAX_INCOMING_DB_INVALID`,
+  `hasValidProvisioningProof`, `timingSafeEqual`, `provisioningToken: _discardedProvisioningToken`,
 ]);
 requireAll('scripts/demo-data-sanitizer.mjs', [
-  `demoDataSynthetic`,
-  `tenantId: 'demo-company'`,
-  `Demo sanitization verification failed`,
-]);
-requireAll('scripts/patch-persistence-integrity.mjs', [
-  `ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`,
-  `ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
-  `ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED`,
-  `ATHLYRAX_PRODUCTION_PASSWORD_RESET_NO_CONSOLE`,
+  `demoDataSynthetic`, `tenantId: 'demo-company'`, `containsObviousPersonalData`, `Demo sanitization verification failed`,
 ]);
 requireAll('scripts/patch-durable-storage-writes.mjs', [
-  `ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
-  `fs.fsyncSync(fileHandle)`,
+  `ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`, `fs.openSync(tmpPath, 'wx', 0o600)`, `fs.fsyncSync(fileHandle)`, `fs.renameSync(tmpPath, filePath)`,
 ]);
 
 for (const obsolete of ['scripts/patch-runtime-start-guard.mjs', 'scripts/patch-provisioning-integrity.mjs']) {
@@ -137,9 +145,12 @@ for (const obsolete of ['patch-runtime-start-guard.mjs', 'patch-provisioning-int
 }
 if (!start.includes('test:storage-all') || !start.includes('production-start.mjs')) failures.push('package.json: guarded production start is not enforced.');
 if (start.includes('migrate-storage-once.mjs')) failures.push('package.json: normal start must not invoke migration directly.');
-for (const required of ['test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:storage-routing-safety', 'test:storage-migration-identity', 'test:storage-extra-invariants', 'test:startup-mutation-safety', 'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths']) {
-  if (!storageAll.includes(required)) failures.push(`package.json: test:storage-all missing ${required}`);
-}
+for (const required of [
+  'test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:storage-routing-safety',
+  'test:storage-migration-identity', 'test:storage-extra-invariants', 'test:startup-mutation-safety',
+  'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore',
+  'test:closed-pilot-security', 'audit:storage-paths',
+]) if (!storageAll.includes(required)) failures.push(`package.json: test:storage-all missing ${required}`);
 
 if (failures.length) {
   console.error('ATHLYRAX_STORAGE_PATH_AUDIT_FAIL');
