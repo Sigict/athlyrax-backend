@@ -5,6 +5,16 @@ import path from 'node:path';
 
 const source = fs.readFileSync(path.resolve('index.js'), 'utf8');
 
+test('coach request refuses a same-tenant two-database transfer', () => {
+  const requestStart = source.indexOf("app.post('/swimmer/coach/request'");
+  const listStart = source.indexOf("app.get('/coach/swimmer-links'", requestStart);
+  assert.ok(requestStart >= 0 && listStart > requestStart, 'request route bounds missing');
+  const request = source.slice(requestStart, listStart);
+  assert.ok(request.includes('ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET'));
+  assert.ok(request.includes('sourceTenantId === targetTenantId'));
+  assert.ok(request.includes('A cross-tenant connection request was not created.'));
+});
+
 test('coach-link lifecycle uses database-first auth-last commit ordering', () => {
   for (const marker of [
     'ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1',
