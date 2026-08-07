@@ -116,28 +116,31 @@ function readJsonForValidation(filePath, fsModule = fs) {
   catch (error) { return { ok: false, error }; }
 }
 
-function validateDatabaseObject(filePath, label, fsModule = fs) {
+function validateDatabaseObject(filePath, label, fsModule = fs, requireNonEmpty = false) {
   if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
   const parsed = readJsonForValidation(filePath, fsModule);
   if (!parsed.ok) return [`${label} is not valid JSON: ${filePath}`];
   if (!parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) return [`${label} must contain a JSON object: ${filePath}`];
+  if (requireNonEmpty && Object.keys(parsed.value).length === 0) return [`${label} must not be empty in production: ${filePath}`];
   return [];
 }
 
-function validateAuthStore(filePath, label = 'Authentication user store', fsModule = fs) {
+function validateAuthStore(filePath, label = 'Authentication user store', fsModule = fs, requireNonEmpty = false) {
   if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
   const parsed = readJsonForValidation(filePath, fsModule);
   if (!parsed.ok) return [`${label} is not valid JSON: ${filePath}`];
   const users = Array.isArray(parsed.value) ? parsed.value : (parsed.value && Array.isArray(parsed.value.users) ? parsed.value.users : null);
   if (!users) return [`${label} must contain a users array: ${filePath}`];
+  if (requireNonEmpty && users.length === 0) return [`${label} must contain at least one user in production: ${filePath}`];
   return [];
 }
 
 export function validateRequiredStorageFiles(configuration, env = process.env, fsModule = fs) {
   const failures = [];
-  failures.push(...validateDatabaseObject(configuration.globalDbPath, 'Global database', fsModule));
-  failures.push(...validateAuthStore(configuration.authUsersPath, 'Authentication user store', fsModule));
-  failures.push(...validateAuthStore(configuration.authUsersBackupPath, 'Authentication user backup', fsModule));
+  const strict = configuration.production;
+  failures.push(...validateDatabaseObject(configuration.globalDbPath, 'Global database', fsModule, strict));
+  failures.push(...validateAuthStore(configuration.authUsersPath, 'Authentication user store', fsModule, strict));
+  failures.push(...validateAuthStore(configuration.authUsersBackupPath, 'Authentication user backup', fsModule, strict));
 
   const tenants = clean(env.ATHLYRAX_REQUIRED_TENANTS).split(',').map((value) => value.trim()).filter(Boolean);
   for (const tenantId of tenants) {
@@ -146,7 +149,7 @@ export function validateRequiredStorageFiles(configuration, env = process.env, f
       continue;
     }
     const tenantPath = path.join(configuration.tenantRootPath, tenantId, 'db.json');
-    failures.push(...validateDatabaseObject(tenantPath, `Tenant database ${tenantId}`, fsModule));
+    failures.push(...validateDatabaseObject(tenantPath, `Tenant database ${tenantId}`, fsModule, strict));
   }
 
   if (configuration.production) {
