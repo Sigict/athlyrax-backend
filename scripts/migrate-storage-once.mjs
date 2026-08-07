@@ -14,6 +14,7 @@ import {
   migrateLegacyStorageIfNeeded,
   restoreBundledDemoTenantIfNeeded,
 } from './storage-path-contract.mjs';
+import { sanitizeDemoTenantDatabase } from './demo-data-sanitizer.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
 let readyMarkerPath = '';
@@ -157,6 +158,10 @@ try {
     storageRoot: configuration.storageRoot,
     backupRoot: configuration.backupRoot,
   });
+  const demoSanitization = sanitizeDemoTenantDatabase({
+    filePath: paths.tenantDb('demo-company'),
+    backupRoot: configuration.backupRoot,
+  });
 
   assertMeaningfulDb(paths.globalDb, 'Global database');
   const primaryUsers = authUsersFrom(readJson(paths.authUsers, 'Authentication user store'));
@@ -206,6 +211,7 @@ try {
   console.log(`Required tenants: ${requiredTenants.join(', ') || '(none)'}`);
   console.log(`Migrated items: ${migration.count || 0}`);
   console.log(`Demo recovery: ${demoRecovery.restored ? demoRecovery.source : demoRecovery.reason}`);
+  console.log(`Demo sanitization: ${demoSanitization.sanitized ? 'sanitized' : demoSanitization.reason}`);
 } catch (error) {
   restorePreviousReadyMarker();
   console.error('ATHLYRAX_STORAGE_MIGRATION_FAILED');
