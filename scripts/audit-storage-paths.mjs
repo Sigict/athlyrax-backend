@@ -16,11 +16,6 @@ const requireTokens = (relative, tokens) => {
   for (const token of tokens) if (!source.includes(token)) failures.push(`${relative}: missing required token: ${token}`);
   return source;
 };
-const forbidTokens = (relative, tokens) => {
-  const source = read(relative);
-  for (const token of tokens) if (source.includes(token)) failures.push(`${relative}: forbidden token remains: ${token}`);
-  return source;
-};
 
 const indexSource = requireTokens('index.js', [
   `path.join(STORAGE_ROOT, 'tenants')`,
@@ -61,13 +56,24 @@ for (const forbidden of [
   'copyFileSync(',
 ]) if (safeStart.includes(forbidden)) failures.push(`scripts/safe-start.mjs: normal startup must not mutate storage through ${forbidden}`);
 
+requireTokens('scripts/production-start.mjs', [
+  `ATHLYRAX_STORAGE_MIGRATION_APPROVAL`,
+  `MIGRATE_CANONICAL_STORAGE_ONCE`,
+  `migrationAlreadyCompleted`,
+  `migrate-storage-once.mjs`,
+  `safe-start.mjs`,
+  `invalid value`,
+]);
+
 const migration = requireTokens('scripts/migrate-storage-once.mjs', [
   `MIGRATE_CANONICAL_STORAGE_ONCE`,
+  `Refusing to manufacture a backup from the primary store`,
   `migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
   `writeStorageReadyMarker(`,
   `runStorageSafetyCheck({`,
   `finalizeLegacyStorageMigration({`,
+  `restorePreviousReadyMarker`,
   `ATHLYRAX_STORAGE_MIGRATION_OK`,
 ]);
 const migrationOrder = [
@@ -129,8 +135,8 @@ for (const patch of ['patch-canonical-storage-contract.mjs', 'patch-persistence-
   if (!postinstall.includes(patch)) failures.push(`package.json: postinstall missing ${patch}.`);
 }
 if (Object.prototype.hasOwnProperty.call(pkg?.scripts || {}, 'start:unsafe')) failures.push('package.json: start:unsafe must not exist.');
-if (!start.includes('test:storage-all') || !start.includes('safe-start.mjs')) failures.push('package.json: production start must run full tests and safe-start.');
-if (start.includes('migrate:storage-once') || start.includes('migrate-storage-once.mjs')) failures.push('package.json: production start must not run storage migration.');
+if (!start.includes('test:storage-all') || !start.includes('production-start.mjs')) failures.push('package.json: production start must run full tests and the guarded production wrapper.');
+if (start.includes('migrate:storage-once') || start.includes('migrate-storage-once.mjs')) failures.push('package.json: start command must not invoke migration directly.');
 if (!migrateCommand.includes('migrate-storage-once.mjs')) failures.push('package.json: explicit migrate:storage-once command is missing.');
 for (const requiredTest of [
   'test:storage-safety',
