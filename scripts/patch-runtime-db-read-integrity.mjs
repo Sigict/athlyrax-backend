@@ -1,0 +1,44 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+const indexPath = path.resolve('index.js');
+let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
+
+const marker = '// ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED';
+if (!source.includes(marker)) {
+  const getRouteStart = source.indexOf("app.get('/db', requireAuth, (req, res) => {");
+  const readAnchor = `\t\t} else {\n\t\t\tlet responsePayload = data;\n\t\t\tconst role = String(req.auth?.role || '').trim().toLowerCase();`;
+  const readIndex = source.indexOf(readAnchor, getRouteStart);
+  if (getRouteStart < 0 || readIndex < 0) throw new Error('GET /db read-integrity anchor was not found.');
+  const replacement = `\t\t} else {\n\t\t\t${marker}\n\t\t\tlet parsedDatabase;\n\t\t\ttry {\n\t\t\t\tparsedDatabase = JSON.parse(String(data || ''));\n\t\t\t\tif (!parsedDatabase || typeof parsedDatabase !== 'object' || Array.isArray(parsedDatabase)) {\n\t\t\t\t\tthrow new Error('Database root must be an object.');\n\t\t\t\t}\n\t\t\t} catch (error) {\n\t\t\t\tappendAuthAuditEvent({\n\t\t\t\t\taction: 'database_read_blocked',\n\t\t\t\t\treq,\n\t\t\t\t\tstatus: 'blocked',\n\t\t\t\t\treason: 'database_invalid_json',\n\t\t\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t\t\t});\n\t\t\t\tres.status(503).json({\n\t\t\t\t\terror: 'Tenant data is unavailable because the stored database failed integrity validation. No empty replacement was created.',\n\t\t\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t\t\t});\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tlet responsePayload = JSON.stringify(parsedDatabase);\n\t\t\tconst role = String(req.auth?.role || '').trim().toLowerCase();`;
+  source = source.slice(0, readIndex) + source.slice(readIndex).replace(readAnchor, replacement);
+
+  const swimmerParse = `\t\t\t\ttry {\n\t\t\t\t\tconst parsed = JSON.parse(String(data || '{}'));\n\t\t\t\t\tconst swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];`;
+  const swimmerParsed = `\t\t\t\ttry {\n\t\t\t\t\tconst parsed = parsedDatabase;\n\t\t\t\t\tconst swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];`;
+  if (!source.includes(swimmerParse)) throw new Error('GET /db swimmer parse anchor was not found.');
+  source = source.replace(swimmerParse, swimmerParsed);
+
+  const unsafeSwimmerCatch = `\t\t\t\t} catch {\n\t\t\t\t\tresponsePayload = JSON.stringify({ swimmers: [] });\n\t\t\t\t}`;
+  const safeSwimmerCatch = `\t\t\t\t} catch (error) {\n\t\t\t\t\tappendAuthAuditEvent({ action: 'database_read_blocked', req, status: 'blocked', reason: 'swimmer_scope_filter_failed', details: { tenantKey: storagePaths.tenantKey } });\n\t\t\t\t\tres.status(503).json({ error: 'Swimmer data could not be safely scoped. No empty result was substituted.' });\n\t\t\t\t\treturn;\n\t\t\t\t}`;
+  if (!source.includes(unsafeSwimmerCatch)) throw new Error('GET /db swimmer empty-fallback anchor was not found.');
+  source = source.replace(unsafeSwimmerCatch, safeSwimmerCatch);
+}
+
+const ownershipMarker = '// ATHLYRAX_OWNERSHIP_SUMMARY_STRICT_DB_READ';
+if (!source.includes(ownershipMarker)) {
+  const anchor = `\t\tconst storagePaths = resolveStoragePathsForAuth(req.auth);\n\t\tensureStorageLayout(storagePaths);\n\t\tconst dbShape = readJsonFile(storagePaths.dbPath);\n\t\tconst summary = buildOwnershipSummary(dbShape);`;
+  const replacement = `\t\tconst storagePaths = resolveStoragePathsForAuth(req.auth);\n\t\t${ownershipMarker}\n\t\tif (!fs.existsSync(storagePaths.dbPath)) {\n\t\t\tres.status(503).json({ error: 'Tenant database is missing. No empty replacement was created.' });\n\t\t\treturn;\n\t\t}\n\t\tlet dbShape;\n\t\ttry {\n\t\t\tdbShape = JSON.parse(fs.readFileSync(storagePaths.dbPath, 'utf8'));\n\t\t\tif (!dbShape || typeof dbShape !== 'object' || Array.isArray(dbShape)) throw new Error('Database root must be an object.');\n\t\t} catch {\n\t\t\tres.status(503).json({ error: 'Tenant database failed integrity validation.' });\n\t\t\treturn;\n\t\t}\n\t\tconst summary = buildOwnershipSummary(dbShape);`;
+  if (!source.includes(anchor)) throw new Error('Ownership summary database-read anchor was not found.');
+  source = source.replace(anchor, replacement);
+}
+
+for (const token of [
+  'ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED',
+  'database_invalid_json',
+  'No empty replacement was created.',
+  'No empty result was substituted.',
+  'ATHLYRAX_OWNERSHIP_SUMMARY_STRICT_DB_READ',
+]) if (!source.includes(token)) throw new Error(`Runtime database read hardening missing: ${token}`);
+
+fs.writeFileSync(indexPath, source, 'utf8');
+console.log('RUNTIME_DB_READ_INTEGRITY_OK');
