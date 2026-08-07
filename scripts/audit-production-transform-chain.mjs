@@ -33,6 +33,12 @@ const expectedTransforms = [
   'scripts/patch-billing-catalog-integrity.mjs',
   'scripts/patch-account-lifecycle-integrity.mjs',
   'scripts/patch-auth-enumeration-safety.mjs',
+  'scripts/patch-coach-link-suite.mjs',
+  'scripts/patch-production-cors-origins.mjs',
+  'scripts/patch-runtime-db-read-integrity.mjs',
+];
+
+const expectedCoachLinkSteps = [
   'scripts/patch-swimmer-coach-authority.mjs',
   'scripts/patch-parent-notification-semantics.mjs',
   'scripts/patch-coach-link-workflow.mjs',
@@ -42,11 +48,10 @@ const expectedTransforms = [
   'scripts/patch-coach-link-routing.mjs',
   'scripts/patch-coach-link-reconnect.mjs',
   'scripts/patch-coach-link-transaction-integrity.mjs',
-  'scripts/patch-production-cors-origins.mjs',
-  'scripts/patch-runtime-db-read-integrity.mjs',
 ];
 
 for (const relative of expectedTransforms) read(relative);
+for (const relative of expectedCoachLinkSteps) read(relative);
 read('tests/auth-persistence-transaction.test.mjs');
 read('tests/auth-enumeration-safety.test.mjs');
 read('tests/coach-link-transaction.test.mjs');
@@ -63,7 +68,29 @@ if (!transformArrayMatch) {
   if (new Set(actualTransforms).size !== actualTransforms.length) {
     failures.push('scripts/build-production-backend.mjs: duplicate production transform exists.');
   }
+  for (const internalStep of expectedCoachLinkSteps) {
+    if (actualTransforms.includes(internalStep)) failures.push(`scripts/build-production-backend.mjs: coach-link internal step leaked back into top-level transform chain: ${internalStep}`);
+  }
 }
+
+const coachSuite = read('scripts/patch-coach-link-suite.mjs');
+const coachStepArrayMatch = coachSuite.match(/const steps = \[([\s\S]*?)\n\];/);
+if (!coachStepArrayMatch) {
+  failures.push('scripts/patch-coach-link-suite.mjs: internal step array could not be parsed.');
+} else {
+  const actualCoachSteps = Array.from(coachStepArrayMatch[1].matchAll(/'([^']+\.mjs)'/g), (match) => match[1]);
+  if (JSON.stringify(actualCoachSteps) !== JSON.stringify(expectedCoachLinkSteps)) {
+    failures.push(`scripts/patch-coach-link-suite.mjs: internal coach-link order mismatch. Expected ${JSON.stringify(expectedCoachLinkSteps)} but found ${JSON.stringify(actualCoachSteps)}.`);
+  }
+  if (new Set(actualCoachSteps).size !== actualCoachSteps.length) failures.push('scripts/patch-coach-link-suite.mjs: duplicate internal coach-link step exists.');
+}
+for (const token of [
+  'ATHLYRAX_COACH_LINK_SUITE_V1',
+  'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE',
+  'ATHLYRAX_PARENT_NOTIFICATION_ONLY',
+  'ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1',
+  'ATHLYRAX_COACH_LINK_SUITE_OK',
+]) if (!coachSuite.includes(token)) failures.push(`scripts/patch-coach-link-suite.mjs: missing suite verification token ${token}`);
 
 for (const required of [
   "run('storage/path audit', ['scripts/audit-storage-paths.mjs']);",
