@@ -29,9 +29,6 @@ replaceRequired(
   'Planner backup cross-target metadata recovery',
 );
 
-// A successful database commit must not be reported as a failed write merely
-// because the derived planner backup could not be refreshed. The backup is no
-// longer authoritative and its failure is surfaced separately.
 replaceRequired(
   `\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);\n\n\t\treturn {\n\t\t\trecoveredTargets: merged.recoveredTargets,\n\t\t\trecoveredFixtureIds: merged.recoveredFixtureIds,\n\t\t\tstaleWriteIgnored: false,\n\t\t};`,
   `\t\tlet plannerBackupSaved = true;\n\t\ttry {\n\t\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);\n\t\t} catch (backupError) {\n\t\t\tplannerBackupSaved = false;\n\t\t\tconsole.error('[planner-backup] Database was saved but derived planner backup refresh failed:', backupError instanceof Error ? backupError.message : String(backupError));\n\t\t}\n\n\t\treturn {\n\t\t\trecoveredTargets: merged.recoveredTargets,\n\t\t\trecoveredFixtureIds: merged.recoveredFixtureIds,\n\t\t\tstaleWriteIgnored: false,\n\t\t\tplannerBackupSaved,\n\t\t};`,
@@ -43,31 +40,22 @@ replaceRequired(
   'Planner backup response status',
 );
 
-// Several swimmer write routes took the snapshot after replacing the database,
-// which made the snapshot a copy of the new state instead of a recovery copy of
-// the previous state. Reverse every exact write-then-snapshot sequence.
 const writeThenSnapshot = `\t\twriteAtomicJsonFile(storagePaths.dbPath, nextDb);\n\t\twriteDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);`;
 const snapshotThenWrite = `\t\t// ATHLYRAX_PREWRITE_DB_SNAPSHOT_ORDER\n\t\twriteDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);\n\t\twriteAtomicJsonFile(storagePaths.dbPath, nextDb);`;
 if (source.includes(writeThenSnapshot)) source = source.replaceAll(writeThenSnapshot, snapshotThenWrite);
 
-// Reject ambiguous tenant override headers instead of silently normalizing them
-// into a potentially different tenant ID.
 replaceRequired(
   `\tconst baseTenantId = resolveAuthTenantId(req.auth);\n\tconst requestedTenantId = normalizeTenantId(req.headers?.['x-athlyrax-tenant']);\n\tconst reason = String(req.headers?.['x-athlyrax-tenant-reason'] || '').trim();`,
   `\tconst baseTenantId = resolveAuthTenantId(req.auth);\n\tconst requestedTenantRaw = String(req.headers?.['x-athlyrax-tenant'] || '').trim();\n\tconst requestedTenantId = normalizeTenantId(requestedTenantRaw);\n\tconst reason = String(req.headers?.['x-athlyrax-tenant-reason'] || '').trim();\n\tif (requestedTenantRaw && (requestedTenantRaw !== requestedTenantId || !/^[a-z0-9_-]+$/.test(requestedTenantRaw))) {\n\t\treturn { ok: false, status: 400, body: { error: 'x-athlyrax-tenant must already be a canonical lowercase tenant ID.' } };\n\t}`,
   'Tenant override canonical validation',
 );
 
-// Browser preflight must allow the two guarded software-owner tenant override
-// headers; otherwise the protected override path cannot work from the UI.
 replaceRequired(
   `\tres.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token');`,
   `\tres.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-AthlyraX-Tenant, X-AthlyraX-Tenant-Reason');`,
   'Tenant override CORS headers',
 );
 
-// Administrative user creation may bind only to an already-existing tenant.
-// New tenant provisioning must go through guarded registration.
 const adminCreateAnchor = `\tif (!username || !password) {`;
 const adminRouteStart = source.indexOf(`app.post('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {`);
 if (adminRouteStart < 0) throw new Error('Admin user-create route was not found.');
@@ -78,7 +66,6 @@ if (!source.includes('// ATHLYRAX_ADMIN_USER_REQUIRES_EXISTING_TENANT')) {
   source = source.slice(0, adminValidationIndex) + adminGuard + source.slice(adminValidationIndex);
 }
 
-// Invites must never point at a missing or ambiguously normalized tenant.
 const inviteRouteStart = source.indexOf(`app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {`);
 const inviteRoleAnchor = `\tif (role === 'head-coach') {`;
 const inviteRoleIndex = source.indexOf(inviteRoleAnchor, inviteRouteStart);
@@ -88,8 +75,6 @@ if (!source.includes('// ATHLYRAX_INVITE_REQUIRES_EXISTING_TENANT')) {
   source = source.slice(0, inviteRoleIndex) + inviteGuard + source.slice(inviteRoleIndex);
 }
 
-// Role changes must use a known role. Unknown values can otherwise strand an
-// account in an unusable authorization state.
 const roleRouteStart = source.indexOf(`app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {`);
 const roleMissingAnchor = `\tif (!targetUsername || !nextRole) {`;
 const roleMissingIndex = source.indexOf(roleMissingAnchor, roleRouteStart);
@@ -100,8 +85,6 @@ if (!source.includes('// ATHLYRAX_ROLE_VALUE_ALLOWLIST')) {
   source = source.slice(0, insertAfter) + roleGuard + source.slice(insertAfter);
 }
 
-// Keep invite history. Expiry/usage checks already determine usability; deleting
-// historical invite rows during unrelated operations destroys audit evidence.
 const cleanStart = source.indexOf('function cleanExpiredInvites() {');
 const cleanEnd = source.indexOf('\nfunction findUsableInvite(', cleanStart);
 if (cleanStart < 0 || cleanEnd < 0) throw new Error('Invite cleanup function was not found.');
@@ -110,9 +93,6 @@ if (!source.includes('// ATHLYRAX_INVITE_HISTORY_PRESERVED')) {
   source = source.slice(0, cleanStart) + safeClean + source.slice(cleanEnd);
 }
 
-// Snapshot-account authentication must use the same production cookie + CSRF
-// session mechanism as normal authentication. Production bearer compatibility
-// is disabled, so returning a token only creates a session that cannot write.
 replaceRequired(
   `\t\t\tconst session = issueAuthToken({ username, role: 'swimmer' });\n\t\t\tres.status(201).json({\n\t\t\t\tok: true,\n\t\t\t\ttoken: session.token,\n\t\t\t\tuser: buildAuthUserPayload(findAuthUser(username)),\n\t\t\t});`,
   `\t\t\tconst session = issueAuthToken({ username, role: 'swimmer' });\n\t\t\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });\n\t\t\tres.status(201).json({\n\t\t\t\tok: true,\n\t\t\t\ttoken: session.token,\n\t\t\t\tcsrfToken: session.csrf,\n\t\t\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,\n\t\t\t\tuser: buildAuthUserPayload(findAuthUser(username)),\n\t\t\t});`,
@@ -124,24 +104,9 @@ replaceRequired(
   'Snapshot account login session',
 );
 
-// Reset-code comparisons use constant-time comparison just like session tokens.
 source = source.replaceAll(
   `hashPasswordResetCode(resetCode) !== String(resetEntry.codeHash || '')`,
   `!safeEqualText(hashPasswordResetCode(resetCode), String(resetEntry.codeHash || ''))`,
-);
-
-// Production recovery/audit snapshots are evidence. Do not silently prune them
-// just because a count threshold is reached; retention/deletion must be an
-// explicit maintenance operation.
-replaceRequired(
-  `function pruneAuthAuditFiles(paths, keepCount) {\n\tfor (const stalePath of (Array.isArray(paths) ? paths : []).slice(keepCount)) {`,
-  `function pruneAuthAuditFiles(paths, keepCount) {\n\t// ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE\n\tif (IS_PRODUCTION) return;\n\tfor (const stalePath of (Array.isArray(paths) ? paths : []).slice(keepCount)) {`,
-  'Production auth-audit retention',
-);
-replaceRequired(
-  `function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {\n\tif (!fs.existsSync(snapshotDir)) return;`,
-  `function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {\n\t// ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE\n\tif (IS_PRODUCTION) return;\n\tif (!fs.existsSync(snapshotDir)) return;`,
-  'Production database snapshot retention',
 );
 
 for (const token of [
@@ -157,11 +122,13 @@ for (const token of [
   'plannerBackupSaved',
   'csrfHeaderName: AUTH_CSRF_HEADER_NAME',
   '!safeEqualText(hashPasswordResetCode(resetCode)',
-  'ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE',
-  'ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',
 ]) {
   if (!source.includes(token)) throw new Error(`Operational integrity verification failed: ${token}`);
 }
+for (const forbidden of [
+  'ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE',
+  'ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',
+]) if (source.includes(forbidden)) throw new Error(`Operational patch must not own retention behavior: ${forbidden}`);
 
 fs.writeFileSync(indexPath, source, 'utf8');
 console.log('OPERATIONAL_INTEGRITY_PATCH_OK');
