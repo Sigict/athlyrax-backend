@@ -14,6 +14,7 @@ import {
 } from './storage-safety-lib.mjs';
 import {
   assertCanonicalPathContract,
+  migrateLegacyStorageIfNeeded,
   restoreBundledDemoTenantIfNeeded,
 } from './storage-path-contract.mjs';
 
@@ -34,6 +35,12 @@ assertCanonicalPathContract({
   sourceRoot,
   storageRoot: initialStorageConfiguration.storageRoot,
   indexSource,
+});
+
+migrateLegacyStorageIfNeeded({
+  sourceRoot,
+  storageRoot: initialStorageConfiguration.storageRoot,
+  backupRoot: initialStorageConfiguration.backupRoot,
 });
 
 restoreBundledDemoTenantIfNeeded({
