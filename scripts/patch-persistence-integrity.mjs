@@ -12,6 +12,14 @@ if (!source.includes(layoutMarker)) {
   source = source.replace(layoutStart, safeLayoutStart);
 }
 
+const authTransactionMarker = `// ATHLYRAX_AUTH_STORE_PAIR_TRANSACTION`;
+if (!source.includes(authTransactionMarker)) {
+  const legacyPersist = `function persistAuthUsers() {\n\tconst payload = normalizeAuthUserRows(authUsers);\n\twriteAtomicJsonFile(AUTH_USERS_PATH, payload);\n\twriteAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);\n}`;
+  const transactionalPersist = `function persistAuthUsers() {\n${authTransactionMarker}\n\tconst payload = normalizeAuthUserRows(authUsers);\n\tconst previousPrimary = fs.existsSync(AUTH_USERS_PATH) ? readJsonFile(AUTH_USERS_PATH) : null;\n\tconst previousBackup = fs.existsSync(AUTH_USERS_BACKUP_PATH) ? readJsonFile(AUTH_USERS_BACKUP_PATH) : null;\n\tlet primaryWritten = false;\n\ttry {\n\t\twriteAtomicJsonFile(AUTH_USERS_PATH, payload);\n\t\tprimaryWritten = true;\n\t\twriteAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);\n\t} catch (error) {\n\t\tconst rollbackErrors = [];\n\t\tif (primaryWritten && previousPrimary !== null) {\n\t\t\ttry { writeAtomicJsonFile(AUTH_USERS_PATH, previousPrimary); } catch (rollbackError) { rollbackErrors.push(rollbackError); }\n\t\t}\n\t\tif (previousBackup !== null) {\n\t\t\ttry { writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, previousBackup); } catch (rollbackError) { rollbackErrors.push(rollbackError); }\n\t\t}\n\t\tif (rollbackErrors.length > 0) {\n\t\t\tconst transactionError = new Error(\`Authentication store transaction failed and rollback was incomplete: \${rollbackErrors.map((item) => item instanceof Error ? item.message : String(item)).join('; ')}\`);\n\t\t\ttransactionError.cause = error;\n\t\t\ttransactionError.code = 'ATHLYRAX_AUTH_STORE_TRANSACTION_ROLLBACK_FAILED';\n\t\t\tthrow transactionError;\n\t\t}\n\t\tthrow error;\n\t}\n}`;
+  if (!source.includes(legacyPersist)) throw new Error('Could not find authentication persistence pair anchor.');
+  source = source.replace(legacyPersist, transactionalPersist);
+}
+
 const snapshotMarker = `// ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`;
 if (!source.includes(snapshotMarker)) {
   const unsafeSnapshotLoader = `function loadOrCreateSnapshotSubmissions() {\n\tconst parsed = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);\n\tif (Array.isArray(parsed)) return parsed;\n\ttry {\n\t\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, []);\n\t} catch {\n\t\t// Keep boot resilient when first-write fails.\n\t}\n\treturn [];\n}\n\nfunction persistSnapshotSubmissions() {\n\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, Array.isArray(snapshotSubmissions) ? snapshotSubmissions : []);\n}`;
@@ -27,9 +35,7 @@ if (!source.includes(snapshotRetentionMarker)) {
   if (!source.includes(destructiveCap)) throw new Error('Could not find destructive snapshot history cap.');
   source = source.replace(destructiveCap, preserveAll);
 }
-if (source.includes('snapshotSubmissions.length = 5000;')) {
-  throw new Error('Destructive snapshot history truncation remains in backend source.');
-}
+if (source.includes('snapshotSubmissions.length = 5000;')) throw new Error('Destructive snapshot history truncation remains in backend source.');
 
 const billingMarker = `// ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED`;
 if (!source.includes(billingMarker)) {
@@ -50,6 +56,8 @@ if (!source.includes(passwordResetMarker)) {
 
 for (const token of [
   layoutMarker,
+  authTransactionMarker,
+  `ATHLYRAX_AUTH_STORE_TRANSACTION_ROLLBACK_FAILED`,
   snapshotMarker,
   snapshotRetentionMarker,
   billingMarker,
@@ -60,9 +68,7 @@ for (const token of [
   'loadLatestBillingCatalogBackupStrict(',
   'Refusing startup-time recovery, normalization or default bootstrap.',
   'Password reset email delivery is not configured. Refusing to expose reset code through server logs.',
-]) {
-  if (!source.includes(token)) throw new Error(`Persistence integrity verification failed: ${token}`);
-}
+]) if (!source.includes(token)) throw new Error(`Persistence integrity verification failed: ${token}`);
 
 fs.writeFileSync(indexPath, source, 'utf8');
 console.log('PERSISTENCE_INTEGRITY_PATCH_OK');
