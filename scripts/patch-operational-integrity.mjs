@@ -20,8 +20,13 @@ replaceRequired(
 );
 replaceRequired(
   `\t\tconst hasExplicitTargetField = Object.prototype.hasOwnProperty.call(existingWeek || {}, 'primaryTargetCompetitionKey');\n\t\tconst existingUpdatedAtMs = Date.parse(String(existingWeek?.updatedAt || existingWeek?.createdAt || ''));\n\t\tconst hasTimestampedIntentionalClear = hasExplicitTargetField\n\t\t\t&& !existingTargetKey\n\t\t\t&& Number.isFinite(existingUpdatedAtMs);\n\t\tconst shouldRecoverTarget = !existingTargetKey && !hasTimestampedIntentionalClear;`,
-  `\t\t// A backup may fill metadata only for a target that still exists in the\n\t\t// submitted week. It must never restore a missing target key.\n\t\tconst shouldRecoverTarget = false;`,
+  `\t\t// A backup may fill metadata only for the exact target key that is still\n\t\t// present in the submitted week. It must never restore a missing target.\n\t\tconst shouldRecoverTarget = false;`,
   'Planner backup target restoration',
+);
+replaceRequired(
+  `\t\tconst shouldRecoverName = Boolean(existingTargetKey) && !existingTargetName && Boolean(targetName);\n\t\tconst shouldRecoverFixtureId = Boolean(existingTargetKey) && !existingFixtureId && Boolean(targetFixtureId);`,
+  `\t\tconst backupMatchesCurrentTarget = Boolean(existingTargetKey) && targetKey === existingTargetKey;\n\t\tconst shouldRecoverName = backupMatchesCurrentTarget && !existingTargetName && Boolean(targetName);\n\t\tconst shouldRecoverFixtureId = backupMatchesCurrentTarget && !existingFixtureId && Boolean(targetFixtureId);`,
+  'Planner backup cross-target metadata recovery',
 );
 
 // A successful database commit must not be reported as a failed write merely
@@ -38,28 +43,61 @@ replaceRequired(
   'Planner backup response status',
 );
 
+// Several swimmer write routes took the snapshot after replacing the database,
+// which made the snapshot a copy of the new state instead of a recovery copy of
+// the previous state. Reverse every exact write-then-snapshot sequence.
+const writeThenSnapshot = `\t\twriteAtomicJsonFile(storagePaths.dbPath, nextDb);\n\t\twriteDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);`;
+const snapshotThenWrite = `\t\t// ATHLYRAX_PREWRITE_DB_SNAPSHOT_ORDER\n\t\twriteDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);\n\t\twriteAtomicJsonFile(storagePaths.dbPath, nextDb);`;
+if (source.includes(writeThenSnapshot)) source = source.replaceAll(writeThenSnapshot, snapshotThenWrite);
+
+// Reject ambiguous tenant override headers instead of silently normalizing them
+// into a potentially different tenant ID.
+replaceRequired(
+  `\tconst baseTenantId = resolveAuthTenantId(req.auth);\n\tconst requestedTenantId = normalizeTenantId(req.headers?.['x-athlyrax-tenant']);\n\tconst reason = String(req.headers?.['x-athlyrax-tenant-reason'] || '').trim();`,
+  `\tconst baseTenantId = resolveAuthTenantId(req.auth);\n\tconst requestedTenantRaw = String(req.headers?.['x-athlyrax-tenant'] || '').trim();\n\tconst requestedTenantId = normalizeTenantId(requestedTenantRaw);\n\tconst reason = String(req.headers?.['x-athlyrax-tenant-reason'] || '').trim();\n\tif (requestedTenantRaw && (requestedTenantRaw !== requestedTenantId || !/^[a-z0-9_-]+$/.test(requestedTenantRaw))) {\n\t\treturn { ok: false, status: 400, body: { error: 'x-athlyrax-tenant must already be a canonical lowercase tenant ID.' } };\n\t}`,
+  'Tenant override canonical validation',
+);
+
+// Browser preflight must allow the two guarded software-owner tenant override
+// headers; otherwise the protected override path cannot work from the UI.
+replaceRequired(
+  `\tres.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token');`,
+  `\tres.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-AthlyraX-Tenant, X-AthlyraX-Tenant-Reason');`,
+  'Tenant override CORS headers',
+);
+
 // Administrative user creation may bind only to an already-existing tenant.
-// New tenant provisioning must go through the guarded registration path rather
-// than creating an auth identity that points at missing storage.
+// New tenant provisioning must go through guarded registration.
 const adminCreateAnchor = `\tif (!username || !password) {`;
 const adminRouteStart = source.indexOf(`app.post('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {`);
 if (adminRouteStart < 0) throw new Error('Admin user-create route was not found.');
 const adminValidationIndex = source.indexOf(adminCreateAnchor, adminRouteStart);
 if (adminValidationIndex < 0) throw new Error('Admin user-create validation anchor was not found.');
-const adminGuard = `\t// ATHLYRAX_ADMIN_USER_REQUIRES_EXISTING_TENANT\n\tif (tenantId && tenantId !== 'global-owner') {\n\t\tconst adminTenantStorage = resolveStoragePathsForTenantKey(tenantId);\n\t\tif (!fs.existsSync(adminTenantStorage.dbPath)) {\n\t\t\tres.status(409).json({ error: 'Cannot create a user for a tenant whose database does not exist. Provision the tenant through the guarded registration flow first.', tenantId });\n\t\t\treturn;\n\t\t}\n\t}\n\n`;
+const adminGuard = `\t// ATHLYRAX_ADMIN_USER_REQUIRES_EXISTING_TENANT\n\tconst rawRequestedAdminTenantId = String(req.body?.tenantId || '').trim();\n\tif (rawRequestedAdminTenantId && (rawRequestedAdminTenantId !== normalizeTenantId(rawRequestedAdminTenantId) || !/^[a-z0-9_-]+$/.test(rawRequestedAdminTenantId))) {\n\t\tres.status(400).json({ error: 'tenantId must already be a canonical lowercase tenant ID.' });\n\t\treturn;\n\t}\n\tif (!AUTH_USERNAME_PATTERN.test(username)) {\n\t\tres.status(400).json({ error: 'Username must be 3-32 chars and only use letters, numbers, dot, underscore, or dash.' });\n\t\treturn;\n\t}\n\tif (String(password).length < 8) {\n\t\tres.status(400).json({ error: 'Password must be at least 8 characters.' });\n\t\treturn;\n\t}\n\tif (!['software-owner', 'head-coach', 'assistant-coach', 'viewer', 'swimmer'].includes(role)) {\n\t\tres.status(400).json({ error: 'Role is not allowed.' });\n\t\treturn;\n\t}\n\tif (tenantId && tenantId !== 'global-owner') {\n\t\tconst adminTenantStorage = resolveStoragePathsForTenantKey(tenantId);\n\t\tif (!fs.existsSync(adminTenantStorage.dbPath)) {\n\t\t\tres.status(409).json({ error: 'Cannot create a user for a tenant whose database does not exist. Provision the tenant through the guarded registration flow first.', tenantId });\n\t\t\treturn;\n\t\t}\n\t}\n\n`;
 if (!source.includes('// ATHLYRAX_ADMIN_USER_REQUIRES_EXISTING_TENANT')) {
   source = source.slice(0, adminValidationIndex) + adminGuard + source.slice(adminValidationIndex);
 }
 
-// Invites must never point at a missing tenant database, otherwise an invited
-// user can be created into an unusable account or trigger recovery ambiguity.
+// Invites must never point at a missing or ambiguously normalized tenant.
 const inviteRouteStart = source.indexOf(`app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {`);
 const inviteRoleAnchor = `\tif (role === 'head-coach') {`;
 const inviteRoleIndex = source.indexOf(inviteRoleAnchor, inviteRouteStart);
 if (inviteRouteStart < 0 || inviteRoleIndex < 0) throw new Error('Invite route guard anchors were not found.');
-const inviteGuard = `\t// ATHLYRAX_INVITE_REQUIRES_EXISTING_TENANT\n\tif (inviteTenantId && inviteTenantId !== 'global-owner') {\n\t\tconst inviteTenantStorage = resolveStoragePathsForTenantKey(inviteTenantId);\n\t\tif (!fs.existsSync(inviteTenantStorage.dbPath)) {\n\t\t\tres.status(409).json({ error: 'Cannot create an invite for a tenant whose database does not exist.', tenantId: inviteTenantId });\n\t\t\treturn;\n\t\t}\n\t}\n`;
+const inviteGuard = `\t// ATHLYRAX_INVITE_REQUIRES_EXISTING_TENANT\n\tconst rawInviteTenantId = String(req.body?.tenantId || '').trim();\n\tif (actorIsPrimaryOwner && rawInviteTenantId && (rawInviteTenantId !== normalizeTenantId(rawInviteTenantId) || !/^[a-z0-9_-]+$/.test(rawInviteTenantId))) {\n\t\tres.status(400).json({ error: 'tenantId must already be a canonical lowercase tenant ID.' });\n\t\treturn;\n\t}\n\tif (inviteTenantId && inviteTenantId !== 'global-owner') {\n\t\tconst inviteTenantStorage = resolveStoragePathsForTenantKey(inviteTenantId);\n\t\tif (!fs.existsSync(inviteTenantStorage.dbPath)) {\n\t\t\tres.status(409).json({ error: 'Cannot create an invite for a tenant whose database does not exist.', tenantId: inviteTenantId });\n\t\t\treturn;\n\t\t}\n\t}\n`;
 if (!source.includes('// ATHLYRAX_INVITE_REQUIRES_EXISTING_TENANT')) {
   source = source.slice(0, inviteRoleIndex) + inviteGuard + source.slice(inviteRoleIndex);
+}
+
+// Role changes must use a known role. Unknown values can otherwise strand an
+// account in an unusable authorization state.
+const roleRouteStart = source.indexOf(`app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {`);
+const roleMissingAnchor = `\tif (!targetUsername || !nextRole) {`;
+const roleMissingIndex = source.indexOf(roleMissingAnchor, roleRouteStart);
+if (roleRouteStart < 0 || roleMissingIndex < 0) throw new Error('Role-update validation anchors were not found.');
+if (!source.includes('// ATHLYRAX_ROLE_VALUE_ALLOWLIST')) {
+  const roleGuard = `\t// ATHLYRAX_ROLE_VALUE_ALLOWLIST\n\tif (!['software-owner', 'head-coach', 'assistant-coach', 'viewer', 'swimmer'].includes(nextRole)) {\n\t\tres.status(400).json({ error: 'Role is not allowed.' });\n\t\treturn;\n\t}\n\n`;
+  const insertAfter = source.indexOf(`\t}\n`, roleMissingIndex) + 3;
+  source = source.slice(0, insertAfter) + roleGuard + source.slice(insertAfter);
 }
 
 // Keep invite history. Expiry/usage checks already determine usability; deleting
@@ -108,8 +146,13 @@ replaceRequired(
 
 for (const token of [
   'ATHLYRAX_PLANNER_BACKUP_NON_AUTHORITATIVE',
+  'backupMatchesCurrentTarget',
+  'ATHLYRAX_PREWRITE_DB_SNAPSHOT_ORDER',
+  'x-athlyrax-tenant must already be a canonical lowercase tenant ID',
+  'X-AthlyraX-Tenant-Reason',
   'ATHLYRAX_ADMIN_USER_REQUIRES_EXISTING_TENANT',
   'ATHLYRAX_INVITE_REQUIRES_EXISTING_TENANT',
+  'ATHLYRAX_ROLE_VALUE_ALLOWLIST',
   'ATHLYRAX_INVITE_HISTORY_PRESERVED',
   'plannerBackupSaved',
   'csrfHeaderName: AUTH_CSRF_HEADER_NAME',
