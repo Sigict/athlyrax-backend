@@ -57,11 +57,14 @@ for (const required of [
   `// ATHLYRAX_PRODUCTION_AUTH_STORE_FAIL_CLOSED`,
   `// ATHLYRAX_AUTH_BOOTSTRAP_ATOMIC_WRITES`,
   `// ATHLYRAX_AUTH_INVITES_FAIL_CLOSED`,
+  `// ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED`,
   `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
   `Render runtime requires NODE_ENV=production`,
   `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
   `Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.`,
+  `Stripe webhook signature is required.`,
+  `Stripe webhook verification is not configured.`,
   `resolveStorageConfiguration(process.env, __dirname)`,
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
@@ -163,9 +166,12 @@ for (const required of [
   `const authFailClosedMarker = \`// ATHLYRAX_PRODUCTION_AUTH_STORE_FAIL_CLOSED\`;`,
   `const authAtomicMarker = \`// ATHLYRAX_AUTH_BOOTSTRAP_ATOMIC_WRITES\`;`,
   `const inviteFailClosedMarker = \`// ATHLYRAX_AUTH_INVITES_FAIL_CLOSED\`;`,
+  `const stripeWebhookMarker = \`// ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED\`;`,
   `Render runtime requires NODE_ENV=production`,
   `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
   `Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.`,
+  `Stripe webhook signature is required.`,
+  `Stripe webhook verification is not configured.`,
   `.replaceAll('writeJsonFile(AUTH_USERS_PATH,', 'writeAtomicJsonFile(AUTH_USERS_PATH,')`,
   `writeAtomicJsonFile(AUTH_INVITES_PATH, [])`,
   `const registrationMarker = \`// ATHLYRAX_NEW_TENANT_DB_PROVISION\`;`,
@@ -176,7 +182,7 @@ for (const required of [
   `try { persistAuthInvites(); } catch {}`,
   `provisioningToken: registrationTenantProvisioningToken`,
 ]) {
-  if (!patchSource.includes(required)) failures.push(`scripts/patch-canonical-storage-contract.mjs: missing registration/auth safety token: ${required}`);
+  if (!patchSource.includes(required)) failures.push(`scripts/patch-canonical-storage-contract.mjs: missing registration/auth/webhook safety token: ${required}`);
 }
 
 const legalSource = fs.readFileSync(path.join(root, 'scripts', 'signup-legal-acceptance-preload.mjs'), 'utf8');
