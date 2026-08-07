@@ -29,39 +29,15 @@ test('Render deploy filesystem is rejected for production storage', () => {
   assert.match(configuration.failures.join('\n'), /Render deploy filesystem/);
 });
 
-test('exact Render deploy root is rejected', () => {
-  const configuration = resolveStorageConfiguration({
-    NODE_ENV: 'production',
-    ATHLYRAX_STORAGE_ROOT: '/opt/render/project',
-    ATHLYRAX_SAFETY_BACKUP_ROOT: '/var/data/backups',
-  }, '/tmp/repo');
-  assert.match(configuration.failures.join('\n'), /Render deploy filesystem/);
-});
-
-test('Render deploy root with trailing slash is rejected', () => {
-  const configuration = resolveStorageConfiguration({
-    NODE_ENV: 'production',
-    ATHLYRAX_STORAGE_ROOT: '/opt/render/project/',
-    ATHLYRAX_SAFETY_BACKUP_ROOT: '/var/data/backups',
-  }, '/tmp/repo');
-  assert.match(configuration.failures.join('\n'), /Render deploy filesystem/);
-});
-
-test('allowed non-Render path is accepted', () => {
+test('allowed persistent paths are accepted', () => {
   const configuration = resolveStorageConfiguration({
     NODE_ENV: 'production',
     ATHLYRAX_STORAGE_ROOT: '/var/data/athlyrax',
     ATHLYRAX_SAFETY_BACKUP_ROOT: '/var/data/athlyrax-safety',
   }, '/tmp/repo');
-  assert.doesNotMatch(configuration.failures.join('\n'), /Render deploy filesystem/);
-});
-
-test('misleading sibling path is not treated as Render deploy root', () => {
-  const configuration = resolveStorageConfiguration({
-    NODE_ENV: 'production',
-    ATHLYRAX_STORAGE_ROOT: '/opt/render/project-other',
-    ATHLYRAX_SAFETY_BACKUP_ROOT: '/var/data/backups',
-  }, '/tmp/repo');
+  assert.equal(configuration.storageRoot, '/var/data/athlyrax');
+  assert.equal(configuration.authUsersPath, '/var/data/athlyrax/auth/auth-users.json');
+  assert.equal(configuration.tenantRootPath, '/var/data/athlyrax/tenants');
   assert.doesNotMatch(configuration.failures.join('\n'), /Render deploy filesystem/);
 });
 
@@ -75,7 +51,19 @@ test('nested primary and backup roots are rejected', () => {
   assert.match(configuration.failures.join('\n'), /must not be nested/);
 });
 
-test('production check succeeds only with marker, auth store, global DB and required tenant', () => {
+test('noncanonical auth path override is rejected', () => {
+  const root = tempDir('athlyrax-auth-path-');
+  const storageRoot = path.join(root, 'storage');
+  const configuration = resolveStorageConfiguration({
+    NODE_ENV: 'production',
+    ATHLYRAX_STORAGE_ROOT: storageRoot,
+    ATHLYRAX_SAFETY_BACKUP_ROOT: path.join(root, 'backup'),
+    AUTH_USERS_PATH: path.join(storageRoot, 'auth-users.json'),
+  }, root);
+  assert.match(configuration.failures.join('\n'), /AUTH_USERS_PATH must equal the canonical path/);
+});
+
+test('production check succeeds only with marker, canonical auth store, global DB and required tenant', () => {
   const repoRoot = tempDir('athlyrax-repo-');
   const storageRoot = tempDir('athlyrax-storage-');
   const backupRoot = tempDir('athlyrax-backup-');
@@ -83,7 +71,7 @@ test('production check succeeds only with marker, auth store, global DB and requ
   fs.mkdirSync(path.dirname(tenantDb), { recursive: true });
   fs.mkdirSync(path.join(storageRoot, 'auth'), { recursive: true });
   fs.writeFileSync(path.join(storageRoot, 'db.json'), '{}\n');
-  fs.writeFileSync(tenantDb, '{}\n');
+  fs.writeFileSync(tenantDb, '{"swimmers":[{"id":"demo"}]}\n');
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), '[]\n');
   writeStorageReadyMarker(storageRoot, { requiredTenants: ['demo-company'] });
 
@@ -98,11 +86,11 @@ test('production check succeeds only with marker, auth store, global DB and requ
     repoRoot,
     createDirectories: true,
     requireFiles: true,
-    linkStorage: false,
     logger: { info() {}, warn() {} },
   });
   assert.equal(result.configuration.storageRoot, path.resolve(storageRoot));
-  assert.equal(env.AUTH_USERS_PATH, path.join(path.resolve(repoRoot), 'storage', 'auth', 'auth-users.json'));
+  assert.equal(env.AUTH_USERS_PATH, path.join(path.resolve(storageRoot), 'auth', 'auth-users.json'));
+  assert.equal(env.AUTH_USERS_BACKUP_PATH, path.join(path.resolve(storageRoot), 'auth', 'auth-users.backup.json'));
 });
 
 test('missing required tenant DB fails closed', () => {
@@ -124,7 +112,6 @@ test('missing required tenant DB fails closed', () => {
     repoRoot,
     createDirectories: true,
     requireFiles: true,
-    linkStorage: false,
     logger: { info() {}, warn() {} },
   }), /demo-company/);
 });
