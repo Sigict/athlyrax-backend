@@ -36,10 +36,12 @@ function resolveStorageRoot() {
 }
 
 function resolveAcceptancePath() {
-  const overridePath = cleanText(process.env.AUTH_LEGAL_ACCEPTANCE_PATH, 1000);
-  return overridePath
-    ? path.resolve(overridePath)
-    : path.join(resolveStorageRoot(), 'legal-acceptances.jsonl');
+  const canonicalPath = path.join(resolveStorageRoot(), 'legal-acceptances.jsonl');
+  const configuredPath = cleanText(process.env.AUTH_LEGAL_ACCEPTANCE_PATH, 1000);
+  if (configuredPath && path.resolve(configuredPath) !== canonicalPath) {
+    throw new Error(`AUTH_LEGAL_ACCEPTANCE_PATH must equal the canonical path: ${canonicalPath}`);
+  }
+  return canonicalPath;
 }
 
 function versionMatches(actual, expected) {
