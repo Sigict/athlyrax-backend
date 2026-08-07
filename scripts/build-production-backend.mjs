@@ -73,6 +73,7 @@ for (const relative of [
   run(`${relative} syntax check`, ['--check', relative]);
 }
 run('storage/path audit', ['scripts/audit-storage-paths.mjs']);
+run('production transform-chain audit', ['scripts/audit-production-transform-chain.mjs']);
 
 for (const obsolete of [
   'scripts/patch-runtime-start-guard.mjs',
