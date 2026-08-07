@@ -18,11 +18,14 @@ jobs:
       - name: Checkout exact commit
         uses: actions/checkout@v4
 
-      - name: Install, patch production entrypoint and run tests
+      - name: Install, patch production entrypoint and run safety tests
         run: |
           npm ci
           grep -F "installSignupLegalAcceptanceGuard(express);" index.js
+          grep -F "ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD" index.js
+          grep -F "ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE" index.js
           npm run test:signup-legal-acceptance
+          npm run test:storage-all
 
       - name: Wait for backend deployment and verify rejection
         if: github.event_name != 'pull_request'
