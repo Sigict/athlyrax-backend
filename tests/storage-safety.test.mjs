@@ -27,6 +27,9 @@ function prepareValidStorage(storageRoot, tenantId = 'demo-company', usersOverri
   const serializedUsers = `${JSON.stringify(users)}\n`;
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), serializedUsers);
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), serializedUsers);
+  fs.writeFileSync(path.join(storageRoot, 'auth-invites.json'), '[]\n');
+  fs.writeFileSync(path.join(storageRoot, 'snapshot-submissions.json'), '[]\n');
+  fs.writeFileSync(path.join(storageRoot, 'billing-catalog.json'), '{"plans":[{"key":"tier-1"}]}\n');
   fs.writeFileSync(path.join(storageRoot, 'tenants', tenantId, 'db.json'), '{"__meta":{"tenantId":"demo-company"},"swimmers":[]}\n');
   writeStorageReadyMarker(storageRoot, { requiredTenants: [tenantId] });
 }
@@ -51,6 +54,9 @@ test('allowed persistent paths are accepted', () => {
   assert.equal(configuration.authUsersPath, '/var/data/athlyrax/auth/auth-users.json');
   assert.equal(configuration.authUsersBackupPath, '/var/data/athlyrax/auth/auth-users.backup.json');
   assert.equal(configuration.legalAcceptancePath, '/var/data/athlyrax/legal-acceptances.jsonl');
+  assert.equal(configuration.authInvitesPath, '/var/data/athlyrax/auth-invites.json');
+  assert.equal(configuration.snapshotSubmissionsPath, '/var/data/athlyrax/snapshot-submissions.json');
+  assert.equal(configuration.billingCatalogPath, '/var/data/athlyrax/billing-catalog.json');
   assert.equal(configuration.tenantRootPath, '/var/data/athlyrax/tenants');
   assert.equal(configuration.failures.length, 0);
 });
@@ -112,7 +118,7 @@ test('noncanonical legal acceptance path override is rejected', () => {
   assert.match(configuration.failures.join('\n'), /AUTH_LEGAL_ACCEPTANCE_PATH must equal the canonical path/);
 });
 
-test('production check succeeds only with marker, canonical auth stores, global DB and required tenant', () => {
+test('production check succeeds only with marker and all startup-loaded stores', () => {
   const repoRoot = tempDir('athlyrax-repo-');
   const storageRoot = tempDir('athlyrax-storage-');
   const backupRoot = tempDir('athlyrax-backup-');
@@ -247,4 +253,25 @@ test('corrupt required tenant database fails closed', () => {
   prepareValidStorage(storageRoot);
   fs.writeFileSync(path.join(storageRoot, 'tenants', 'demo-company', 'db.json'), '{invalid', 'utf8');
   assert.throws(() => runStorageSafetyCheck({ env: productionEnv(storageRoot, backupRoot, { ATHLYRAX_REQUIRED_TENANTS: 'demo-company' }), repoRoot, logger: { info() {}, warn() {} } }), /Tenant database demo-company is not valid JSON/);
+});
+
+test('missing startup-loaded stores fail closed instead of being created', () => {
+  for (const fileName of ['auth-invites.json', 'snapshot-submissions.json', 'billing-catalog.json']) {
+    const repoRoot = tempDir('athlyrax-repo-');
+    const storageRoot = tempDir('athlyrax-storage-');
+    const backupRoot = tempDir('athlyrax-backup-');
+    prepareValidStorage(storageRoot);
+    fs.unlinkSync(path.join(storageRoot, fileName));
+    assert.throws(() => runStorageSafetyCheck({ env: productionEnv(storageRoot, backupRoot), repoRoot, logger: { info() {}, warn() {} } }), /Required storage file is missing/);
+  }
+});
+
+test('noncanonical tenant metadata fails closed', () => {
+  const repoRoot = tempDir('athlyrax-repo-');
+  const storageRoot = tempDir('athlyrax-storage-');
+  const backupRoot = tempDir('athlyrax-backup-');
+  const users = [{ username: 'coach-a', role: 'head-coach', passwordHash: 'x', tenantId: 'demo-company' }];
+  prepareValidStorage(storageRoot, 'demo-company', users);
+  fs.writeFileSync(path.join(storageRoot, 'tenants', 'demo-company', 'db.json'), '{"__meta":{"tenantId":"Demo.Company"},"swimmers":[]}\n');
+  assert.throws(() => runStorageSafetyCheck({ env: productionEnv(storageRoot, backupRoot), repoRoot, logger: { info() {}, warn() {} } }), /noncanonical tenant ID/);
 });
