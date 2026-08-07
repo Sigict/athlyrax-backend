@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 function clean(value) { return String(value ?? '').trim(); }
+const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
 function writeDurableJson(filePath, payload) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -63,9 +64,21 @@ function isPersonLike(value) {
   return ['firstname', 'lastname', 'fullname', 'email', 'phone', 'dob', 'dateofbirth', 'asn', 'membershipnumber', 'emergencycontact'].some((key) => keys.has(key));
 }
 
+function syntheticUsername(original, state) {
+  const raw = clean(original).toLowerCase();
+  if (!raw) return '';
+  if (!state.usernameMap.has(raw)) state.usernameMap.set(raw, `demo-user-${state.usernameMap.size + 1}`);
+  return state.usernameMap.get(raw);
+}
+
+function sanitizeEmbeddedString(value) {
+  if (typeof value !== 'string') return value;
+  return value.replace(EMAIL_PATTERN, 'demo@example.invalid');
+}
+
 function sanitizeObject(value, state) {
   if (Array.isArray(value)) return value.map((entry) => sanitizeObject(entry, state));
-  if (!value || typeof value !== 'object') return value;
+  if (!value || typeof value !== 'object') return sanitizeEmbeddedString(value);
 
   const personLike = isPersonLike(value);
   let personNumber = 0;
@@ -81,20 +94,27 @@ function sanitizeObject(value, state) {
     if (personLike && lower === 'firstname') { output[key] = 'Demo'; continue; }
     if (personLike && lower === 'lastname') { output[key] = `Person ${personNumber}`; continue; }
     if (personLike && (lower === 'fullname' || lower === 'name')) { output[key] = `Demo Person ${personNumber}`; continue; }
+    if (lower === 'username' || lower.endsWith('username')) { output[key] = syntheticUsername(original, state); continue; }
     if (lower === 'email' || lower.endsWith('email')) { output[key] = personLike ? `demo.person.${personNumber}@example.invalid` : ''; continue; }
     if (lower === 'phone' || lower.endsWith('phone') || lower.includes('telephone') || lower.includes('mobile')) { output[key] = ''; continue; }
     if (lower === 'address' || lower.endsWith('address') || lower === 'postcode' || lower === 'postalcode') { output[key] = ''; continue; }
     if (lower === 'asn' || lower.includes('membershipnumber') || lower === 'membershipno') { output[key] = ''; continue; }
     if (lower === 'notes' || lower === 'medicalnotes' || lower === 'emergencycontact') { output[key] = ''; continue; }
     if (lower === 'dob' || lower === 'dateofbirth' || lower === 'birthdate') { output[key] = syntheticDob(original); continue; }
+    if (lower === 'filedataurl' || lower === 'imagedataurl' || lower === 'photodataurl' || lower === 'avatarurl') { output[key] = ''; continue; }
 
     output[key] = sanitizeObject(original, state);
   }
   return output;
 }
 
-function containsObviousContactData(value) {
-  if (Array.isArray(value)) return value.some(containsObviousContactData);
+function containsObviousPersonalData(value) {
+  if (typeof value === 'string') {
+    const matches = value.match(EMAIL_PATTERN) || [];
+    if (matches.some((email) => !email.toLowerCase().endsWith('@example.invalid'))) return true;
+    return /^data:/i.test(value.trim());
+  }
+  if (Array.isArray(value)) return value.some(containsObviousPersonalData);
   if (!value || typeof value !== 'object') return false;
   for (const [key, item] of Object.entries(value)) {
     const lower = key.toLowerCase();
@@ -102,7 +122,8 @@ function containsObviousContactData(value) {
     if ((lower === 'phone' || lower.endsWith('phone') || lower.includes('telephone') || lower.includes('mobile')) && clean(item)) return true;
     if ((lower === 'address' || lower.endsWith('address') || lower === 'postcode' || lower === 'postalcode') && clean(item)) return true;
     if ((lower === 'asn' || lower.includes('membershipnumber') || lower === 'membershipno') && clean(item)) return true;
-    if (containsObviousContactData(item)) return true;
+    if ((lower === 'filedataurl' || lower === 'imagedataurl' || lower === 'photodataurl' || lower === 'avatarurl') && clean(item)) return true;
+    if (containsObviousPersonalData(item)) return true;
   }
   return false;
 }
@@ -117,12 +138,12 @@ export function sanitizeDemoTenantDatabase({ filePath, backupRoot, logger = cons
     throw new Error(`Demo database is empty or invalid: ${resolved}`);
   }
 
-  if (payload?.__meta?.tenantId === 'demo-company' && payload?.__meta?.demoDataSynthetic === true && !containsObviousContactData(payload)) {
+  if (payload?.__meta?.tenantId === 'demo-company' && payload?.__meta?.demoDataSynthetic === true && !containsObviousPersonalData(payload)) {
     return { sanitized: false, reason: 'already-sanitized', filePath: resolved };
   }
 
   const backupPath = preserveOriginal(resolved, backupRoot);
-  const state = { personCount: 0 };
+  const state = { personCount: 0, usernameMap: new Map() };
   const sanitized = sanitizeObject(payload, state);
   sanitized.__meta = {
     ...(sanitized.__meta && typeof sanitized.__meta === 'object' ? sanitized.__meta : {}),
@@ -131,16 +152,16 @@ export function sanitizeDemoTenantDatabase({ filePath, backupRoot, logger = cons
     demoSanitizedAt: new Date().toISOString(),
   };
 
-  if (containsObviousContactData(sanitized)) {
-    throw new Error('Demo sanitization verification failed: contact/identifier data remains.');
+  if (containsObviousPersonalData(sanitized)) {
+    throw new Error('Demo sanitization verification failed: contact, identifier or embedded personal data remains.');
   }
 
   writeDurableJson(resolved, sanitized);
   const verified = JSON.parse(fs.readFileSync(resolved, 'utf8'));
-  if (verified?.__meta?.tenantId !== 'demo-company' || verified?.__meta?.demoDataSynthetic !== true || containsObviousContactData(verified)) {
+  if (verified?.__meta?.tenantId !== 'demo-company' || verified?.__meta?.demoDataSynthetic !== true || containsObviousPersonalData(verified)) {
     throw new Error('Demo sanitization verification failed after durable write.');
   }
 
   logger.info(`[demo-safety] Sanitized ${state.personCount} person-like records before demo activation. Original preserved at ${backupPath}.`);
-  return { sanitized: true, filePath: resolved, backupPath, personCount: state.personCount };
+  return { sanitized: true, filePath: resolved, backupPath, personCount: state.personCount, usernamesSanitized: state.usernameMap.size };
 }
