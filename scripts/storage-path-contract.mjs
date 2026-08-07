@@ -4,6 +4,117 @@ import crypto from 'node:crypto';
 
 const LEGACY_MIGRATION_MARKER = '.athlyrax-legacy-storage-migration-v1.json';
 
+function normalizeTenantId(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function readJson(filePath) {
+  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
+  catch { return null; }
+}
+
+function readJsonObject(filePath) {
+  const parsed = readJson(filePath);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+}
+
+function validAuthStore(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  const payload = readJson(filePath);
+  const users = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.users) ? payload.users : null);
+  if (!users) return null;
+  return { filePath, payload, users, stat: fs.statSync(filePath) };
+}
+
+function classifyDatabase(filePath) {
+  if (!fs.existsSync(filePath)) return { state: 'missing' };
+  const stat = fs.statSync(filePath);
+  const payload = readJsonObject(filePath);
+  if (!payload) return { state: 'invalid', stat };
+  if (Object.keys(payload).length === 0) return { state: 'empty', stat, payload };
+  return { state: 'meaningful', stat, payload };
+}
+
+function validMeaningfulDatabase(filePath) {
+  const state = classifyDatabase(filePath);
+  return state.state === 'meaningful' ? { filePath, ...state } : null;
+}
+
+function assertTenantIdentity(payload, expectedTenantId, label) {
+  const declared = normalizeTenantId(payload?.__meta?.tenantId);
+  const expected = normalizeTenantId(expectedTenantId);
+  if (declared && declared !== expected) {
+    throw new Error(`${label} declares tenant ${declared} but is being routed to ${expected}. Refusing cross-tenant migration or recovery.`);
+  }
+}
+
+function hasMeaningfulDemoData(payload) {
+  const keys = ['swimmers', 'squads', 'trainingSessions', 'trainingSessionSets', 'tests', 'attendance', 'competitions', 'fixtures', 'groups'];
+  return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload)
+    && keys.some((key) => Array.isArray(payload[key]) && payload[key].length > 0);
+}
+
+function durableWriteBytes(destination, bytes) {
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  const temp = `${destination}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  let handle = null;
+  try {
+    handle = fs.openSync(temp, 'wx', 0o600);
+    fs.writeFileSync(handle, bytes);
+    fs.fsyncSync(handle);
+  } finally {
+    if (handle !== null) fs.closeSync(handle);
+  }
+  try {
+    fs.renameSync(temp, destination);
+  } catch (error) {
+    try { fs.unlinkSync(temp); } catch {}
+    throw error;
+  }
+  try {
+    const directoryHandle = fs.openSync(path.dirname(destination), 'r');
+    try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
+  } catch {
+    // Directory fsync is not supported by every hosted filesystem.
+  }
+}
+
+function copyExact(source, destination) {
+  const sourceBytes = fs.readFileSync(source);
+  durableWriteBytes(destination, sourceBytes);
+  const destinationBytes = fs.readFileSync(destination);
+  if (!sourceBytes.equals(destinationBytes)) throw new Error(`Verified copy failed: ${source} -> ${destination}`);
+  return destinationBytes.length;
+}
+
+function writeAtomicJson(filePath, payload) {
+  durableWriteBytes(filePath, Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8'));
+}
+
+function listFilesRecursive(rootDir) {
+  if (!fs.existsSync(rootDir)) return [];
+  const output = [];
+  const visit = (current, relativeBase = '') => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const relative = path.join(relativeBase, entry.name);
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) visit(full, relative);
+      else if (entry.isFile()) output.push({ full, relative });
+    }
+  };
+  visit(rootDir);
+  return output;
+}
+
+function readMigrationMarker(markerPath) {
+  const marker = readJsonObject(markerPath);
+  return marker && marker.completed === true && marker.version === 1 ? marker : null;
+}
+
 export function canonicalStoragePaths({ sourceRoot, storageRoot } = {}) {
   const source = path.resolve(String(sourceRoot || process.cwd()));
   const storage = path.resolve(String(storageRoot || path.join(source, 'storage')));
@@ -35,144 +146,6 @@ export function canonicalStoragePaths({ sourceRoot, storageRoot } = {}) {
   });
 }
 
-function normalizeTenantId(value) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-function readJson(filePath) {
-  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
-  catch { return null; }
-}
-
-function readJsonObject(filePath) {
-  const parsed = readJson(filePath);
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-}
-
-function assertTenantIdentity(payload, expectedTenantId, label) {
-  const declared = normalizeTenantId(payload?.__meta?.tenantId);
-  const expected = normalizeTenantId(expectedTenantId);
-  if (declared && declared !== expected) {
-    throw new Error(`${label} declares tenant ${declared} but is being routed to ${expected}. Refusing cross-tenant migration or recovery.`);
-  }
-}
-
-function hasMeaningfulDemoData(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
-  const collectionKeys = ['swimmers', 'squads', 'trainingSessions', 'trainingSessionSets', 'tests', 'attendance', 'competitions', 'fixtures', 'groups'];
-  return collectionKeys.some((key) => Array.isArray(payload?.[key]) && payload[key].length > 0);
-}
-
-function validMeaningfulDatabase(filePath) {
-  if (!fs.existsSync(filePath)) return null;
-  const stat = fs.statSync(filePath);
-  if (stat.size < 2) return null;
-  const payload = readJsonObject(filePath);
-  if (!payload || Object.keys(payload).length === 0) return null;
-  return { filePath, stat, payload };
-}
-
-function classifyDatabase(filePath) {
-  if (!fs.existsSync(filePath)) return { state: 'missing' };
-  const stat = fs.statSync(filePath);
-  if (stat.size <= 16) {
-    const tinyPayload = readJsonObject(filePath);
-    if (tinyPayload && Object.keys(tinyPayload).length === 0) return { state: 'empty', stat, payload: tinyPayload };
-  }
-  const payload = readJsonObject(filePath);
-  if (!payload) return { state: 'invalid', stat };
-  if (Object.keys(payload).length === 0) return { state: 'empty', stat, payload };
-  return { state: 'meaningful', stat, payload };
-}
-
-function validAuthStore(filePath) {
-  if (!fs.existsSync(filePath)) return null;
-  const stat = fs.statSync(filePath);
-  if (stat.size < 2) return null;
-  const payload = readJson(filePath);
-  const users = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.users) ? payload.users : null);
-  if (!users) return null;
-  return { filePath, stat, payload, users };
-}
-
-function durableCopyExact(source, destination) {
-  const sourceBytes = fs.readFileSync(source);
-  fs.mkdirSync(path.dirname(destination), { recursive: true });
-  const temp = `${destination}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-  let handle = null;
-  try {
-    handle = fs.openSync(temp, 'wx', 0o600);
-    fs.writeSync(handle, sourceBytes);
-    fs.fsyncSync(handle);
-  } finally {
-    if (handle !== null) fs.closeSync(handle);
-  }
-  try {
-    fs.renameSync(temp, destination);
-  } catch (error) {
-    try { fs.unlinkSync(temp); } catch {}
-    throw error;
-  }
-  const destinationBytes = fs.readFileSync(destination);
-  if (!sourceBytes.equals(destinationBytes)) throw new Error(`Verified copy failed: ${source} -> ${destination}`);
-  try {
-    const directoryHandle = fs.openSync(path.dirname(destination), 'r');
-    try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
-  } catch {
-    // Directory fsync is not supported by every hosted filesystem.
-  }
-  return destinationBytes.length;
-}
-
-function listFilesRecursive(rootDir) {
-  if (!fs.existsSync(rootDir)) return [];
-  const output = [];
-  const visit = (current, relativeBase = '') => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      const relative = path.join(relativeBase, entry.name);
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) visit(full, relative);
-      else if (entry.isFile()) output.push({ full, relative });
-    }
-  };
-  visit(rootDir);
-  return output;
-}
-
-function readMigrationMarker(markerPath) {
-  const marker = readJsonObject(markerPath);
-  return marker && marker.completed === true && marker.version === 1 ? marker : null;
-}
-
-function writeAtomicJson(filePath, payload) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const temp = `${filePath}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-  let handle = null;
-  try {
-    handle = fs.openSync(temp, 'wx', 0o600);
-    fs.writeFileSync(handle, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-    fs.fsyncSync(handle);
-  } finally {
-    if (handle !== null) fs.closeSync(handle);
-  }
-  try {
-    fs.renameSync(temp, filePath);
-  } catch (error) {
-    try { fs.unlinkSync(temp); } catch {}
-    throw error;
-  }
-  try {
-    const directoryHandle = fs.openSync(path.dirname(filePath), 'r');
-    try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
-  } catch {
-    // Directory fsync is not supported by every hosted filesystem.
-  }
-}
-
 export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger = console } = {}) {
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot });
   const existingMarker = readMigrationMarker(paths.legacyMigrationMarker);
@@ -186,7 +159,7 @@ export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRo
   const preserve = (source, relative) => {
     if (!backupSession || !fs.existsSync(source)) return '';
     const destination = path.join(backupSession, relative);
-    durableCopyExact(source, destination);
+    copyExact(source, destination);
     return destination;
   };
 
@@ -199,24 +172,17 @@ export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRo
   if (!fs.existsSync(paths.authUsers) && fs.existsSync(legacyAuthUsers)) {
     if (!validAuthStore(legacyAuthUsers)) throw new Error(`Legacy auth users store is unreadable or invalid: ${legacyAuthUsers}`);
     preserve(legacyAuthUsers, path.join('legacy-auth', 'auth-users.json'));
-    const bytes = durableCopyExact(legacyAuthUsers, paths.authUsers);
-    migrated.push({ kind: 'auth-users', from: legacyAuthUsers, to: paths.authUsers, bytes });
+    migrated.push({ kind: 'auth-users', from: legacyAuthUsers, to: paths.authUsers, bytes: copyExact(legacyAuthUsers, paths.authUsers) });
   }
+
   if (!fs.existsSync(paths.authUsersBackup) && fs.existsSync(legacyAuthBackup)) {
     if (!validAuthStore(legacyAuthBackup)) throw new Error(`Legacy auth users backup is unreadable or invalid: ${legacyAuthBackup}`);
     preserve(legacyAuthBackup, path.join('legacy-auth', 'auth-users.backup.json'));
-    const bytes = durableCopyExact(legacyAuthBackup, paths.authUsersBackup);
-    migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes });
+    migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes: copyExact(legacyAuthBackup, paths.authUsersBackup) });
   }
+
   if (fs.existsSync(paths.authUsers) && !fs.existsSync(paths.authUsersBackup)) {
-    if (fs.existsSync(legacyAuthBackup)) {
-      if (!validAuthStore(legacyAuthBackup)) throw new Error(`Legacy auth users backup is unreadable or invalid: ${legacyAuthBackup}`);
-      preserve(legacyAuthBackup, path.join('legacy-auth', 'auth-users.backup.json'));
-      const bytes = durableCopyExact(legacyAuthBackup, paths.authUsersBackup);
-      migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes });
-    } else {
-      throw new Error(`Canonical auth users store exists but its independent backup is missing: ${paths.authUsersBackup}`);
-    }
+    migrated.push({ kind: 'auth-users-backup-baseline', from: paths.authUsers, to: paths.authUsersBackup, bytes: copyExact(paths.authUsers, paths.authUsersBackup) });
   }
 
   const legacyTenantRoot = path.join(paths.storageRoot, 'tenants', 'clubs');
@@ -242,16 +208,14 @@ export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRo
         if (!legacyCandidate) throw new Error(`Legacy tenant database is unreadable, invalid or empty: ${legacyDb}`);
         assertTenantIdentity(legacyCandidate.payload, tenantId, `Legacy tenant database ${legacyDb}`);
         if (fs.existsSync(canonicalDb)) preserve(canonicalDb, path.join('canonical-before-migration', tenantId, 'db.json'));
-        const bytes = durableCopyExact(legacyDb, canonicalDb);
-        migrated.push({ kind: 'tenant-db', tenantId, from: legacyDb, to: canonicalDb, bytes });
+        migrated.push({ kind: 'tenant-db', tenantId, from: legacyDb, to: canonicalDb, bytes: copyExact(legacyDb, canonicalDb) });
       }
 
       for (const file of legacyFiles) {
         if (file.relative === 'db.json') continue;
         const destination = path.join(canonicalTenantDir, file.relative);
         if (fs.existsSync(destination)) continue;
-        const bytes = durableCopyExact(file.full, destination);
-        migrated.push({ kind: 'tenant-ancillary', tenantId, from: file.full, to: destination, bytes });
+        migrated.push({ kind: 'tenant-ancillary', tenantId, from: file.full, to: destination, bytes: copyExact(file.full, destination) });
       }
     }
   }
@@ -271,8 +235,7 @@ export function finalizeLegacyStorageMigration({ storageRoot, migrationResult, l
   if (!migrationResult || migrationResult.skipped) return { finalized: false, reason: 'nothing-to-finalize' };
   const rawStorage = String(storageRoot || '').trim();
   if (!rawStorage) throw new Error('Storage root is required to finalize legacy migration.');
-  const storage = path.resolve(rawStorage);
-  const markerPath = path.join(storage, LEGACY_MIGRATION_MARKER);
+  const markerPath = path.join(path.resolve(rawStorage), LEGACY_MIGRATION_MARKER);
   writeAtomicJson(markerPath, {
     version: 1,
     completed: true,
@@ -281,8 +244,7 @@ export function finalizeLegacyStorageMigration({ storageRoot, migrationResult, l
     legacyDetected: migrationResult.legacyDetected === true,
     backupSession: String(migrationResult.backupSession || ''),
   });
-  const marker = readMigrationMarker(markerPath);
-  if (!marker) throw new Error(`Legacy migration marker verification failed: ${markerPath}`);
+  if (!readMigrationMarker(markerPath)) throw new Error(`Legacy migration marker verification failed: ${markerPath}`);
   logger.info(`[storage-path] Legacy migration finalized. Future startups will not reuse legacy paths: ${markerPath}`);
   return { finalized: true, markerPath };
 }
@@ -302,23 +264,23 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
   const markerFinalized = Boolean(readMigrationMarker(paths.legacyMigrationMarker));
   const legacyCandidate = markerFinalized ? null : validMeaningfulDatabase(legacyDemo);
   const bundledCandidate = validMeaningfulDatabase(bundledDemo);
+
   if (legacyCandidate) assertTenantIdentity(legacyCandidate.payload, 'demo-company', `Legacy demo-company database ${legacyDemo}`);
   if (bundledCandidate) {
     assertTenantIdentity(bundledCandidate.payload, 'demo-company', `Bundled demo-company database ${bundledDemo}`);
     if (!hasMeaningfulDemoData(bundledCandidate.payload)) throw new Error(`Bundled demo-company database contains no meaningful demo records: ${bundledDemo}`);
   }
+
   const sourceCandidate = legacyCandidate || bundledCandidate;
   if (!sourceCandidate) throw new Error('No valid demo-company recovery database is available.');
 
-  fs.mkdirSync(path.dirname(liveDemo), { recursive: true });
   const backupDirectory = backupRoot ? path.join(path.resolve(backupRoot), 'demo-bootstrap-replaced') : '';
   if (backupDirectory) fs.mkdirSync(backupDirectory, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  if (fs.existsSync(liveDemo) && backupDirectory) copyExact(liveDemo, path.join(backupDirectory, `${stamp}-canonical-demo-before-recovery.json`));
+  if (legacyCandidate && backupDirectory) copyExact(legacyDemo, path.join(backupDirectory, `${stamp}-legacy-demo-source-preserved.json`));
 
-  if (fs.existsSync(liveDemo) && backupDirectory) durableCopyExact(liveDemo, path.join(backupDirectory, `${stamp}-canonical-demo-before-recovery.json`));
-  if (legacyCandidate && backupDirectory) durableCopyExact(legacyDemo, path.join(backupDirectory, `${stamp}-legacy-demo-source-preserved.json`));
-
-  const bytes = durableCopyExact(sourceCandidate.filePath, liveDemo);
+  const bytes = copyExact(sourceCandidate.filePath, liveDemo);
   const restored = validMeaningfulDatabase(liveDemo);
   if (!restored || restored.stat.size !== sourceCandidate.stat.size || !hasMeaningfulDemoData(restored.payload)) throw new Error('Demo-company recovery verification failed.');
   assertTenantIdentity(restored.payload, 'demo-company', `Recovered demo-company database ${liveDemo}`);
