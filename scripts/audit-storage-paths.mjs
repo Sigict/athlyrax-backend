@@ -15,6 +15,7 @@ const runtimeFiles = [
   'scripts/stage-storage-restore.mjs',
   'scripts/storage-path-contract.mjs',
   'scripts/storage-safety-lib.mjs',
+  'scripts/patch-persistence-integrity.mjs',
   'scripts/patch-durable-storage-writes.mjs',
 ];
 
@@ -26,6 +27,7 @@ const forbiddenByFile = new Map([
     `writeAtomicJsonFile(storagePaths.dbPath, {});`,
     `writeJsonFile(AUTH_USERS_PATH,`,
     `writeJsonFile(AUTH_USERS_BACKUP_PATH,`,
+    `snapshotSubmissions.length = 5000;`,
     `import { runStorageSafetyCheck } from './scripts/storage-safety-lib.mjs';`,
   ]],
   ['verify-closed-pilot-security.mjs', [
@@ -61,6 +63,7 @@ for (const required of [
   `// ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED`,
   `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
+  `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
   `Render runtime requires NODE_ENV=production`,
   `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
@@ -112,9 +115,12 @@ for (const required of [
   `const LEGACY_MIGRATION_MARKER = '.athlyrax-legacy-storage-migration-v1.json'`,
   `path.join(paths.storageRoot, 'auth-users.json')`,
   `path.join(paths.storageRoot, 'tenants', 'clubs')`,
+  'requireCanonicalTenantId(',
+  'Refusing cross-tenant migration or recovery',
   'listFilesRecursive(',
   `file.relative === 'db.json'`,
   'copyExact(',
+  `fs.openSync(temp, 'wx', 0o600)`,
   'Legacy tenant database is unreadable, invalid or empty',
   'legacy-migration-already-finalized',
 ]) {
@@ -131,17 +137,18 @@ for (const required of [
   'validateAuthBoundTenantDatabases(',
   'Authentication primary and backup stores differ',
   'Auth-bound tenant database',
+  'isCanonicalTenantId(',
+  'Invalid or noncanonical tenant key in ATHLYRAX_REQUIRED_TENANTS',
+  `role === 'swimmer' && explicit === 'snapshot-public' && createdVia === 'snapshot-self-signup'`,
+  'Storage approval marker is not bound to this storage root',
   'AUTH_REQUIRED must not be false in production',
   'PHASE1_TENANT_ISOLATION must not be false in production',
   'AUTH_ENFORCE_CANONICAL_STORE must not be false in production',
   'AUTH_SECRET must be explicitly configured with at least 32 characters in production',
   'STRIPE_WEBHOOK_SECRET is required in production whenever STRIPE_SECRET_KEY is configured',
   'AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE must be false in production',
-  'requireNonEmpty',
   'must not be empty in production',
   'must contain at least one user in production',
-  'Global database',
-  'Authentication user store is not valid JSON',
   'Authentication user backup',
   `storageRoot: resolvedStorageRoot`,
   `crypto.randomBytes(6).toString('hex')`,
@@ -153,6 +160,7 @@ for (const required of [
 
 const dataSafetySource = fs.readFileSync(path.join(root, 'scripts', 'data-safety-preload.mjs'), 'utf8');
 for (const required of [
+  'ATHLYRAX_MISSING_DB_CREATE_BLOCKED',
   'ATHLYRAX_CURRENT_DB_INVALID',
   'ATHLYRAX_INCOMING_DB_INVALID',
   'ATHLYRAX_DB_BACKUP_VERIFICATION_FAILED',
@@ -160,6 +168,17 @@ for (const required of [
   'sourceBytes.equals(backupBytes)',
 ]) {
   if (!dataSafetySource.includes(required)) failures.push(`scripts/data-safety-preload.mjs: missing database corruption guard token: ${required}`);
+}
+
+const persistenceSource = fs.readFileSync(path.join(root, 'scripts', 'patch-persistence-integrity.mjs'), 'utf8');
+for (const required of [
+  'ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED',
+  'ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION',
+  `source.includes('snapshotSubmissions.length = 5000;')`,
+  'ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED',
+  'ATHLYRAX_PRODUCTION_PASSWORD_RESET_NO_CONSOLE',
+]) {
+  if (!persistenceSource.includes(required)) failures.push(`scripts/patch-persistence-integrity.mjs: missing persistence token: ${required}`);
 }
 
 const durablePatchSource = fs.readFileSync(path.join(root, 'scripts', 'patch-durable-storage-writes.mjs'), 'utf8');
@@ -210,6 +229,8 @@ const legalSource = fs.readFileSync(path.join(root, 'scripts', 'signup-legal-acc
 for (const required of [
   `path.join(resolveStorageRoot(), 'legal-acceptances.jsonl')`,
   `AUTH_LEGAL_ACCEPTANCE_PATH must equal the canonical path`,
+  `fs.fsyncSync(fileHandle)`,
+  `Legal acceptance append verification failed.`,
 ]) {
   if (!legalSource.includes(required)) failures.push(`scripts/signup-legal-acceptance-preload.mjs: missing canonical legal-storage token: ${required}`);
 }
@@ -224,11 +245,29 @@ for (const requiredPatch of ['patch-canonical-storage-contract.mjs', 'patch-pers
 if (postinstall.includes('patch-tenant-storage-path.mjs')) failures.push('package.json: obsolete tenant-storage patch is still wired into postinstall.');
 if (Object.prototype.hasOwnProperty.call(packageJson?.scripts || {}, 'start:unsafe')) failures.push('package.json: start:unsafe bypass must not exist.');
 if (!start.includes('test:storage-all') || !start.includes('safe-start.mjs')) failures.push('package.json: production start must run the full storage test suite and safe-start.');
-for (const requiredScript of ['test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:storage-routing-safety', 'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths']) {
+for (const requiredScript of [
+  'test:storage-safety',
+  'test:data-safety',
+  'test:persistence-integrity',
+  'test:storage-routing-safety',
+  'test:storage-migration-identity',
+  'test:storage-extra-invariants',
+  'test:storage-path-contract',
+  'test:signup-legal-acceptance',
+  'test:closed-pilot-backup-restore',
+  'test:closed-pilot-security',
+  'audit:storage-paths',
+]) {
   if (!storageAll.includes(requiredScript)) failures.push(`package.json: test:storage-all is missing ${requiredScript}.`);
 }
 
-for (const requiredTest of ['tests/data-safety.test.mjs', 'tests/persistence-integrity.test.mjs', 'tests/storage-routing-safety.test.mjs']) {
+for (const requiredTest of [
+  'tests/data-safety.test.mjs',
+  'tests/persistence-integrity.test.mjs',
+  'tests/storage-routing-safety.test.mjs',
+  'tests/storage-migration-identity.test.mjs',
+  'tests/storage-extra-invariants.test.mjs',
+]) {
   if (!fs.existsSync(path.join(root, requiredTest))) failures.push(`${requiredTest} is missing.`);
 }
 
