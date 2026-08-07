@@ -7,7 +7,7 @@ let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 const marker = '// ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS';
 if (!source.includes(marker)) {
   const unsafe = `function parseAllowedOrigins() {\n\tconst raw = String(process.env.ALLOWED_ORIGINS || '').trim();\n\tif (!raw) return new Set(DEFAULT_ALLOWED_ORIGINS);\n\treturn new Set(\n\t\traw\n\t\t\t.split(',')\n\t\t\t.map((value) => String(value || '').trim())\n\t\t\t.filter(Boolean)\n\t);\n}`;
-  const safe = `function parseAllowedOrigins() {\n\t${marker}\n\tconst requiredProductionOrigins = IS_PRODUCTION\n\t\t? ['https://athlyrax.com', 'https://www.athlyrax.com']\n\t\t: [];\n\tconst raw = String(process.env.ALLOWED_ORIGINS || '').trim();\n\tconst configuredOrigins = raw\n\t\t? raw.split(',').map((value) => String(value || '').trim()).filter(Boolean)\n\t\t: (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS);\n\tconst origins = [...configuredOrigins, ...requiredProductionOrigins];\n\tfor (const origin of origins) {\n\t\tif (origin === '*' || !/^https?:\\/\\/[^\\s/]+(?::\\d+)?$/i.test(origin)) {\n\t\t\tthrow new Error(\`Invalid CORS origin: \${origin || '(empty)'}. Use an explicit http/https origin with no path; wildcard origins are forbidden.\`);\n\t\t}\n\t}\n\treturn new Set(origins);\n}`;
+  const safe = `function parseAllowedOrigins() {\n\t${marker}\n\tconst requiredProductionOrigins = IS_PRODUCTION\n\t\t? ['https://athlyrax.com', 'https://www.athlyrax.com']\n\t\t: [];\n\tconst raw = String(process.env.ALLOWED_ORIGINS || '').trim();\n\tconst configuredOrigins = raw\n\t\t? raw.split(',').map((value) => String(value || '').trim()).filter(Boolean)\n\t\t: (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS);\n\tconst origins = [...configuredOrigins, ...requiredProductionOrigins];\n\tfor (const origin of origins) {\n\t\tlet parsed;\n\t\ttry { parsed = new URL(origin); } catch { parsed = null; }\n\t\tconst validProtocol = parsed && (parsed.protocol === 'https:' || parsed.protocol === 'http:');\n\t\tconst exactOrigin = parsed && parsed.origin === origin;\n\t\tif (origin === '*' || !validProtocol || !exactOrigin || parsed.username || parsed.password) {\n\t\t\tthrow new Error(\`Invalid CORS origin: \${origin || '(empty)'}. Use an exact http/https origin with no path, query, fragment or credentials; wildcard origins are forbidden.\`);\n\t\t}\n\t}\n\treturn new Set(origins);\n}`;
   if (!source.includes(unsafe)) throw new Error('CORS allowed-origin parser anchor was not found.');
   source = source.replace(unsafe, safe);
 }
@@ -17,6 +17,8 @@ for (const token of [
   "'https://athlyrax.com'",
   "'https://www.athlyrax.com'",
   ': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)',
+  'new URL(origin)',
+  'parsed.origin === origin',
   "origin === '*'",
   'return new Set(origins);',
 ]) if (!source.includes(token)) throw new Error(`Production CORS hardening missing: ${token}`);
