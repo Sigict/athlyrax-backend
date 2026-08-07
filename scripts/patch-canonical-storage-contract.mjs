@@ -54,6 +54,28 @@ if (!source.includes(authFailClosedMarker)) {
   source = source.replace(authAnchor, authReplacement);
 }
 
+const authAtomicMarker = `// ATHLYRAX_AUTH_BOOTSTRAP_ATOMIC_WRITES`;
+if (!source.includes(authAtomicMarker)) {
+  const functionStart = source.indexOf('function loadOrCreateAuthUsers() {');
+  const functionEnd = source.indexOf('\nfunction toBase64Url(', functionStart);
+  if (functionStart < 0 || functionEnd < 0) throw new Error('Could not locate authentication bootstrap function for atomic write guard.');
+  let authFunction = source.slice(functionStart, functionEnd);
+  authFunction = authFunction
+    .replaceAll('writeJsonFile(AUTH_USERS_PATH,', 'writeAtomicJsonFile(AUTH_USERS_PATH,')
+    .replaceAll('writeJsonFile(AUTH_USERS_BACKUP_PATH,', 'writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH,');
+  if (authFunction.includes('writeJsonFile(AUTH_USERS_')) throw new Error('Non-atomic authentication bootstrap write remains.');
+  authFunction = authFunction.replace('function loadOrCreateAuthUsers() {', `function loadOrCreateAuthUsers() {\n${authAtomicMarker}`);
+  source = source.slice(0, functionStart) + authFunction + source.slice(functionEnd);
+}
+
+const inviteFailClosedMarker = `// ATHLYRAX_AUTH_INVITES_FAIL_CLOSED`;
+if (!source.includes(inviteFailClosedMarker)) {
+  const legacyInviteLoader = `function loadOrCreateAuthInvites() {\n\tensureStorageLayout();\n\tconst fromFile = normalizeInviteRows(readJsonFile(AUTH_INVITES_PATH));\n\tif (fromFile.length > 0) return fromFile;\n\twriteJsonFile(AUTH_INVITES_PATH, []);\n\treturn [];\n}`;
+  const safeInviteLoader = `function loadOrCreateAuthInvites() {\n${inviteFailClosedMarker}\n\tensureStorageLayout();\n\tif (fs.existsSync(AUTH_INVITES_PATH)) {\n\t\tconst raw = readJsonFile(AUTH_INVITES_PATH);\n\t\tif (!Array.isArray(raw)) {\n\t\t\tthrow new Error('Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.');\n\t\t}\n\t\treturn normalizeInviteRows(raw);\n\t}\n\twriteAtomicJsonFile(AUTH_INVITES_PATH, []);\n\treturn [];\n}`;
+  if (!source.includes(legacyInviteLoader)) throw new Error('Could not find authentication invite loader anchor.');
+  source = source.replace(legacyInviteLoader, safeInviteLoader);
+}
+
 const missingTenantResponse = `\t\tappendAuthAuditEvent({\n\t\t\taction: 'tenant_database_missing',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: 'missing_existing_tenant_database',\n\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t});\n\t\tres.status(503).json({\n\t\t\terror: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',\n\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t});\n\t\treturn;`;
 
 const unsafeGetBlock = `\tensureStorageLayout(storagePaths);\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n\t\twriteAtomicJsonFile(storagePaths.dbPath, {});\n\t}`;
@@ -94,6 +116,8 @@ const forbidden = [
   `path.join(STORAGE_ROOT, 'auth-users.json')`,
   `writeAtomicJsonFile(storagePaths.dbPath, {});`,
   obsoleteStorageSafetyImport,
+  `writeJsonFile(AUTH_USERS_PATH,`,
+  `writeJsonFile(AUTH_USERS_BACKUP_PATH,`,
 ];
 for (const token of forbidden) {
   if (source.includes(token)) throw new Error(`Forbidden legacy storage behavior remains in index.js: ${token}`);
@@ -104,10 +128,13 @@ for (const token of [
   storageContractImport,
   runtimeGuardMarker,
   authFailClosedMarker,
+  authAtomicMarker,
+  inviteFailClosedMarker,
   putMarker,
   registrationMarker,
   `Render runtime requires NODE_ENV=production`,
   `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
+  `Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.`,
   `resolveStorageConfiguration(process.env, __dirname)`,
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
