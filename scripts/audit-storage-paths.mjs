@@ -52,8 +52,11 @@ for (const required of [
   `path.join(STORAGE_ROOT, 'auth', 'auth-users.json')`,
   `action: 'tenant_database_missing'`,
   `// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD`,
+  `// ATHLYRAX_PRODUCTION_AUTH_STORE_FAIL_CLOSED`,
   `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
+  `Render runtime requires NODE_ENV=production`,
+  `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
   `resolveStorageConfiguration(process.env, __dirname)`,
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
@@ -68,11 +71,13 @@ for (const required of [
 
 const safeStartSource = fs.readFileSync(path.join(root, 'scripts', 'safe-start.mjs'), 'utf8');
 for (const required of [
+  `Safe production start requires NODE_ENV=production`,
   'resolveStorageConfiguration(process.env, repoRoot)',
   'initialStorageConfiguration.failures.length > 0',
   'legacyMigration = migrateLegacyStorageIfNeeded({',
   'restoreBundledDemoTenantIfNeeded({',
   'runStorageSafetyCheck({',
+  'requireFiles: true',
   'finalizeLegacyStorageMigration({',
 ]) {
   if (!safeStartSource.includes(required)) failures.push(`scripts/safe-start.mjs: missing prevalidated storage token: ${required}`);
@@ -107,6 +112,9 @@ const safetySource = fs.readFileSync(path.join(root, 'scripts', 'storage-safety-
 for (const required of [
   'validateDatabaseObject(',
   'validateAuthStore(',
+  'requireNonEmpty',
+  'must not be empty in production',
+  'must contain at least one user in production',
   'Global database',
   'Authentication user store is not valid JSON',
   'Authentication user backup',
@@ -125,6 +133,9 @@ for (const required of [
 
 const patchSource = fs.readFileSync(path.join(root, 'scripts', 'patch-canonical-storage-contract.mjs'), 'utf8');
 for (const required of [
+  `const authFailClosedMarker = \`// ATHLYRAX_PRODUCTION_AUTH_STORE_FAIL_CLOSED\`;`,
+  `Render runtime requires NODE_ENV=production`,
+  `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
   `const registrationMarker = \`// ATHLYRAX_NEW_TENANT_DB_PROVISION\`;`,
   `registrationTenantStorage = resolveStoragePathsForTenantKey(tenantId)`,
   `invited_tenant_database_missing`,
@@ -133,7 +144,7 @@ for (const required of [
   `try { persistAuthInvites(); } catch {}`,
   `provisioningToken: registrationTenantProvisioningToken`,
 ]) {
-  if (!patchSource.includes(required)) failures.push(`scripts/patch-canonical-storage-contract.mjs: missing registration safety token: ${required}`);
+  if (!patchSource.includes(required)) failures.push(`scripts/patch-canonical-storage-contract.mjs: missing registration/auth safety token: ${required}`);
 }
 
 const legalSource = fs.readFileSync(path.join(root, 'scripts', 'signup-legal-acceptance-preload.mjs'), 'utf8');
