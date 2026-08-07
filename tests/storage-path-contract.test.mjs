@@ -91,16 +91,18 @@ test('legacy auth plus all tenant files migrate to canonical paths and backups',
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('legacy migration creates a canonical auth backup baseline when old backup is absent', () => {
+test('legacy migration refuses to manufacture a canonical auth backup when old backup is absent', () => {
   const root = tempDir('athlyrax-auth-baseline-');
   const storageRoot = path.join(root, 'persistent');
   const backupRoot = path.join(root, 'backup');
   fs.mkdirSync(storageRoot, { recursive: true });
   const users = [{ username: 'coach-a', role: 'head-coach' }];
   fs.writeFileSync(path.join(storageRoot, 'auth-users.json'), `${JSON.stringify(users)}\n`, 'utf8');
-  const result = migrateLegacyStorageIfNeeded({ sourceRoot: root, storageRoot, backupRoot, logger: { info() {} } });
-  assert.equal(result.count, 2);
-  assert.equal(fs.readFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), 'utf8'), fs.readFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), 'utf8'));
+  assert.throws(
+    () => migrateLegacyStorageIfNeeded({ sourceRoot: root, storageRoot, backupRoot, logger: { info() {} } }),
+    /no independent authentication backup is available/,
+  );
+  assert.equal(fs.existsSync(path.join(storageRoot, 'auth', 'auth-users.backup.json')), false);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
