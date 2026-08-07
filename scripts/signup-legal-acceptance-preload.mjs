@@ -82,7 +82,7 @@ export function validateSignupLegalAcceptance(body) {
   return { ok: true, versions: { ...REQUIRED_SIGNUP_LEGAL_VERSIONS } };
 }
 
-export function buildSignupLegalAcceptanceRecord({ req, responsePayload, acceptedAt } = {}) {
+export function buildSignupLegalAcceptanceRecord({ req, responsePayload, acceptedAt, stage = 'completed' } = {}) {
   const body = req?.body && typeof req.body === 'object' ? req.body : {};
   const responseUser = responsePayload?.user && typeof responsePayload.user === 'object'
     ? responsePayload.user
@@ -97,6 +97,7 @@ export function buildSignupLegalAcceptanceRecord({ req, responsePayload, accepte
   return {
     eventId: `legal_${crypto.randomUUID()}`,
     eventType: 'signup-data-protection-acceptance',
+    stage: cleanText(stage, 40) || 'completed',
     acceptedAt: timestamp,
     username,
     email: cleanText(responseUser?.email || body?.email, 254).toLowerCase(),
@@ -117,7 +118,12 @@ export function buildSignupLegalAcceptanceRecord({ req, responsePayload, accepte
 export function appendSignupLegalAcceptanceRecord(record) {
   const targetPath = resolveAcceptancePath();
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.appendFileSync(targetPath, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });
+  const line = `${JSON.stringify(record)}\n`;
+  fs.appendFileSync(targetPath, line, { encoding: 'utf8', mode: 0o600 });
+  const stat = fs.statSync(targetPath);
+  if (!Number.isFinite(stat.size) || stat.size < Buffer.byteLength(line)) {
+    throw new Error('Legal acceptance append verification failed.');
+  }
   try {
     fs.chmodSync(targetPath, 0o600);
   } catch {
@@ -130,6 +136,16 @@ function signupLegalAcceptanceMiddleware(req, res, next) {
   const validation = validateSignupLegalAcceptance(req?.body);
   if (!validation.ok) {
     res.status(400).json({ error: validation.error });
+    return;
+  }
+
+  // Persist the user's acceptance before the account handler can create any account data.
+  // A completed record is appended only after a successful registration response.
+  try {
+    appendSignupLegalAcceptanceRecord(buildSignupLegalAcceptanceRecord({ req, stage: 'pre-registration' }));
+  } catch (error) {
+    console.error('[auth] Could not persist pre-registration legal acceptance record:', error?.message || error);
+    res.status(503).json({ error: 'Registration is temporarily unavailable because legal acceptance could not be recorded.' });
     return;
   }
 
@@ -146,9 +162,9 @@ function signupLegalAcceptanceMiddleware(req, res, next) {
     const statusCode = Number(res?.statusCode || 0);
     if (statusCode < 200 || statusCode >= 300) return;
     try {
-      appendSignupLegalAcceptanceRecord(buildSignupLegalAcceptanceRecord({ req, responsePayload }));
+      appendSignupLegalAcceptanceRecord(buildSignupLegalAcceptanceRecord({ req, responsePayload, stage: 'completed' }));
     } catch (error) {
-      console.error('[auth] Could not persist signup legal acceptance record:', error?.message || error);
+      console.error('[auth] Could not persist completed signup legal acceptance record:', error?.message || error);
     }
   });
 
