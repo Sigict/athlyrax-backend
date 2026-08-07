@@ -86,10 +86,7 @@ forbidAll('scripts/safe-start.mjs', [
 ]);
 
 requireAll('scripts/storage-path-integrity.mjs', [
-  `ATHLYRAX_STORAGE_SYMLINK_BLOCKED`,
-  `lstatSync`,
-  `isSymbolicLink()`,
-  `assertNoSymlinkStorageLayout`,
+  `ATHLYRAX_STORAGE_SYMLINK_BLOCKED`, `realpathSync`, `lstatSync`, `isSymbolicLink()`, `assertNoSymlinkStorageLayout`,
 ]);
 requireAll('scripts/migration-transaction-state.mjs', [
   `ACTIVE_MIGRATION_TRANSACTION_FILE`,
@@ -110,9 +107,19 @@ requireAll('scripts/storage-safety-lib.mjs', [
 ]);
 
 requireAll('scripts/approve-storage-layout.mjs', [
+  `assertNoSymlinkStorageLayout(`, `assertNoActiveMigrationTransaction(`,
   `assertJsonArray(paths.authInvites`, `assertJsonArray(paths.snapshotSubmissions`,
-  `assertBillingCatalog(paths.billingCatalog`, `authBoundTenants`,
-  `requiredTenants = [...new Set`, `writeStorageReadyMarker`,
+  `assertBillingCatalog(paths.billingCatalog`, `contains duplicate plan keys`, `contains duplicate username`,
+  `authBoundTenants`, `requiredTenants = [...new Set`, `writeStorageReadyMarker`,
+]);
+requireAll('scripts/stage-storage-restore.mjs', [
+  `assertRegularNonSymlinkFile`, `assertSafeDestination`, `requireCanonicalTenantId`,
+  `isSymbolicLink()`, `fs.fsyncSync(handle)`, `Staged copy verification failed`,
+  `Production activation: NOT PERFORMED`,
+]);
+requireAll('scripts/check-storage-safety.mjs', [
+  `if (!production)`, `assertNoSymlinkStorageLayout(`, `assertNoActiveMigrationTransaction(`,
+  `validateRequiredStorageFiles(`, `ATHLYRAX_STORAGE_SAFETY_CHECK_FAILED`,
 ]);
 
 requireAll('scripts/production-start.mjs', [
