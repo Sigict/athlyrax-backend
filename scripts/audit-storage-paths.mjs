@@ -106,7 +106,9 @@ requireTokens('scripts/demo-data-sanitizer.mjs', [
   `demo-pre-sanitization`,
   `demoDataSynthetic`,
   `tenantId: 'demo-company'`,
-  `containsObviousContactData`,
+  `containsObviousPersonalData`,
+  `syntheticUsername`,
+  `filedataurl`,
   `example.invalid`,
   `Demo sanitization verification failed`,
 ]);
