@@ -84,10 +84,14 @@ function readValidatedJsonObject(filePath, label, expectedTenantId = '') {
   }
   return parsed;
 }
-
-function copyValidatedJson(source, destination, label, expectedTenantId = '') {
+function validateSource(source, label, expectedTenantId = '') {
   const resolvedSource = assertRegularNonSymlinkFile(source, label);
   readValidatedJsonObject(resolvedSource, label, expectedTenantId);
+  return resolvedSource;
+}
+
+function copyValidatedJson(source, destination, label, expectedTenantId = '') {
+  const resolvedSource = validateSource(source, label, expectedTenantId);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   const bytes = fs.readFileSync(resolvedSource);
   const temp = `${destination}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
@@ -116,25 +120,32 @@ try {
   if (!args.destination || !args.globalDb) { usage(); process.exit(2); }
 
   const destination = assertSafeDestination(args.destination);
-  fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
-  if (fs.lstatSync(destination).isSymbolicLink()) throw new Error(`Destination became a symbolic link: ${destination}`);
-
   const paths = canonicalStoragePaths({ sourceRoot: process.cwd(), storageRoot: destination });
-  const files = [copyValidatedJson(args.globalDb, paths.globalDb, 'Global database')];
-  const tenantIds = [];
-  const seenTenantIds = new Set();
 
+  // ATHLYRAX_RESTORE_PREFLIGHT_BEFORE_WRITE
+  // Validate every input and mapping before creating or writing the staging tree.
+  const globalSource = validateSource(args.globalDb, 'Global database');
+  const tenantPlans = [];
+  const seenTenantIds = new Set();
   for (const tenantSpec of args.tenants) {
     const separator = String(tenantSpec || '').indexOf('=');
     if (separator <= 0) throw new Error(`Invalid --tenant mapping: ${tenantSpec}`);
     const tenantId = requireCanonicalTenantId(tenantSpec.slice(0, separator).trim(), 'tenant mapping ID');
     const source = tenantSpec.slice(separator + 1).trim();
     if (!source) throw new Error(`Missing tenant source file for ${tenantId}.`);
-    const dbPath = paths.tenantDb(tenantId);
     if (seenTenantIds.has(tenantId)) throw new Error(`Duplicate --tenant mapping: ${tenantId}`);
     seenTenantIds.add(tenantId);
-    tenantIds.push(tenantId);
-    files.push(copyValidatedJson(source, dbPath, `Tenant database ${tenantId}`, tenantId));
+    tenantPlans.push({ tenantId, source: validateSource(source, `Tenant database ${tenantId}`, tenantId) });
+  }
+
+  fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
+  if (fs.lstatSync(destination).isSymbolicLink()) throw new Error(`Destination became a symbolic link: ${destination}`);
+
+  const files = [copyValidatedJson(globalSource, paths.globalDb, 'Global database')];
+  const tenantIds = [];
+  for (const plan of tenantPlans) {
+    tenantIds.push(plan.tenantId);
+    files.push(copyValidatedJson(plan.source, paths.tenantDb(plan.tenantId), `Tenant database ${plan.tenantId}`, plan.tenantId));
   }
 
   const manifest = {
