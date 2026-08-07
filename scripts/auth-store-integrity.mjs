@@ -28,6 +28,9 @@ function canonicalTenant(value) {
   const raw = clean(value);
   return !raw || (CANONICAL_TENANT_PATTERN.test(raw) && raw === raw.toLowerCase());
 }
+function optionalBooleanIsValid(user, key) {
+  return !Object.prototype.hasOwnProperty.call(user, key) || typeof user[key] === 'boolean';
+}
 
 export function validateAuthStoreSemanticIntegrity(configuration, env = process.env, fsModule = fs) {
   if (!configuration || typeof configuration !== 'object') throw new Error('Storage configuration is required.');
@@ -64,6 +67,13 @@ export function validateAuthStoreSemanticIntegrity(configuration, env = process.
     if (!validScryptHash(user.passwordHash)) failures.push(`Authentication user ${usernameRaw || index} has a missing or invalid scrypt passwordHash.`);
     if (Object.prototype.hasOwnProperty.call(user, 'password') && clean(user.password)) failures.push(`Authentication user ${usernameRaw || index} contains a plaintext password field.`);
     if (!canonicalTenant(tenantId)) failures.push(`Authentication user ${usernameRaw || index} has noncanonical tenantId: ${tenantId}.`);
+    for (const flag of ['isApproved', 'disabled', 'onboardingComplete']) {
+      if (!optionalBooleanIsValid(user, flag)) failures.push(`Authentication user ${usernameRaw || index} has non-boolean ${flag}.`);
+    }
+    if (Object.prototype.hasOwnProperty.call(user, 'tokenValidAfter')) {
+      const tokenValidAfter = Number(user.tokenValidAfter);
+      if (!Number.isFinite(tokenValidAfter) || tokenValidAfter < 0) failures.push(`Authentication user ${usernameRaw || index} has invalid tokenValidAfter.`);
+    }
 
     if (email) {
       if (emails.has(email)) failures.push(`Authentication email is duplicated: ${email}.`);
@@ -74,15 +84,20 @@ export function validateAuthStoreSemanticIntegrity(configuration, env = process.
       primaryOwnerCount += 1;
       if (role !== 'software-owner') failures.push(`Primary software owner ${usernameRaw} must have role software-owner.`);
       if (tenantId && tenantId !== 'global-owner') failures.push(`Primary software owner ${usernameRaw} must not be bound to tenant ${tenantId}.`);
+      if (user.disabled === true) failures.push(`Primary software owner ${usernameRaw} must not be disabled.`);
+      if (user.isApproved === false) failures.push(`Primary software owner ${usernameRaw} must remain approved.`);
     }
-    if (username === 'demo.coach' && tenantId !== 'demo-company') failures.push('demo.coach must be explicitly bound to demo-company.');
+    if (role !== 'software-owner' && tenantId === 'global-owner') failures.push(`Non-software-owner ${usernameRaw || index} cannot use the global-owner tenant scope.`);
+    if (username === 'demo.coach') {
+      if (tenantId !== 'demo-company') failures.push('demo.coach must be explicitly bound to demo-company.');
+      if (role !== 'head-coach') failures.push('demo.coach must retain the head-coach role.');
+    }
     if (clean(user.createdVia).toLowerCase() === 'snapshot-self-signup' && (role !== 'swimmer' || tenantId !== 'snapshot-public')) {
       failures.push(`Snapshot self-signup user ${usernameRaw || index} must be swimmer/snapshot-public.`);
     }
   }
   if (primaryOwnerCount !== 1) failures.push(`Authentication store must contain exactly one configured primary software owner (${primaryOwner}).`);
 
-  // Backup must be a byte-semantically equivalent user set, not merely the same count.
   const canonical = (value) => {
     if (Array.isArray(value)) return value.map(canonical);
     if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
