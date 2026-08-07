@@ -10,8 +10,6 @@ function replaceRequired(needle, replacement, label) {
   source = source.replace(needle, replacement);
 }
 
-// Target history is user data. Do not silently throw older entries away while
-// normalizing or disconnecting a swimmer.
 replaceRequired(
   `\t\t.filter(Boolean)\n\t\t.slice(0, 240);\n}\n\nfunction normalizeSwimmerPathway`,
   `\t\t.filter(Boolean);\n}\n\nfunction normalizeSwimmerPathway`,
@@ -23,8 +21,6 @@ replaceRequired(
   'Disconnect-history silent truncation',
 );
 
-// Oversized swimmer sync requests must be rejected before persistence instead
-// of truncating arrays and replacing the complete stored profile with the cap.
 replaceRequired(
   `\tconst snapshots = Array.isArray(body?.snapshots) ? body.snapshots.slice(0, SWIMMER_SYNC_MAX_SNAPSHOTS) : [];\n\tconst history = Array.isArray(body?.history) ? body.history.slice(0, SWIMMER_SYNC_MAX_HISTORY_DAYS) : [];\n\tconst pbRows = Array.isArray(body?.pbRows) ? body.pbRows.slice(0, SWIMMER_SYNC_MAX_PB_ROWS) : [];`,
   `\tconst snapshots = Array.isArray(body?.snapshots) ? body.snapshots : [];\n\tconst history = Array.isArray(body?.history) ? body.history : [];\n\tconst pbRows = Array.isArray(body?.pbRows) ? body.pbRows : [];`,
@@ -36,7 +32,6 @@ replaceRequired(
   'Swimmer sync custom-set truncation',
 );
 
-// Administrative password resets obey the same minimum as self-service reset.
 const adminPasswordRoute = source.indexOf(`app.put('/auth/users/:username/password', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {`);
 const passwordMissing = source.indexOf(`\tif (!targetUsername || !nextPassword) {`, adminPasswordRoute);
 if (adminPasswordRoute < 0 || passwordMissing < 0) throw new Error('Admin password route was not found.');
@@ -46,8 +41,6 @@ if (!source.includes('// ATHLYRAX_ADMIN_PASSWORD_MINIMUM')) {
   source = source.slice(0, close) + guard + source.slice(close);
 }
 
-// Onboarding can change an email address. Prevent it from creating ambiguous
-// email login identities that the startup validator would later reject.
 const onboardingRoute = source.indexOf(`app.post('/auth/onboarding/complete', requireStrictAuth, (req, res) => {`);
 const onboardingEmailValidation = source.indexOf(`\tif (!AUTH_EMAIL_PATTERN.test(email)) {`, onboardingRoute);
 if (onboardingRoute < 0 || onboardingEmailValidation < 0) throw new Error('Onboarding route was not found.');
@@ -57,9 +50,6 @@ if (!source.includes('// ATHLYRAX_ONBOARDING_EMAIL_UNIQUE')) {
   source = source.slice(0, close) + guard + source.slice(close);
 }
 
-// The configured primary owner is part of the production safety contract. Do
-// not allow an ordinary role/approval operation to invalidate that account and
-// make the next restart fail or lock out administration.
 const roleRoute = source.indexOf(`app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {`);
 const roleIndexLookup = source.indexOf(`\tconst index = authUsers.findIndex((row) => row.username === targetUsername);`, roleRoute);
 if (roleRoute < 0 || roleIndexLookup < 0) throw new Error('Role update route was not found.');
@@ -75,17 +65,12 @@ if (!source.includes('// ATHLYRAX_PRIMARY_OWNER_APPROVAL_IMMUTABLE')) {
   source = source.slice(0, approvalIndexLookup) + guard + source.slice(approvalIndexLookup);
 }
 
-// The operational patch deliberately stopped production audit deletion. Replace
-// that unbounded-growth state with verified archival to the independent safety
-// root before deleting any old primary audit file.
-const oldAuditPrune = `function pruneAuthAuditFiles(paths, keepCount) {\n\t// ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE\n\tif (IS_PRODUCTION) return;\n\tfor (const stalePath of (Array.isArray(paths) ? paths : []).slice(keepCount)) {\n\t\ttry {\n\t\t\tfs.unlinkSync(stalePath);\n\t\t} catch {\n\t\t\t// Ignore cleanup failures for best-effort retention.\n\t\t}\n\t}\n}`;
+const oldAuditPrune = `function pruneAuthAuditFiles(paths, keepCount) {\n\tfor (const stalePath of (Array.isArray(paths) ? paths : []).slice(keepCount)) {\n\t\ttry {\n\t\t\tfs.unlinkSync(stalePath);\n\t\t} catch {\n\t\t\t// Ignore cleanup failures for best-effort retention.\n\t\t}\n\t}\n}`;
 const safeAuditPrune = `function pruneAuthAuditFiles(paths, keepCount) {\n\t// ATHLYRAX_PRODUCTION_AUDIT_ARCHIVE_BEFORE_DELETE\n\tfor (const stalePath of (Array.isArray(paths) ? paths : []).slice(keepCount)) {\n\t\ttry {\n\t\t\tif (IS_PRODUCTION) {\n\t\t\t\tconst safetyRoot = String(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();\n\t\t\t\tif (!safetyRoot) continue;\n\t\t\t\tconst archiveDir = path.join(path.resolve(safetyRoot), 'auth-audit-retention');\n\t\t\t\tfs.mkdirSync(archiveDir, { recursive: true });\n\t\t\t\tconst sourceBytes = fs.readFileSync(stalePath);\n\t\t\t\tconst archivePath = path.join(archiveDir, \`${'${Date.now()}'}-${'${crypto.randomBytes(4).toString(\'hex\')}'}-${'${path.basename(stalePath)}'}\`);\n\t\t\t\tfs.writeFileSync(archivePath, sourceBytes, { mode: 0o600 });\n\t\t\t\tif (!sourceBytes.equals(fs.readFileSync(archivePath))) { try { fs.unlinkSync(archivePath); } catch {} continue; }\n\t\t\t}\n\t\t\tfs.unlinkSync(stalePath);\n\t\t} catch {\n\t\t\t// Retain the primary file when archival/deletion cannot be verified.\n\t\t}\n\t}\n}`;
 replaceRequired(oldAuditPrune, safeAuditPrune, 'Auth audit verified retention');
 
-// DB snapshots are supplementary to the independent pre-write safety backups.
-// Restore bounded primary retention to avoid filling the production disk.
 replaceRequired(
-  `function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {\n\t// ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE\n\tif (IS_PRODUCTION) return;\n\tif (!fs.existsSync(snapshotDir)) return;`,
+  `function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {\n\tif (!fs.existsSync(snapshotDir)) return;`,
   `function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {\n\t// ATHLYRAX_BOUNDED_PRIMARY_DB_SNAPSHOT_RETENTION\n\tif (!fs.existsSync(snapshotDir)) return;`,
   'DB snapshot bounded retention',
 );
@@ -100,6 +85,10 @@ for (const token of [
   'ATHLYRAX_BOUNDED_PRIMARY_DB_SNAPSHOT_RETENTION',
 ]) if (!source.includes(token)) throw new Error(`Runtime retention verification failed: ${token}`);
 
+for (const forbidden of [
+  'ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE',
+  'ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',
+]) if (source.includes(forbidden)) throw new Error(`Temporary retention marker remains: ${forbidden}`);
 if (source.includes(`.slice(0, SWIMMER_SYNC_MAX_`)) throw new Error('Silent swimmer sync truncation remains.');
 if (source.includes(`.slice(0, 240);`)) throw new Error('Silent target-history truncation remains.');
 
