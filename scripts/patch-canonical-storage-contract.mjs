@@ -76,6 +76,14 @@ if (!source.includes(inviteFailClosedMarker)) {
   source = source.replace(legacyInviteLoader, safeInviteLoader);
 }
 
+const stripeWebhookMarker = `// ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED`;
+if (!source.includes(stripeWebhookMarker)) {
+  const unsafeWebhookBlock = `\ttry {\n\t\tif (BILLING_STRIPE_WEBHOOK_SECRET && signature) {\n\t\t\tevent = stripeClient.webhooks.constructEvent(req.body, signature, BILLING_STRIPE_WEBHOOK_SECRET);\n\t\t} else {\n\t\t\tconst rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body || '{}');\n\t\t\tevent = JSON.parse(rawBody);\n\t\t}\n\t} catch (error) {`;
+  const safeWebhookBlock = `${stripeWebhookMarker}\n\ttry {\n\t\tif (BILLING_STRIPE_WEBHOOK_SECRET) {\n\t\t\tif (!signature) {\n\t\t\t\tres.status(400).json({ error: 'Stripe webhook signature is required.' });\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tevent = stripeClient.webhooks.constructEvent(req.body, signature, BILLING_STRIPE_WEBHOOK_SECRET);\n\t\t} else {\n\t\t\tif (IS_PRODUCTION) {\n\t\t\t\tres.status(503).json({ error: 'Stripe webhook verification is not configured.' });\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tconst rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body || '{}');\n\t\t\tevent = JSON.parse(rawBody);\n\t\t}\n\t} catch (error) {`;
+  if (!source.includes(unsafeWebhookBlock)) throw new Error('Could not find Stripe webhook verification anchor.');
+  source = source.replace(unsafeWebhookBlock, safeWebhookBlock);
+}
+
 const missingTenantResponse = `\t\tappendAuthAuditEvent({\n\t\t\taction: 'tenant_database_missing',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: 'missing_existing_tenant_database',\n\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t});\n\t\tres.status(503).json({\n\t\t\terror: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',\n\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t});\n\t\treturn;`;
 
 const unsafeGetBlock = `\tensureStorageLayout(storagePaths);\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n\t\twriteAtomicJsonFile(storagePaths.dbPath, {});\n\t}`;
@@ -130,11 +138,14 @@ for (const token of [
   authFailClosedMarker,
   authAtomicMarker,
   inviteFailClosedMarker,
+  stripeWebhookMarker,
   putMarker,
   registrationMarker,
   `Render runtime requires NODE_ENV=production`,
   `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
   `Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.`,
+  `Stripe webhook signature is required.`,
+  `Stripe webhook verification is not configured.`,
   `resolveStorageConfiguration(process.env, __dirname)`,
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
