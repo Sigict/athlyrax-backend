@@ -15,6 +15,7 @@ const runtimeFiles = [
   'scripts/stage-storage-restore.mjs',
   'scripts/storage-path-contract.mjs',
   'scripts/storage-safety-lib.mjs',
+  'scripts/patch-durable-storage-writes.mjs',
 ];
 
 const failures = [];
@@ -60,6 +61,7 @@ for (const required of [
   `// ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED`,
   `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
+  `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
   `Render runtime requires NODE_ENV=production`,
   `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
   `Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.`,
@@ -73,6 +75,9 @@ for (const required of [
   `registrationTenantStorage = resolveStoragePathsForTenantKey(tenantId)`,
   `invited_tenant_database_missing`,
   `provisioningToken: registrationTenantProvisioningToken`,
+  `crypto.randomBytes(6).toString('hex')`,
+  `fs.openSync(tmpPath, 'wx', 0o600)`,
+  `fs.fsyncSync(fileHandle)`,
 ]) {
   if (!indexSource.includes(required)) failures.push(`index.js: missing canonical token: ${required}`);
 }
@@ -119,6 +124,8 @@ for (const required of [
 const safetySource = fs.readFileSync(path.join(root, 'scripts', 'storage-safety-lib.mjs'), 'utf8');
 for (const required of [
   'validateDatabaseObject(',
+  'validateTenantDatabaseIdentity(',
+  'Refusing cross-tenant data routing',
   'validateAuthStore(',
   'validateAuthPrimaryBackupParity(',
   'validateAuthBoundTenantDatabases(',
@@ -136,6 +143,9 @@ for (const required of [
   'Global database',
   'Authentication user store is not valid JSON',
   'Authentication user backup',
+  `storageRoot: resolvedStorageRoot`,
+  `crypto.randomBytes(6).toString('hex')`,
+  `fsModule.fsyncSync(fileHandle)`,
   `fsModule.renameSync(tempPath, markerPath)`,
 ]) {
   if (!safetySource.includes(required)) failures.push(`scripts/storage-safety-lib.mjs: missing production safety token: ${required}`);
@@ -150,6 +160,17 @@ for (const required of [
   'sourceBytes.equals(backupBytes)',
 ]) {
   if (!dataSafetySource.includes(required)) failures.push(`scripts/data-safety-preload.mjs: missing database corruption guard token: ${required}`);
+}
+
+const durablePatchSource = fs.readFileSync(path.join(root, 'scripts', 'patch-durable-storage-writes.mjs'), 'utf8');
+for (const required of [
+  'ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES',
+  `crypto.randomBytes(6).toString('hex')`,
+  `fs.openSync(tmpPath, 'wx', 0o600)`,
+  `fs.fsyncSync(fileHandle)`,
+  `fs.fsyncSync(directoryHandle)`,
+]) {
+  if (!durablePatchSource.includes(required)) failures.push(`scripts/patch-durable-storage-writes.mjs: missing durable-write token: ${required}`);
 }
 
 const approvalSource = fs.readFileSync(path.join(root, 'scripts', 'approve-storage-layout.mjs'), 'utf8');
@@ -197,15 +218,19 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 
 const postinstall = String(packageJson?.scripts?.postinstall || '');
 const start = String(packageJson?.scripts?.start || '');
 const storageAll = String(packageJson?.scripts?.['test:storage-all'] || '');
-if (!postinstall.includes('patch-canonical-storage-contract.mjs')) failures.push('package.json: canonical storage patch is not wired into postinstall.');
+for (const requiredPatch of ['patch-canonical-storage-contract.mjs', 'patch-persistence-integrity.mjs', 'patch-durable-storage-writes.mjs']) {
+  if (!postinstall.includes(requiredPatch)) failures.push(`package.json: postinstall is missing ${requiredPatch}.`);
+}
 if (postinstall.includes('patch-tenant-storage-path.mjs')) failures.push('package.json: obsolete tenant-storage patch is still wired into postinstall.');
 if (Object.prototype.hasOwnProperty.call(packageJson?.scripts || {}, 'start:unsafe')) failures.push('package.json: start:unsafe bypass must not exist.');
 if (!start.includes('test:storage-all') || !start.includes('safe-start.mjs')) failures.push('package.json: production start must run the full storage test suite and safe-start.');
-for (const requiredScript of ['test:storage-safety', 'test:data-safety', 'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths']) {
+for (const requiredScript of ['test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:storage-routing-safety', 'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths']) {
   if (!storageAll.includes(requiredScript)) failures.push(`package.json: test:storage-all is missing ${requiredScript}.`);
 }
 
-if (!fs.existsSync(path.join(root, 'tests', 'data-safety.test.mjs'))) failures.push('tests/data-safety.test.mjs is missing.');
+for (const requiredTest of ['tests/data-safety.test.mjs', 'tests/persistence-integrity.test.mjs', 'tests/storage-routing-safety.test.mjs']) {
+  if (!fs.existsSync(path.join(root, requiredTest))) failures.push(`${requiredTest} is missing.`);
+}
 
 if (failures.length) {
   console.error('ATHLYRAX_STORAGE_PATH_AUDIT_FAIL');
