@@ -82,54 +82,64 @@ forbidAll('scripts/safe-start.mjs', [
 ]);
 
 requireAll('scripts/storage-safety-lib.mjs', [
-  `authInvitesPath`,
-  `snapshotSubmissionsPath`,
-  `billingCatalogPath`,
+  `authInvitesPath`, `snapshotSubmissionsPath`, `billingCatalogPath`,
   `validateJsonArray(configuration.authInvitesPath`,
   `validateJsonArray(configuration.snapshotSubmissionsPath`,
   `validateBillingCatalog(configuration.billingCatalogPath`,
-  `validateAuthPrimaryBackupParity`,
-  `validateAuthBoundTenantDatabases`,
+  `validateAuthPrimaryBackupParity`, `validateAuthBoundTenantDatabases`,
+  `contains duplicate usernames`, `has noncanonical tenantId`,
+  `Demo tenant database demo-company contains no meaningful demo records`,
   `Storage approval marker is not bound to this storage root`,
   `AUTH_SECRET must be explicitly configured with at least 32 characters in production`,
 ]);
 
 requireAll('scripts/approve-storage-layout.mjs', [
-  `assertJsonArray(paths.authInvites`,
-  `assertJsonArray(paths.snapshotSubmissions`,
-  `assertBillingCatalog(paths.billingCatalog`,
-  `authBoundTenants`,
-  `requiredTenants = [...new Set`,
-  `writeStorageReadyMarker`,
+  `assertJsonArray(paths.authInvites`, `assertJsonArray(paths.snapshotSubmissions`,
+  `assertBillingCatalog(paths.billingCatalog`, `authBoundTenants`,
+  `requiredTenants = [...new Set`, `writeStorageReadyMarker`,
 ]);
 
 requireAll('scripts/production-start.mjs', [
-  `ATHLYRAX_STORAGE_MIGRATION_APPROVAL`, `MIGRATE_CANONICAL_STORAGE_ONCE`, `migrationAlreadyCompleted`,
-  `migrate-storage-once.mjs`, `safe-start.mjs`,
+  `ATHLYRAX_STORAGE_MIGRATION_APPROVAL`, `MIGRATE_CANONICAL_STORAGE_ONCE`,
+  `migrationAlreadyCompleted`, `migrate-storage-once.mjs`, `safe-start.mjs`,
 ]);
 requireAll('scripts/migrate-storage-once.mjs', [
-  `MIGRATE_CANONICAL_STORAGE_ONCE`, `migrateLegacyStorageIfNeeded({`, `restoreBundledDemoTenantIfNeeded({`,
+  `MIGRATE_CANONICAL_STORAGE_ONCE`, `beginTransaction(`, `rollbackTransaction(`,
+  `migrateLegacyStorageIfNeeded({`, `restoreBundledDemoTenantIfNeeded({`,
   `sanitizeDemoTenantDatabase({`, `writeStorageReadyMarker(`, `runStorageSafetyCheck({`,
-  `finalizeLegacyStorageMigration({`, `restorePreviousReadyMarker`,
+  `finalizeLegacyStorageMigration({`, `Migration failed; original storage was restored`,
 ]);
 requireAll('scripts/storage-path-contract.mjs', [
   `legacy-migration-already-finalized`, `Refusing cross-tenant migration or recovery`,
   `Refusing to manufacture a backup baseline from the primary store`,
+  `Canonical demo-company database exists but contains no meaningful demo records`,
+  `validMeaningfulDemoDatabase`,
 ]);
 forbidAll('scripts/storage-path-contract.mjs', [`kind: 'auth-users-backup-baseline'`]);
 
 requireAll('scripts/data-safety-preload.mjs', [
   `ATHLYRAX_MISSING_DB_CREATE_BLOCKED`, `ATHLYRAX_CURRENT_DB_INVALID`, `ATHLYRAX_INCOMING_DB_INVALID`,
+  `ATHLYRAX_DB_TENANT_IDENTITY_CONFLICT`, `expectedTenantIdForDbPath`,
   `hasValidProvisioningProof`, `timingSafeEqual`, `provisioningToken: _discardedProvisioningToken`,
+  `fsModule.fsyncSync(handle)`,
 ]);
 requireAll('scripts/demo-data-sanitizer.mjs', [
   `demoDataSynthetic`, `tenantId: 'demo-company'`, `containsObviousPersonalData`, `Demo sanitization verification failed`,
 ]);
 requireAll('scripts/patch-durable-storage-writes.mjs', [
-  `ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`, `fs.openSync(tmpPath, 'wx', 0o600)`, `fs.fsyncSync(fileHandle)`, `fs.renameSync(tmpPath, filePath)`,
+  `ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`, `fs.openSync(tmpPath, 'wx', 0o600)`,
+  `fs.fsyncSync(fileHandle)`, `fs.renameSync(tmpPath, filePath)`,
 ]);
 
-for (const obsolete of ['scripts/patch-runtime-start-guard.mjs', 'scripts/patch-provisioning-integrity.mjs']) {
+const build = requireAll('scripts/build-production-backend.mjs', [
+  `patch-index-signup-legal.mjs`, `patch-logout-csrf.mjs`, `patch-canonical-storage-contract.mjs`,
+  `patch-persistence-integrity.mjs`, `patch-durable-storage-writes.mjs`,
+  `--check`, `audit-storage-paths.mjs`, `ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK`,
+]);
+if (build.includes('patch-runtime-start-guard.mjs') && !build.includes('Obsolete production patch')) {
+  failures.push('scripts/build-production-backend.mjs: obsolete patch is referenced as an active transform.');
+}
+for (const obsolete of ['scripts/patch-runtime-start-guard.mjs', 'scripts/patch-provisioning-integrity.mjs', 'scripts/patch-tenant-storage-path.mjs']) {
   if (fs.existsSync(path.join(root, obsolete))) failures.push(`Obsolete patch file must be removed: ${obsolete}`);
 }
 
@@ -137,9 +147,7 @@ const pkg = JSON.parse(read('package.json') || '{}');
 const postinstall = String(pkg?.scripts?.postinstall || '');
 const start = String(pkg?.scripts?.start || '');
 const storageAll = String(pkg?.scripts?.['test:storage-all'] || '');
-for (const required of ['patch-index-signup-legal.mjs', 'patch-logout-csrf.mjs', 'patch-canonical-storage-contract.mjs', 'patch-persistence-integrity.mjs', 'patch-durable-storage-writes.mjs']) {
-  if (!postinstall.includes(required)) failures.push(`package.json: postinstall missing ${required}`);
-}
+if (postinstall !== 'node scripts/build-production-backend.mjs') failures.push('package.json: postinstall must use only the verified production build orchestrator.');
 for (const obsolete of ['patch-runtime-start-guard.mjs', 'patch-provisioning-integrity.mjs', 'patch-tenant-storage-path.mjs']) {
   if (postinstall.includes(obsolete)) failures.push(`package.json: obsolete postinstall patch remains: ${obsolete}`);
 }
