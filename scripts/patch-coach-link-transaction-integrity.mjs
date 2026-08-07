@@ -10,6 +10,22 @@ if (!source.includes('ATHLYRAX_COACH_LINK_RECONNECT_V1')) {
 
 const marker = '// ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1';
 if (!source.includes(marker)) {
+  // The request workflow is a cross-tenant transfer. If source and target are the
+  // same database, its two-write choreography would overwrite its own request.
+  {
+    const requestStart = source.indexOf("app.post('/swimmer/coach/request'");
+    const listStart = source.indexOf("app.get('/coach/swimmer-links'", requestStart);
+    if (requestStart < 0 || listStart < 0) throw new Error('Coach-link request route bounds missing for transaction hardening.');
+    let route = source.slice(requestStart, listStart);
+    const anchor = `\tconst sourceTenantId = resolveTenantKeyFromUser(swimmerUser);\n\tconst targetTenantId = resolveTenantKeyFromUser(coachUser);`;
+    const guarded = `${anchor}\n\t// ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET\n\tif (sourceTenantId && targetTenantId && sourceTenantId === targetTenantId) {\n\t\tres.status(409).json({ error: 'This swimmer account already belongs to the requested coach tenant. A cross-tenant connection request was not created.' });\n\t\treturn;\n\t}`;
+    if (!route.includes('ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET')) {
+      if (!route.includes(anchor)) throw new Error('Coach-link source/target tenant guard anchor missing.');
+      route = route.replace(anchor, guarded);
+    }
+    source = source.slice(0, requestStart) + route + source.slice(listStart);
+  }
+
   // Acceptance: commit both database copies before auth routing. If either database
   // write fails, auth remains on the source tenant. If auth persistence fails,
   // restore both database copies before reporting failure.
@@ -66,6 +82,8 @@ if (!source.includes(marker)) {
 
 for (const required of [
   'ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1',
+  'ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET',
+  'A cross-tenant connection request was not created.',
   'ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST',
   'ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET',
   'ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST',
