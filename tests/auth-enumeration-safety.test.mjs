@@ -17,6 +17,12 @@ test('production runtime cannot activate built-in default auth users', () => {
   assert.ok(source.includes('const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : ['));
 });
 
+test('legacy first-match identifier helper is removed from transformed backend', () => {
+  assert.ok(source.includes('ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED'));
+  assert.equal(source.includes('function findAuthUserByIdentifier('), false);
+  assert.equal(source.includes('findAuthUserByIdentifier(identifier)'), false);
+});
+
 test('password reset request endpoints do not reveal delivery outcome or use first-match identity lookup', () => {
   for (const startText of [
     "app.post('/auth/password-reset/request'",
@@ -26,7 +32,6 @@ test('password reset request endpoints do not reveal delivery outcome or use fir
     assert.ok(body.includes("If an account exists, a reset code has been issued."));
     assert.equal(body.includes('Could not issue reset code. Please contact your administrator.'), false);
     assert.equal(body.includes('Could not issue reset code. Please try again.'), false);
-    assert.equal(body.includes('findAuthUserByIdentifier(identifier)'), false);
     assert.ok(body.includes('resolveLoginUserByIdentifier(identifier)'));
   }
 });
@@ -42,7 +47,6 @@ test('password reset confirm endpoints do not reveal whether the account exists'
     assert.ok(body.includes("res.status(400).json({ error: 'Reset code is invalid or expired.' });"));
   }
   const snapshotConfirm = route("app.post('/snapshot/account/password-reset/confirm'");
-  assert.equal(snapshotConfirm.includes('findAuthUserByIdentifier(identifier)'), false);
   assert.ok(snapshotConfirm.includes('resolveLoginUserByIdentifier(identifier)'));
 });
 
@@ -50,7 +54,6 @@ test('snapshot sign-in rejects ambiguous identifiers instead of selecting first 
   const body = route("app.post('/snapshot/account/auth'");
   assert.ok(body.includes('ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE'));
   assert.ok(body.includes('resolveLoginUserByIdentifier(identifier)'));
-  assert.equal(body.includes('findAuthUserByIdentifier(identifier)'), false);
 });
 
 test('onboarding email uniqueness has one authoritative guard', () => {
