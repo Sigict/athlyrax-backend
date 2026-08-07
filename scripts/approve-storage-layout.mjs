@@ -1,15 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  sha256File,
-  writeStorageReadyMarker,
-} from './storage-safety-lib.mjs';
+import { sha256File, writeStorageReadyMarker } from './storage-safety-lib.mjs';
+import { canonicalStoragePaths } from './storage-path-contract.mjs';
 
 function parseArgs(argv) {
   const result = {};
-  for (let index = 0; index < argv.length; index += 2) {
-    result[argv[index]] = argv[index + 1];
-  }
+  for (let index = 0; index < argv.length; index += 2) result[argv[index]] = argv[index + 1];
   return result;
 }
 
@@ -19,36 +15,25 @@ try {
     throw new Error('Explicit approval is required: --approve CREATE_READY_MARKER');
   }
   const storageRoot = path.resolve(String(args['--storage-root'] || ''));
-  if (!storageRoot || storageRoot === path.parse(storageRoot).root) {
-    throw new Error('A valid --storage-root is required.');
-  }
+  if (!storageRoot || storageRoot === path.parse(storageRoot).root) throw new Error('A valid --storage-root is required.');
 
-  const globalDb = path.join(storageRoot, 'db.json');
-  const authUsers = path.join(storageRoot, 'auth', 'auth-users.json');
-  if (!fs.existsSync(globalDb)) throw new Error(`Missing ${globalDb}`);
-  if (!fs.existsSync(authUsers)) throw new Error(`Missing ${authUsers}`);
+  const paths = canonicalStoragePaths({ sourceRoot: process.cwd(), storageRoot });
+  if (!fs.existsSync(paths.globalDb)) throw new Error(`Missing ${paths.globalDb}`);
+  if (!fs.existsSync(paths.authUsers)) throw new Error(`Missing ${paths.authUsers}`);
 
-  const requiredTenants = String(args['--required-tenants'] || '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const requiredTenants = String(args['--required-tenants'] || '').split(',').map((value) => value.trim()).filter(Boolean);
   const verified = [
-    { path: globalDb, sha256: sha256File(globalDb), bytes: fs.statSync(globalDb).size },
-    { path: authUsers, sha256: sha256File(authUsers), bytes: fs.statSync(authUsers).size },
+    { path: paths.globalDb, sha256: sha256File(paths.globalDb), bytes: fs.statSync(paths.globalDb).size },
+    { path: paths.authUsers, sha256: sha256File(paths.authUsers), bytes: fs.statSync(paths.authUsers).size },
   ];
 
   for (const tenantId of requiredTenants) {
-    if (!/^[a-zA-Z0-9._-]+$/.test(tenantId)) throw new Error(`Unsafe tenant ID: ${tenantId}`);
-    const dbPath = path.join(storageRoot, 'tenants', tenantId, 'db.json');
+    const dbPath = paths.tenantDb(tenantId);
     if (!fs.existsSync(dbPath)) throw new Error(`Missing ${dbPath}`);
     verified.push({ path: dbPath, sha256: sha256File(dbPath), bytes: fs.statSync(dbPath).size });
   }
 
-  const markerPath = writeStorageReadyMarker(storageRoot, {
-    requiredTenants,
-    verifiedFiles: verified,
-  });
-
+  const markerPath = writeStorageReadyMarker(storageRoot, { requiredTenants, verifiedFiles: verified });
   console.log('ATHLYRAX_STORAGE_READY_MARKER_CREATED');
   console.log(`Marker: ${markerPath}`);
   console.log(`Verified files: ${verified.length}`);
