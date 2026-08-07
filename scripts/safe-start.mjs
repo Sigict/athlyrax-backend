@@ -26,11 +26,7 @@ const configuredBackupRoot = path.resolve(
   String(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim() || path.join(sourceRoot, '.athlyrax-safety-backups'),
 );
 
-assertCanonicalPathContract({
-  sourceRoot,
-  storageRoot: configuredStorageRoot,
-  indexSource,
-});
+assertCanonicalPathContract({ sourceRoot, storageRoot: configuredStorageRoot, indexSource });
 
 restoreBundledDemoTenantIfNeeded({
   sourceRoot,
@@ -45,7 +41,6 @@ runStorageSafetyCheck({
       ?? (String(process.env.NODE_ENV || '').toLowerCase() === 'production' ? 'true' : 'false'),
   ).toLowerCase() !== 'false',
   createDirectories: true,
-  linkStorage: true,
 });
 
 process.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';
