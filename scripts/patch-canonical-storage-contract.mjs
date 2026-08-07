@@ -94,6 +94,26 @@ if (!source.includes(startupHealMarker)) {
   source = source.replace(unsafeHealStart, safeHealStart);
 }
 
+const loginReadOnlyMarker = `// ATHLYRAX_PRODUCTION_LOGIN_READ_ONLY`;
+if (!source.includes(loginReadOnlyMarker)) {
+  const canonicalHeal = `\tconst canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[String(user?.username || '').trim().toLowerCase()];\n\tif (canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {`;
+  const guardedCanonicalHeal = `\tconst canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[String(user?.username || '').trim().toLowerCase()];\n${loginReadOnlyMarker}\n\tif (IS_PRODUCTION && canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {\n\t\tappendAuthAuditEvent({ action: 'login_blocked', req, status: 'blocked', target: user.username, reason: 'canonical_tenant_mismatch' });\n\t\tres.status(503).json({ error: 'Account tenant configuration is invalid. Login was blocked without modifying stored data.' });\n\t\treturn;\n\t}\n\tif (!IS_PRODUCTION && canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {`;
+  if (!source.includes(canonicalHeal)) throw new Error('Could not find login canonical-tenant self-heal anchor.');
+  source = source.replace(canonicalHeal, guardedCanonicalHeal);
+  const loginSwimmerHeal = `\tif (AUTH_AUTO_HEAL_SWIMMER_BINDINGS && String(user?.role || '').trim().toLowerCase() === 'swimmer') {`;
+  const devOnlyLoginSwimmerHeal = `\tif (!IS_PRODUCTION && AUTH_AUTO_HEAL_SWIMMER_BINDINGS && String(user?.role || '').trim().toLowerCase() === 'swimmer') {`;
+  if (!source.includes(loginSwimmerHeal)) throw new Error('Could not find login swimmer auto-heal anchor.');
+  source = source.replace(loginSwimmerHeal, devOnlyLoginSwimmerHeal);
+}
+
+const getReadOnlyMarker = `// ATHLYRAX_PRODUCTION_DB_GET_READ_ONLY`;
+if (!source.includes(getReadOnlyMarker)) {
+  const readHeal = `\t\t\t\tif (scopedSwimmers.length < 1 && AUTH_AUTO_HEAL_SWIMMER_BINDINGS) {`;
+  const devOnlyReadHeal = `\t\t\t\t${getReadOnlyMarker}\n\t\t\t\tif (!IS_PRODUCTION && scopedSwimmers.length < 1 && AUTH_AUTO_HEAL_SWIMMER_BINDINGS) {`;
+  if (!source.includes(readHeal)) throw new Error('Could not find GET /db swimmer auto-heal anchor.');
+  source = source.replace(readHeal, devOnlyReadHeal);
+}
+
 const missingTenantResponse = `\t\tappendAuthAuditEvent({\n\t\t\taction: 'tenant_database_missing',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: 'missing_existing_tenant_database',\n\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t});\n\t\tres.status(503).json({\n\t\t\terror: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',\n\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t});\n\t\treturn;`;
 const unsafeGetBlock = `\tensureStorageLayout(storagePaths);\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n\t\twriteAtomicJsonFile(storagePaths.dbPath, {});\n\t}`;
 const safeGetBlock = `\tensureStorageLayout(storagePaths);\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n${missingTenantResponse}\n\t}`;
@@ -106,8 +126,7 @@ if (!source.includes(putMarker)) {
   const existingAnchor = `\tconst existingDb = readJsonFile(storagePaths.dbPath);`;
   const existingIndex = source.indexOf(existingAnchor, putStart);
   if (putStart < 0 || existingIndex < 0) throw new Error('Could not find PUT /db missing-tenant guard anchors.');
-  const writeGuard = `${putMarker}\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n${missingTenantResponse}\n\t}\n\n`;
-  source = source.slice(0, existingIndex) + writeGuard + source.slice(existingIndex);
+  source = source.slice(0, existingIndex) + `${putMarker}\n\tif (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {\n${missingTenantResponse}\n\t}\n\n` + source.slice(existingIndex);
 }
 
 const registrationMarker = `// ATHLYRAX_NEW_TENANT_DB_PROVISION`;
@@ -119,7 +138,7 @@ if (!source.includes(registrationMarker)) {
   source = source.slice(0, roleIndex) + provisionBlock + source.slice(roleIndex);
 
   const catchAnchor = `\t} catch (error) {\n\t\tauthUsers.pop();\n\t\tif (usableInvite) {\n\t\t\tusableInvite.usedCount = Math.max(0, Number(usableInvite.usedCount || 0) - 1);\n\t\t}\n\t\tres.status(500).json({\n\t\t\terror: 'Could not create account.',`;
-  const safeCatch = `\t} catch (error) {\n\t\tauthUsers.pop();\n\t\tif (usableInvite) usableInvite.usedCount = Math.max(0, Number(usableInvite.usedCount || 0) - 1);\n\t\ttry { persistAuthUsers(); } catch {}\n\t\tif (usableInvite) { try { persistAuthInvites(); } catch {} }\n\t\tif (registrationTenantDbCreated && registrationTenantStorage.dbPath !== DB_PATH && fs.existsSync(registrationTenantStorage.dbPath)) {\n\t\t\ttry { fs.unlinkSync(registrationTenantStorage.dbPath); } catch {}\n\t\t}\n\t\tres.status(500).json({\n\t\t\terror: 'Could not create account.',`;
+  const safeCatch = `\t} catch (error) {\n\t\tauthUsers.pop();\n\t\tif (usableInvite) usableInvite.usedCount = Math.max(0, Number(usableInvite.usedCount || 0) - 1);\n\t\tlet registrationRollbackFailed = false;\n\t\ttry { persistAuthUsers(); } catch (rollbackError) { registrationRollbackFailed = true; console.error('[auth] Registration auth rollback failed:', rollbackError instanceof Error ? rollbackError.message : rollbackError); }\n\t\tif (usableInvite) {\n\t\t\ttry { persistAuthInvites(); } catch (rollbackError) { registrationRollbackFailed = true; console.error('[auth] Registration invite rollback failed:', rollbackError instanceof Error ? rollbackError.message : rollbackError); }\n\t\t}\n\t\tif (!registrationRollbackFailed && registrationTenantDbCreated && registrationTenantStorage.dbPath !== DB_PATH && fs.existsSync(registrationTenantStorage.dbPath)) {\n\t\t\ttry { fs.unlinkSync(registrationTenantStorage.dbPath); } catch (rollbackError) { registrationRollbackFailed = true; console.error('[auth] Registration tenant rollback failed:', rollbackError instanceof Error ? rollbackError.message : rollbackError); }\n\t\t}\n\t\tres.status(500).json({\n\t\t\terror: registrationRollbackFailed ? 'Could not create account and automatic rollback requires administrator recovery.' : 'Could not create account.',`;
   if (!source.includes(catchAnchor)) throw new Error('Could not find registration rollback anchor.');
   source = source.replace(catchAnchor, safeCatch);
 }
@@ -138,8 +157,12 @@ for (const required of [
   stripeWebhookMarker,
   billingEmailMarker,
   startupHealMarker,
+  loginReadOnlyMarker,
+  getReadOnlyMarker,
+  `if (!IS_PRODUCTION && AUTH_AUTO_HEAL_SWIMMER_BINDINGS`,
   putMarker,
   registrationMarker,
+  `registrationRollbackFailed`,
   `crypto.createHmac('sha256', AUTH_SECRET).update(path.resolve(registrationTenantStorage.dbPath)).digest('hex')`,
 ]) if (!source.includes(required)) throw new Error(`Canonical production hardening token is missing: ${required}`);
 
