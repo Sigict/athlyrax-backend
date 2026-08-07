@@ -1,0 +1,37 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+const filePath = path.resolve('scripts/storage-path-contract.mjs');
+let source = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+
+const helperAnchor = `function validMeaningfulDatabase(filePath) {\n  const state = classifyDatabase(filePath);\n  return state.state === 'meaningful' ? { filePath, ...state } : null;\n}`;
+const helpers = `${helperAnchor}\nconst RECOGNIZED_TENANT_COLLECTIONS = Object.freeze([\n  'coaches', 'squads', 'swimmers', 'venues', 'sessionTypes', 'timetables', 'timetableSlots', 'schedule',\n  'trainingSessions', 'trainingSessionSets', 'templateSets', 'templateTests', 'trainingSetBlocks',\n  'seasonPlans', 'mesoCycles', 'microCycles', 'attendance', 'tests', 'competitions', 'fixtures', 'groups',\n  'seasons', 'trainingPlannerWeeks', 'conflictResolutions', 'changeLog', 'auditLog', 'notifications', 'documents',\n]);\nfunction hasRecognizedTenantShape(payload) {\n  return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload)\n    && RECOGNIZED_TENANT_COLLECTIONS.some((key) => Array.isArray(payload[key]));\n}\nfunction validUsableTenantDatabase(filePath) {\n  const candidate = validMeaningfulDatabase(filePath);\n  return candidate && hasRecognizedTenantShape(candidate.payload) ? candidate : null;\n}\nfunction validNonEmptyAuthStore(filePath) {\n  const candidate = validAuthStore(filePath);\n  return candidate && candidate.users.length > 0 ? candidate : null;\n}`;
+if (!source.includes('function validUsableTenantDatabase(')) {
+  if (!source.includes(helperAnchor)) throw new Error('Storage recovery semantic helper anchor was not found.');
+  source = source.replace(helperAnchor, helpers);
+}
+
+const authBlock = `  if (fs.existsSync(paths.authUsers) && !validAuthStore(paths.authUsers)) throw new Error(\`Canonical auth users store is unreadable or invalid: \${paths.authUsers}\`);\n  if (fs.existsSync(paths.authUsersBackup) && !validAuthStore(paths.authUsersBackup)) throw new Error(\`Canonical auth users backup is unreadable or invalid: \${paths.authUsersBackup}\`);\n\n  if (!fs.existsSync(paths.authUsers) && fs.existsSync(legacyAuthUsers)) {\n    if (!validAuthStore(legacyAuthUsers)) throw new Error(\`Legacy auth users store is unreadable or invalid: \${legacyAuthUsers}\`);\n    preserve(legacyAuthUsers, path.join('legacy-auth', 'auth-users.json'));\n    migrated.push({ kind: 'auth-users', from: legacyAuthUsers, to: paths.authUsers, bytes: copyExact(legacyAuthUsers, paths.authUsers) });\n  }\n  if (!fs.existsSync(paths.authUsersBackup) && fs.existsSync(legacyAuthBackup)) {\n    if (!validAuthStore(legacyAuthBackup)) throw new Error(\`Legacy auth users backup is unreadable or invalid: \${legacyAuthBackup}\`);\n    preserve(legacyAuthBackup, path.join('legacy-auth', 'auth-users.backup.json'));\n    migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes: copyExact(legacyAuthBackup, paths.authUsersBackup) });\n  }`;
+const safeAuthBlock = `  const canonicalAuth = fs.existsSync(paths.authUsers) ? validAuthStore(paths.authUsers) : null;\n  const canonicalAuthBackup = fs.existsSync(paths.authUsersBackup) ? validAuthStore(paths.authUsersBackup) : null;\n  const legacyAuth = fs.existsSync(legacyAuthUsers) ? validNonEmptyAuthStore(legacyAuthUsers) : null;\n  const legacyBackup = fs.existsSync(legacyAuthBackup) ? validNonEmptyAuthStore(legacyAuthBackup) : null;\n  if (fs.existsSync(paths.authUsers) && !canonicalAuth) throw new Error(\`Canonical auth users store is unreadable or invalid: \${paths.authUsers}\`);\n  if (fs.existsSync(paths.authUsersBackup) && !canonicalAuthBackup) throw new Error(\`Canonical auth users backup is unreadable or invalid: \${paths.authUsersBackup}\`);\n\n  const canonicalAuthNeedsRecovery = !canonicalAuth || canonicalAuth.users.length === 0;\n  if (canonicalAuthNeedsRecovery && legacyAuth) {\n    if (fs.existsSync(paths.authUsers)) preserve(paths.authUsers, path.join('canonical-before-migration', 'auth', 'auth-users.json'));\n    preserve(legacyAuthUsers, path.join('legacy-auth', 'auth-users.json'));\n    migrated.push({ kind: 'auth-users', from: legacyAuthUsers, to: paths.authUsers, bytes: copyExact(legacyAuthUsers, paths.authUsers) });\n  } else if (!canonicalAuth && fs.existsSync(legacyAuthUsers)) {\n    throw new Error(\`Legacy auth users store is unreadable, invalid or empty: \${legacyAuthUsers}\`);\n  }\n\n  const canonicalBackupNeedsRecovery = !canonicalAuthBackup || canonicalAuthBackup.users.length === 0;\n  if (canonicalBackupNeedsRecovery && legacyBackup) {\n    if (fs.existsSync(paths.authUsersBackup)) preserve(paths.authUsersBackup, path.join('canonical-before-migration', 'auth', 'auth-users.backup.json'));\n    preserve(legacyAuthBackup, path.join('legacy-auth', 'auth-users.backup.json'));\n    migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes: copyExact(legacyAuthBackup, paths.authUsersBackup) });\n  } else if (!canonicalAuthBackup && fs.existsSync(legacyAuthBackup)) {\n    throw new Error(\`Legacy auth users backup is unreadable, invalid or empty: \${legacyAuthBackup}\`);\n  }`;
+if (!source.includes('const canonicalAuthNeedsRecovery')) {
+  if (!source.includes(authBlock)) throw new Error('Canonical/legacy auth recovery anchor was not found.');
+  source = source.replace(authBlock, safeAuthBlock);
+}
+
+const tenantStateBlock = `      const canonicalState = classifyDatabase(canonicalDb);\n      if (canonicalState.state === 'invalid') throw new Error(\`Canonical tenant database is unreadable or invalid JSON: \${canonicalDb}\`);\n      if (canonicalState.state === 'meaningful') assertTenantIdentity(canonicalState.payload, tenantId, \`Canonical tenant database \${canonicalDb}\`);`;
+const safeTenantStateBlock = `${tenantStateBlock}\n      const canonicalUsable = canonicalState.state === 'meaningful' && hasRecognizedTenantShape(canonicalState.payload);`;
+if (!source.includes('const canonicalUsable =')) {
+  if (!source.includes(tenantStateBlock)) throw new Error('Canonical tenant usability anchor was not found.');
+  source = source.replace(tenantStateBlock, safeTenantStateBlock);
+}
+source = source.replace(
+  `      if (canonicalState.state !== 'meaningful' && fs.existsSync(legacyDb)) {\n        const legacyCandidate = validMeaningfulDatabase(legacyDb);\n        if (!legacyCandidate) throw new Error(\`Legacy tenant database is unreadable, invalid or empty: \${legacyDb}\`);`,
+  `      if (!canonicalUsable && fs.existsSync(legacyDb)) {\n        const legacyCandidate = validUsableTenantDatabase(legacyDb);\n        if (!legacyCandidate) throw new Error(\`Legacy tenant database is unreadable, invalid, empty or structurally incomplete: \${legacyDb}\`);`,
+);
+
+for (const token of ['validUsableTenantDatabase', 'canonicalUsable', 'canonicalAuthNeedsRecovery', 'validNonEmptyAuthStore']) {
+  if (!source.includes(token)) throw new Error(`Storage recovery semantic verification failed: ${token}`);
+}
+
+fs.writeFileSync(filePath, source, 'utf8');
+console.log('STORAGE_RECOVERY_SEMANTICS_PATCH_OK');
