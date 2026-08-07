@@ -1,24 +1,21 @@
-# Do not deploy this branch
+# Production deployment gate
 
-This branch prepares the persistent-storage migration only.
+The old pre-persistent-disk migration warning is obsolete. Use this file as the current deployment gate.
 
-Do not merge or deploy it until:
+Do not deploy a backend commit unless all of the following are true:
 
-- the existing API backup has a second independent copy;
-- Render Support has confirmed in writing a way to preserve the currently running ephemeral filesystem without restarting or replacing the instance;
-- the current Render filesystem has been archived and downloaded through that confirmed method;
-- the archive checksum has been verified outside Render;
-- the raw authentication files have been preserved;
-- the persistent disk has been populated;
-- the storage-ready marker has been created;
+- production uses one canonical persistent root via `ATHLYRAX_STORAGE_ROOT`;
+- `ATHLYRAX_SAFETY_BACKUP_ROOT` is separate and non-nested;
+- tenant databases resolve only to `tenants/<tenant-id>/db.json`;
+- authentication resolves only to `auth/auth-users.json` and its canonical backup;
+- no `tenants/clubs` runtime path remains after install-time entrypoint preparation;
+- no root-level `auth-users.json` runtime path remains;
+- missing existing tenant databases fail closed on both read and write;
+- `start:unsafe` does not exist;
+- `npm run test:storage-all` passes;
+- `npm run audit:storage-paths` returns `ATHLYRAX_STORAGE_PATH_AUDIT_OK`;
 - `npm run check:storage-safety` returns `ATHLYRAX_STORAGE_SAFETY_OK`;
-- both `global-owner` and `demo-company` have been verified.
+- the production start command is `npm start`;
+- `demo.coach` resolves to `demo-company` and its canonical database is non-empty.
 
-Before the raw archive is safely preserved, do not:
-
-- upgrade the service;
-- restart or redeploy it;
-- attach a persistent disk;
-- change the start command;
-- change environment variables;
-- merge this PR.
+A deployment that fails any of these checks must not be promoted as production-ready.
