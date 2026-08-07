@@ -40,6 +40,7 @@ const expectedTransforms = [
   'scripts/patch-coach-link-ownership.mjs',
   'scripts/patch-coach-link-routing.mjs',
   'scripts/patch-coach-link-reconnect.mjs',
+  'scripts/patch-coach-link-transaction-integrity.mjs',
   'scripts/patch-production-cors-origins.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
 ];
@@ -77,6 +78,7 @@ for (const marker of [
   'ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1',
   'ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1',
   'ATHLYRAX_COACH_LINK_RECONNECT_V1',
+  'ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1',
   'ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB',
   'ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
@@ -91,6 +93,14 @@ for (const token of [
   'restorePrevious(AUTH_USERS_BACKUP_PATH',
   'rollback was incomplete',
 ]) if (!authPersistencePatch.includes(token)) failures.push(`scripts/patch-auth-persistence-transaction.mjs: missing required token ${token}`);
+
+const coachTransactionPatch = read('scripts/patch-coach-link-transaction-integrity.mjs');
+for (const token of [
+  'ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST',
+  'ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET',
+  'ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST',
+  'database rollback was incomplete',
+]) if (!coachTransactionPatch.includes(token)) failures.push(`scripts/patch-coach-link-transaction-integrity.mjs: missing required token ${token}`);
 
 const pkg = JSON.parse(read('package.json') || '{}');
 const postinstall = String(pkg?.scripts?.postinstall || '');
