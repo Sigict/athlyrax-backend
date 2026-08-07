@@ -5,12 +5,13 @@ const indexPath = path.resolve('index.js');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const storageSafetyImport = `import { resolveStorageConfiguration, runStorageSafetyCheck } from './scripts/storage-safety-lib.mjs';`;
-const storageContractImport = `import { migrateLegacyStorageIfNeeded, restoreBundledDemoTenantIfNeeded } from './scripts/storage-path-contract.mjs';`;
+const storageContractImport = `import { finalizeLegacyStorageMigration, migrateLegacyStorageIfNeeded, restoreBundledDemoTenantIfNeeded } from './scripts/storage-path-contract.mjs';`;
 const importAnchor = `import Stripe from 'stripe';`;
 
 const obsoleteStorageSafetyImport = `import { runStorageSafetyCheck } from './scripts/storage-safety-lib.mjs';`;
 const obsoleteStorageContractImports = [
   `import { restoreBundledDemoTenantIfNeeded } from './scripts/storage-path-contract.mjs';`,
+  `import { migrateLegacyStorageIfNeeded, restoreBundledDemoTenantIfNeeded } from './scripts/storage-path-contract.mjs';`,
 ];
 if (source.includes(obsoleteStorageSafetyImport)) source = source.replace(obsoleteStorageSafetyImport, storageSafetyImport);
 for (const obsolete of obsoleteStorageContractImports) {
@@ -34,13 +35,13 @@ for (const [legacy, canonical] of replacements) {
 
 const runtimeGuardMarker = `// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD`;
 const appAnchor = `const app = express();`;
-const runtimeGuard = `${runtimeGuardMarker}\nif (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {\n\tconst runtimeStorageConfiguration = resolveStorageConfiguration(process.env, __dirname);\n\tif (runtimeStorageConfiguration.failures.length > 0) {\n\t\tconst error = new Error(runtimeStorageConfiguration.failures.join('\\n'));\n\t\terror.code = 'ATHLYRAX_STORAGE_CONFIGURATION_INVALID';\n\t\tthrow error;\n\t}\n\tmigrateLegacyStorageIfNeeded({\n\t\tsourceRoot: __dirname,\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tbackupRoot: runtimeStorageConfiguration.backupRoot,\n\t});\n\trestoreBundledDemoTenantIfNeeded({\n\t\tsourceRoot: __dirname,\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tbackupRoot: runtimeStorageConfiguration.backupRoot,\n\t});\n\trunStorageSafetyCheck({ repoRoot: __dirname, requireFiles: true, createDirectories: true });\n\tprocess.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';\n}\n\n${appAnchor}`;
+const runtimeGuard = `${runtimeGuardMarker}\nif (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {\n\tconst runtimeStorageConfiguration = resolveStorageConfiguration(process.env, __dirname);\n\tif (runtimeStorageConfiguration.failures.length > 0) {\n\t\tconst error = new Error(runtimeStorageConfiguration.failures.join('\\n'));\n\t\terror.code = 'ATHLYRAX_STORAGE_CONFIGURATION_INVALID';\n\t\tthrow error;\n\t}\n\tconst runtimeLegacyMigration = migrateLegacyStorageIfNeeded({\n\t\tsourceRoot: __dirname,\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tbackupRoot: runtimeStorageConfiguration.backupRoot,\n\t});\n\trestoreBundledDemoTenantIfNeeded({\n\t\tsourceRoot: __dirname,\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tbackupRoot: runtimeStorageConfiguration.backupRoot,\n\t});\n\trunStorageSafetyCheck({ repoRoot: __dirname, requireFiles: true, createDirectories: true });\n\tfinalizeLegacyStorageMigration({\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tmigrationResult: runtimeLegacyMigration,\n\t});\n\tprocess.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';\n}\n\n${appAnchor}`;
 
 if (!source.includes(runtimeGuardMarker)) {
   if (!source.includes(appAnchor)) throw new Error('Could not find Express app anchor for canonical storage guard.');
   source = source.replace(appAnchor, runtimeGuard);
 } else {
-  for (const required of ['runtimeStorageConfiguration = resolveStorageConfiguration', 'migrateLegacyStorageIfNeeded({']) {
+  for (const required of ['runtimeStorageConfiguration = resolveStorageConfiguration', 'runtimeLegacyMigration = migrateLegacyStorageIfNeeded({', 'finalizeLegacyStorageMigration({']) {
     if (!source.includes(required)) throw new Error(`Existing canonical runtime guard is stale: missing ${required}`);
   }
 }
@@ -79,9 +80,10 @@ for (const token of [
   runtimeGuardMarker,
   putMarker,
   `resolveStorageConfiguration(process.env, __dirname)`,
-  `migrateLegacyStorageIfNeeded({`,
-  `runStorageSafetyCheck({`,
+  `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
+  `runStorageSafetyCheck({`,
+  `finalizeLegacyStorageMigration({`,
   `path.join(STORAGE_ROOT, 'tenants')`,
   `path.join(STORAGE_ROOT, 'auth', 'auth-users.json')`,
   `action: 'tenant_database_missing'`,
