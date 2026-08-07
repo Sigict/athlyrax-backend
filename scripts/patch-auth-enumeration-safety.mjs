@@ -81,13 +81,6 @@ if (!source.includes(marker)) {
     });
   }
 
-  replaceRoute("app.post('/auth/onboarding/complete'", (route) => {
-    const anchor = `\tconst index = authUsers.findIndex((row) => String(row?.username || '').trim() === username);`;
-    if (!route.includes(anchor)) throw new Error('Onboarding account lookup anchor missing.');
-    const guard = `\t// ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS\n\tconst normalizedOnboardingEmail = email.toLowerCase();\n\tif (authUsers.some((row) => String(row?.username || '').trim() !== username && String(row?.email || '').trim().toLowerCase() === normalizedOnboardingEmail)) {\n\t\tres.status(409).json({ error: 'Email is already registered.' });\n\t\treturn;\n\t}\n\n${anchor}`;
-    return route.replace(anchor, guard);
-  });
-
   source = `${marker}\n${source}`;
 }
 
@@ -100,10 +93,16 @@ for (const required of [
   'ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
-  'ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS',
   'ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED',
   'const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
 ]) if (!source.includes(required)) throw new Error(`Auth identity/enumeration hardening missing: ${required}`);
+
+if (!source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUE')) {
+  throw new Error('Onboarding email uniqueness must be installed by the earlier runtime-retention transform.');
+}
+if (source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) {
+  throw new Error('Duplicate onboarding email-uniqueness guard remains.');
+}
 
 for (const routeStartText of [
   "app.post('/auth/password-reset/confirm'",
