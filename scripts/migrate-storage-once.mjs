@@ -16,6 +16,11 @@ import {
   restoreBundledDemoTenantIfNeeded,
 } from './storage-path-contract.mjs';
 import { sanitizeDemoTenantDatabase } from './demo-data-sanitizer.mjs';
+import { assertNoSymlinkStorageLayout } from './storage-path-integrity.mjs';
+import {
+  activeMigrationTransactionPath,
+  readActiveMigrationTransaction,
+} from './migration-transaction-state.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
 let transaction = null;
@@ -71,6 +76,7 @@ function listFiles(rootDir) {
   const visit = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`Symbolic link found during migration transaction scan: ${full}`);
       if (entry.isDirectory()) visit(full);
       else if (entry.isFile()) rows.push(full);
     }
@@ -78,9 +84,14 @@ function listFiles(rootDir) {
   visit(rootDir);
   return rows;
 }
-function durableCopy(source, destination) {
+function fsyncDirectory(directory) {
+  try {
+    const handle = fs.openSync(directory, 'r');
+    try { fs.fsyncSync(handle); } finally { fs.closeSync(handle); }
+  } catch {}
+}
+function durableWriteBytes(destination, bytes) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  const bytes = fs.readFileSync(source);
   const temp = `${destination}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   let handle = null;
   try {
@@ -90,12 +101,76 @@ function durableCopy(source, destination) {
   } finally { if (handle !== null) fs.closeSync(handle); }
   try { fs.renameSync(temp, destination); }
   catch (error) { try { fs.unlinkSync(temp); } catch {} throw error; }
+  fsyncDirectory(path.dirname(destination));
+}
+function durableWriteJson(destination, value) {
+  durableWriteBytes(destination, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'));
+}
+function durableCopy(source, destination) {
+  const bytes = fs.readFileSync(source);
+  durableWriteBytes(destination, bytes);
   if (!bytes.equals(fs.readFileSync(destination))) throw new Error(`Transaction copy verification failed: ${source} -> ${destination}`);
+}
+function assertInside(candidate, parent, label) {
+  const resolvedParent = path.resolve(parent);
+  const resolvedCandidate = path.resolve(candidate);
+  const relative = path.relative(resolvedParent, resolvedCandidate);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`${label} must be inside ${resolvedParent}: ${resolvedCandidate}`);
+  return resolvedCandidate;
+}
+function validateTransactionManifest(manifest, storageRoot, snapshotRoot) {
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || manifest.version !== 1 || !Array.isArray(manifest.files)) {
+    throw new Error(`Migration transaction manifest is invalid: ${snapshotRoot}`);
+  }
+  if (path.resolve(String(manifest.storageRoot || '')) !== path.resolve(storageRoot)) throw new Error('Migration transaction manifest belongs to a different storage root.');
+  const normalized = [];
+  const seen = new Set();
+  for (const item of manifest.files) {
+    const relative = String(item?.relative || '').trim();
+    if (!relative || path.isAbsolute(relative) || relative.startsWith('..') || relative.split(path.sep).includes('..')) throw new Error(`Unsafe transaction manifest path: ${relative}`);
+    if (seen.has(relative)) throw new Error(`Duplicate transaction manifest path: ${relative}`);
+    seen.add(relative);
+    const sha256 = String(item?.sha256 || '').trim();
+    const bytes = Number(item?.bytes);
+    if (!/^[a-f0-9]{64}$/i.test(sha256) || !Number.isFinite(bytes) || bytes < 0) throw new Error(`Invalid transaction manifest metadata: ${relative}`);
+    const snapshotFile = assertInside(path.join(snapshotRoot, relative), snapshotRoot, 'Transaction snapshot file');
+    if (!fs.existsSync(snapshotFile) || !fs.statSync(snapshotFile).isFile()) throw new Error(`Transaction snapshot file is missing: ${relative}`);
+    if (fs.statSync(snapshotFile).size !== bytes || sha256File(snapshotFile) !== sha256) throw new Error(`Transaction snapshot verification failed: ${relative}`);
+    normalized.push({ relative, sha256, bytes });
+  }
+  return normalized;
+}
+function restoreManifest(storageRoot, snapshotRoot, manifest) {
+  const files = validateTransactionManifest(manifest, storageRoot, snapshotRoot);
+  const originalSet = new Set(files.map((item) => item.relative));
+  for (const current of listFiles(storageRoot)) {
+    const relative = path.relative(storageRoot, current);
+    if (!originalSet.has(relative)) fs.unlinkSync(current);
+  }
+  for (const item of files) {
+    const destination = assertInside(path.join(storageRoot, item.relative), storageRoot, 'Rollback destination');
+    durableCopy(path.join(snapshotRoot, item.relative), destination);
+    if (fs.statSync(destination).size !== item.bytes || sha256File(destination) !== item.sha256) throw new Error(`Migration rollback verification failed: ${item.relative}`);
+  }
+  return files.length;
+}
+function recoverInterruptedTransaction(storageRoot, backupRoot) {
+  const active = readActiveMigrationTransaction(backupRoot, fs);
+  if (!active) return { recovered: false };
+  if (path.resolve(String(active.storageRoot || '')) !== path.resolve(storageRoot)) throw new Error('Active migration transaction belongs to a different storage root.');
+  const snapshotRoot = assertInside(String(active.snapshotRoot || ''), backupRoot, 'Migration transaction snapshot root');
+  const manifestPath = assertInside(path.join(snapshotRoot, 'transaction-manifest.json'), snapshotRoot, 'Migration transaction manifest');
+  const manifest = readJson(manifestPath, 'Migration transaction manifest');
+  const restoredFiles = restoreManifest(storageRoot, snapshotRoot, manifest);
+  fs.unlinkSync(active.journalPath);
+  fsyncDirectory(path.dirname(active.journalPath));
+  console.warn(`[storage-migration] Recovered interrupted migration transaction from ${snapshotRoot} (${restoredFiles} files restored).`);
+  return { recovered: true, snapshotRoot, restoredFiles };
 }
 function beginTransaction(storageRoot, backupRoot) {
   if (!fs.existsSync(storageRoot) || !fs.statSync(storageRoot).isDirectory()) throw new Error(`Storage root is missing before migration: ${storageRoot}`);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const snapshotRoot = path.join(path.resolve(backupRoot), 'migration-transaction-snapshots', stamp);
+  const snapshotRoot = path.join(path.resolve(backupRoot), 'migration-transaction-snapshots', `${stamp}-${crypto.randomBytes(4).toString('hex')}`);
   const originalFiles = listFiles(storageRoot).map((full) => path.relative(storageRoot, full));
   const manifest = [];
   for (const relative of originalFiles) {
@@ -105,24 +180,34 @@ function beginTransaction(storageRoot, backupRoot) {
     manifest.push({ relative, sha256: sha256File(source), bytes: fs.statSync(source).size });
   }
   fs.mkdirSync(snapshotRoot, { recursive: true });
-  fs.writeFileSync(path.join(snapshotRoot, 'transaction-manifest.json'), `${JSON.stringify({ createdAt: new Date().toISOString(), storageRoot: path.resolve(storageRoot), files: manifest }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  for (const item of manifest) {
-    const snapshotFile = path.join(snapshotRoot, item.relative);
-    if (sha256File(snapshotFile) !== item.sha256) throw new Error(`Pre-migration transaction snapshot verification failed: ${item.relative}`);
-  }
-  return { storageRoot: path.resolve(storageRoot), snapshotRoot, manifest, committed: false };
+  const manifestPath = path.join(snapshotRoot, 'transaction-manifest.json');
+  durableWriteJson(manifestPath, { version: 1, createdAt: new Date().toISOString(), storageRoot: path.resolve(storageRoot), files: manifest });
+  validateTransactionManifest(readJson(manifestPath, 'Migration transaction manifest'), storageRoot, snapshotRoot);
+  const journalPath = activeMigrationTransactionPath(backupRoot);
+  durableWriteJson(journalPath, {
+    version: 1,
+    active: true,
+    createdAt: new Date().toISOString(),
+    storageRoot: path.resolve(storageRoot),
+    snapshotRoot: path.resolve(snapshotRoot),
+  });
+  return { storageRoot: path.resolve(storageRoot), snapshotRoot, manifest, journalPath, committed: false };
 }
 function rollbackTransaction(tx) {
   if (!tx || tx.committed) return;
-  const originalSet = new Set(tx.manifest.map((item) => item.relative));
-  for (const current of listFiles(tx.storageRoot)) {
-    const relative = path.relative(tx.storageRoot, current);
-    if (!originalSet.has(relative)) fs.unlinkSync(current);
+  restoreManifest(tx.storageRoot, tx.snapshotRoot, { version: 1, storageRoot: tx.storageRoot, files: tx.manifest });
+  if (fs.existsSync(tx.journalPath)) {
+    fs.unlinkSync(tx.journalPath);
+    fsyncDirectory(path.dirname(tx.journalPath));
   }
-  for (const item of tx.manifest) {
-    durableCopy(path.join(tx.snapshotRoot, item.relative), path.join(tx.storageRoot, item.relative));
-    if (sha256File(path.join(tx.storageRoot, item.relative)) !== item.sha256) throw new Error(`Migration rollback verification failed: ${item.relative}`);
+}
+function commitTransaction(tx) {
+  if (!tx || tx.committed) return;
+  if (fs.existsSync(tx.journalPath)) {
+    fs.unlinkSync(tx.journalPath);
+    fsyncDirectory(path.dirname(tx.journalPath));
   }
+  tx.committed = true;
 }
 
 try {
@@ -139,6 +224,9 @@ try {
   if (configuration.failures.length > 0) { const error = new Error(configuration.failures.join('\n')); error.code = 'ATHLYRAX_STORAGE_CONFIGURATION_INVALID'; throw error; }
 
   assertCanonicalPathContract({ sourceRoot, storageRoot: configuration.storageRoot, indexSource });
+  assertNoSymlinkStorageLayout(configuration, fs);
+  recoverInterruptedTransaction(configuration.storageRoot, configuration.backupRoot);
+  assertNoSymlinkStorageLayout(configuration, fs);
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot: configuration.storageRoot });
 
   const legacyAuthUsers = path.join(configuration.storageRoot, 'auth-users.json');
@@ -180,7 +268,7 @@ try {
   writeStorageReadyMarker(configuration.storageRoot, { migrationApproval: APPROVAL, requiredTenants, verifiedFiles });
   runStorageSafetyCheck({ repoRoot, requireFiles: true, createDirectories: false });
   finalizeLegacyStorageMigration({ storageRoot: configuration.storageRoot, migrationResult: migration });
-  transaction.committed = true;
+  commitTransaction(transaction);
 
   console.log('ATHLYRAX_STORAGE_MIGRATION_OK');
   console.log(`Canonical storage: ${configuration.storageRoot}`);
