@@ -13,7 +13,6 @@ try {
         ?? (String(process.env.NODE_ENV || '').toLowerCase() === 'production' ? 'true' : 'false'),
     ).toLowerCase() !== 'false',
     createDirectories: true,
-    linkStorage: false,
   });
 } catch (error) {
   console.error('ATHLYRAX_STORAGE_SAFETY_CHECK_FAILED');
