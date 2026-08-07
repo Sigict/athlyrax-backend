@@ -41,22 +41,52 @@ function parseArgs(argv) {
 function normalizeTenantId(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 }
-
+function requireCanonicalTenantId(value, label = 'tenant ID') {
+  const raw = String(value || '').trim();
+  const normalized = normalizeTenantId(raw);
+  if (!normalized || raw !== normalized || !/^[a-z0-9_-]+$/.test(raw)) throw new Error(`Noncanonical ${label}: ${raw}`);
+  return raw;
+}
+function assertRegularNonSymlinkFile(filePath, label) {
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) throw new Error(`${label} not found: ${resolved}`);
+  const stat = fs.lstatSync(resolved);
+  if (stat.isSymbolicLink()) throw new Error(`${label} must not be a symbolic link: ${resolved}`);
+  if (!stat.isFile()) throw new Error(`${label} must be a regular file: ${resolved}`);
+  return resolved;
+}
+function assertSafeDestination(destination) {
+  const resolved = path.resolve(destination);
+  if (resolved === path.parse(resolved).root) throw new Error('The staging script refuses filesystem roots.');
+  const posix = resolved.replace(/\\/g, '/');
+  if (posix === '/opt/render' || posix.startsWith('/opt/render/') || posix === '/var/data' || posix.startsWith('/var/data/')) {
+    throw new Error('The staging script refuses Render paths and production disk paths.');
+  }
+  if (fs.existsSync(resolved)) {
+    const stat = fs.lstatSync(resolved);
+    if (stat.isSymbolicLink()) throw new Error(`Destination must not be a symbolic link: ${resolved}`);
+    if (!stat.isDirectory()) throw new Error(`Destination must be a directory: ${resolved}`);
+    if (fs.readdirSync(resolved).length > 0) throw new Error(`Destination must be empty: ${resolved}`);
+  }
+  return resolved;
+}
 function readValidatedJsonObject(filePath, label, expectedTenantId = '') {
   const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${label} must contain a JSON object: ${filePath}`);
   if (Object.keys(parsed).length === 0) throw new Error(`${label} must not be empty: ${filePath}`);
   if (expectedTenantId) {
-    const declared = normalizeTenantId(parsed?.__meta?.tenantId);
-    const expected = normalizeTenantId(expectedTenantId);
-    if (declared && declared !== expected) throw new Error(`${label} declares tenant ${declared} but restore mapping is ${expected}.`);
+    const expected = requireCanonicalTenantId(expectedTenantId, 'restore tenant ID');
+    const declaredRaw = String(parsed?.__meta?.tenantId || '').trim();
+    if (declaredRaw) {
+      const declared = requireCanonicalTenantId(declaredRaw, 'declared tenant ID');
+      if (declared !== expected) throw new Error(`${label} declares tenant ${declared} but restore mapping is ${expected}.`);
+    }
   }
   return parsed;
 }
 
 function copyValidatedJson(source, destination, label, expectedTenantId = '') {
-  const resolvedSource = path.resolve(source);
-  if (!fs.existsSync(resolvedSource)) throw new Error(`Source file not found: ${resolvedSource}`);
+  const resolvedSource = assertRegularNonSymlinkFile(source, label);
   readValidatedJsonObject(resolvedSource, label, expectedTenantId);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   const bytes = fs.readFileSync(resolvedSource);
@@ -69,9 +99,14 @@ function copyValidatedJson(source, destination, label, expectedTenantId = '') {
   } finally {
     if (handle !== null) fs.closeSync(handle);
   }
-  fs.renameSync(temp, destination);
+  try { fs.renameSync(temp, destination); }
+  catch (error) { try { fs.unlinkSync(temp); } catch {} throw error; }
   const copied = fs.readFileSync(destination);
   if (!bytes.equals(copied)) throw new Error(`Staged copy verification failed: ${resolvedSource}`);
+  try {
+    const directoryHandle = fs.openSync(path.dirname(destination), 'r');
+    try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
+  } catch {}
   return { source: resolvedSource, destination, bytes: copied.length, sha256: sha256File(destination) };
 }
 
@@ -80,12 +115,9 @@ try {
   if (args.approve !== 'STAGE_ONLY') throw new Error('Explicit approval is required: --approve STAGE_ONLY');
   if (!args.destination || !args.globalDb) { usage(); process.exit(2); }
 
-  const destination = path.resolve(args.destination);
-  if (destination === path.parse(destination).root || destination.startsWith('/opt/render/') || destination.startsWith('/var/data')) {
-    throw new Error('The staging script refuses filesystem roots, Render paths and production disk paths.');
-  }
-  if (fs.existsSync(destination) && fs.readdirSync(destination).length > 0) throw new Error(`Destination must be empty: ${destination}`);
-  fs.mkdirSync(destination, { recursive: true });
+  const destination = assertSafeDestination(args.destination);
+  fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
+  if (fs.lstatSync(destination).isSymbolicLink()) throw new Error(`Destination became a symbolic link: ${destination}`);
 
   const paths = canonicalStoragePaths({ sourceRoot: process.cwd(), storageRoot: destination });
   const files = [copyValidatedJson(args.globalDb, paths.globalDb, 'Global database')];
@@ -95,8 +127,9 @@ try {
   for (const tenantSpec of args.tenants) {
     const separator = String(tenantSpec || '').indexOf('=');
     if (separator <= 0) throw new Error(`Invalid --tenant mapping: ${tenantSpec}`);
-    const tenantId = tenantSpec.slice(0, separator).trim();
+    const tenantId = requireCanonicalTenantId(tenantSpec.slice(0, separator).trim(), 'tenant mapping ID');
     const source = tenantSpec.slice(separator + 1).trim();
+    if (!source) throw new Error(`Missing tenant source file for ${tenantId}.`);
     const dbPath = paths.tenantDb(tenantId);
     if (seenTenantIds.has(tenantId)) throw new Error(`Duplicate --tenant mapping: ${tenantId}`);
     seenTenantIds.add(tenantId);
@@ -128,6 +161,10 @@ try {
   } finally {
     fs.closeSync(manifestHandle);
   }
+  try {
+    const directoryHandle = fs.openSync(destination, 'r');
+    try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
+  } catch {}
 
   console.log('ATHLYRAX_STORAGE_RESTORE_STAGED');
   console.log(`Destination: ${destination}`);
