@@ -12,7 +12,7 @@ if (markerIndex < 0 || appIndex < 0) {
   throw new Error('Canonical runtime guard block not found; refusing to patch production startup behavior.');
 }
 
-const replacement = `${marker}\nconst athlyraxRuntimeIsProduction = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';\nif (process.env.RENDER_SERVICE_ID && !athlyraxRuntimeIsProduction) {\n\tthrow new Error('Render runtime requires NODE_ENV=production. Refusing unsafe development/default mode.');\n}\nif (athlyraxRuntimeIsProduction && String(process.env.ATHLYRAX_SAFE_START_ENFORCED || '').trim().toLowerCase() !== 'true') {\n\tthrow new Error('Production backend entrypoint must be launched through the guarded production-start/safe-start path. Direct index.js startup is refused.');\n}\n\n${appAnchor}`;
+const replacement = `${marker}\nconst athlyraxRuntimeIsProduction = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';\nconst athlyraxSafeStartProof = globalThis[Symbol.for('athlyrax.safeStartEnforced')] === true;\nif (process.env.RENDER_SERVICE_ID && !athlyraxRuntimeIsProduction) {\n\tthrow new Error('Render runtime requires NODE_ENV=production. Refusing unsafe development/default mode.');\n}\nif (athlyraxRuntimeIsProduction && !athlyraxSafeStartProof) {\n\tthrow new Error('Production backend entrypoint must be launched through the guarded production-start/safe-start path. Direct index.js startup is refused.');\n}\n\n${appAnchor}`;
 
 source = source.slice(0, markerIndex) + replacement + source.slice(appIndex + appAnchor.length);
 
@@ -21,16 +21,17 @@ for (const forbidden of [
   'restoreBundledDemoTenantIfNeeded({',
   'finalizeLegacyStorageMigration({',
   'runStorageSafetyCheck({ repoRoot: __dirname, requireFiles: true, createDirectories: true })',
+  'process.env.ATHLYRAX_SAFE_START_ENFORCED',
 ]) {
   const start = source.indexOf(marker);
   const end = source.indexOf(appAnchor, start);
   const guardBlock = source.slice(start, end);
-  if (guardBlock.includes(forbidden)) throw new Error(`Runtime startup mutation remains: ${forbidden}`);
+  if (guardBlock.includes(forbidden)) throw new Error(`Runtime startup mutation/bypass remains: ${forbidden}`);
 }
 
 for (const required of [
   marker,
-  'ATHLYRAX_SAFE_START_ENFORCED',
+  `globalThis[Symbol.for('athlyrax.safeStartEnforced')] === true`,
   'Production backend entrypoint must be launched through the guarded production-start/safe-start path.',
   'Direct index.js startup is refused.',
 ]) {
