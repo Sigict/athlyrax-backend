@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveStorageConfiguration, sha256File, writeStorageReadyMarker } from './storage-safety-lib.mjs';
 import { canonicalStoragePaths } from './storage-path-contract.mjs';
+import { assertNoSymlinkStorageLayout } from './storage-path-integrity.mjs';
+import { assertNoActiveMigrationTransaction } from './migration-transaction-state.mjs';
 
 function parseArgs(argv) {
   if (argv.length % 2 !== 0) throw new Error(`Incomplete argument: ${argv[argv.length - 1]}`);
@@ -38,6 +40,8 @@ function assertBillingCatalog(filePath) {
   const parsed = readJson(filePath, 'Billing catalog');
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.plans) || parsed.plans.length < 1) throw new Error(`Billing catalog must contain at least one plan: ${filePath}`);
   if (parsed.plans.some((plan) => !plan || typeof plan !== 'object' || !clean(plan.key))) throw new Error(`Billing catalog contains an invalid plan row: ${filePath}`);
+  const keys = parsed.plans.map((plan) => clean(plan.key));
+  if (new Set(keys).size !== keys.length) throw new Error(`Billing catalog contains duplicate plan keys: ${filePath}`);
   return parsed;
 }
 function assertAuthStore(filePath, label) {
@@ -45,6 +49,17 @@ function assertAuthStore(filePath, label) {
   const parsed = readJson(filePath, label);
   const users = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.users) ? parsed.users : null);
   if (!users || users.length === 0) throw new Error(`${label} must contain at least one user: ${filePath}`);
+  const seen = new Set();
+  for (const [index, user] of users.entries()) {
+    if (!user || typeof user !== 'object' || Array.isArray(user)) throw new Error(`${label} contains an invalid user row at index ${index}: ${filePath}`);
+    const username = clean(user.username).toLowerCase();
+    if (!username) throw new Error(`${label} contains a user without a username at index ${index}: ${filePath}`);
+    if (seen.has(username)) throw new Error(`${label} contains duplicate username ${username}: ${filePath}`);
+    seen.add(username);
+    const tenantId = clean(user.tenantId);
+    if (tenantId && !isCanonicalTenantId(tenantId)) throw new Error(`${label} contains noncanonical tenantId ${tenantId} for ${username}: ${filePath}`);
+    if (username === 'demo.coach' && tenantId && tenantId !== 'demo-company') throw new Error(`${label} routes demo.coach to ${tenantId}; expected demo-company.`);
+  }
   return users;
 }
 function canonicalJson(value) { if (Array.isArray(value)) return value.map(canonicalJson); if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])])); return value; }
@@ -55,7 +70,8 @@ function resolveTenantFromUser(user) {
   const primaryOwner = clean(process.env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').toLowerCase();
   if (username === 'demo.coach') return 'demo-company';
   if (role === 'software-owner' && username === primaryOwner) return '';
-  const explicit = normalizeTenantId(user?.tenantId);
+  const explicitRaw = clean(user?.tenantId);
+  const explicit = isCanonicalTenantId(explicitRaw) ? explicitRaw : '';
   if (role === 'swimmer' && explicit === 'snapshot-public' && createdVia === 'snapshot-self-signup') return '';
   if (explicit) return explicit;
   const swimClub = clean(user?.swimClub);
@@ -78,6 +94,8 @@ try {
   const configuration = resolveStorageConfiguration(process.env, process.cwd());
   if (configuration.failures.length) throw new Error(configuration.failures.join('\n'));
   if (configuration.storageRoot !== storageRoot) throw new Error(`--storage-root must equal configured ATHLYRAX_STORAGE_ROOT: ${configuration.storageRoot}`);
+  assertNoSymlinkStorageLayout(configuration, fs);
+  assertNoActiveMigrationTransaction(configuration.backupRoot, fs);
 
   const paths = canonicalStoragePaths({ sourceRoot: process.cwd(), storageRoot });
   assertDbObject(paths.globalDb, 'Global database');
