@@ -29,6 +29,9 @@ const indexSource = requireTokens('index.js', [
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
   `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
+  `ATHLYRAX_SAFE_START_ENFORCED`,
+  `Direct index.js startup is refused.`,
+  `crypto.createHmac('sha256', AUTH_SECRET).update(path.resolve(registrationTenantStorage.dbPath)).digest('hex')`,
 ]);
 for (const forbidden of [
   `path.join(STORAGE_ROOT, 'tenants', 'clubs')`,
@@ -37,6 +40,9 @@ for (const forbidden of [
   `writeJsonFile(AUTH_USERS_PATH,`,
   `writeJsonFile(AUTH_USERS_BACKUP_PATH,`,
   `snapshotSubmissions.length = 5000;`,
+  `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
+  `runStorageSafetyCheck({ repoRoot: __dirname, requireFiles: true, createDirectories: true })`,
+  `const registrationTenantProvisioningToken = crypto.randomUUID();`,
 ]) if (indexSource.includes(forbidden)) failures.push(`index.js: forbidden legacy/destructive token remains: ${forbidden}`);
 
 const safeStart = requireTokens('scripts/safe-start.mjs', [
@@ -104,6 +110,17 @@ requireTokens('scripts/demo-data-sanitizer.mjs', [
   `example.invalid`,
   `Demo sanitization verification failed`,
 ]);
+requireTokens('scripts/patch-runtime-start-guard.mjs', [
+  `ATHLYRAX_SAFE_START_ENFORCED`,
+  `Direct index.js startup is refused.`,
+  `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
+]);
+requireTokens('scripts/patch-provisioning-integrity.mjs', [
+  `crypto.createHmac('sha256', authSecret).update(destination).digest('hex')`,
+  `crypto.timingSafeEqual`,
+  `discardedProvisioningToken`,
+  `crypto.createHmac('sha256', AUTH_SECRET).update(path.resolve(registrationTenantStorage.dbPath)).digest('hex')`,
+]);
 requireTokens('scripts/storage-path-contract.mjs', [
   `const LEGACY_MIGRATION_MARKER = '.athlyrax-legacy-storage-migration-v1.json'`,
   `path.join(paths.storageRoot, 'tenants', 'clubs')`,
@@ -126,6 +143,9 @@ requireTokens('scripts/data-safety-preload.mjs', [
   `ATHLYRAX_CURRENT_DB_INVALID`,
   `ATHLYRAX_INCOMING_DB_INVALID`,
   `ATHLYRAX_DB_BACKUP_VERIFICATION_FAILED`,
+  `crypto.createHmac('sha256', authSecret).update(destination).digest('hex')`,
+  `crypto.timingSafeEqual`,
+  `discardedProvisioningToken`,
 ]);
 requireTokens('scripts/patch-persistence-integrity.mjs', [
   `ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`,
@@ -148,7 +168,13 @@ const postinstall = String(pkg?.scripts?.postinstall || '');
 const start = String(pkg?.scripts?.start || '');
 const migrateCommand = String(pkg?.scripts?.['migrate:storage-once'] || '');
 const storageAll = String(pkg?.scripts?.['test:storage-all'] || '');
-for (const patch of ['patch-canonical-storage-contract.mjs', 'patch-persistence-integrity.mjs', 'patch-durable-storage-writes.mjs']) {
+for (const patch of [
+  'patch-canonical-storage-contract.mjs',
+  'patch-provisioning-integrity.mjs',
+  'patch-persistence-integrity.mjs',
+  'patch-durable-storage-writes.mjs',
+  'patch-runtime-start-guard.mjs',
+]) {
   if (!postinstall.includes(patch)) failures.push(`package.json: postinstall missing ${patch}.`);
 }
 if (Object.prototype.hasOwnProperty.call(pkg?.scripts || {}, 'start:unsafe')) failures.push('package.json: start:unsafe must not exist.');
