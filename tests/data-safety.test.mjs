@@ -70,6 +70,32 @@ test('valid matching-revision database replacement increments revision and prese
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('legacy database without storage revision can be adopted exactly once at revision one', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-data-safety-legacy-revision-');
+  const destination = path.join(root, 'tenant', 'db.json');
+  const source = path.join(root, 'tenant', 'db.json.tmp');
+  writeJson(destination, { swimmers: [{ id: 'old' }], __meta: {} });
+  writeJson(source, { swimmers: [{ id: 'new' }], __meta: {} });
+  withGuard(root, () => fs.renameSync(source, destination));
+  const next = JSON.parse(fs.readFileSync(destination, 'utf8'));
+  assert.equal(next.swimmers[0].id, 'new');
+  assert.equal(next.__meta.storageRevision, 1);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('existing database with core records cannot be replaced by a zero-record payload', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-data-safety-total-wipe-');
+  const destination = path.join(root, 'tenant', 'db.json');
+  const source = path.join(root, 'tenant', 'db.json.tmp');
+  writeJson(destination, { swimmers: [{ id: 'keep' }], tests: [{ id: 'test-1' }], __meta: { storageRevision: 2 } });
+  writeJson(source, { swimmers: [], tests: [], __meta: { storageRevision: 2 } });
+  withGuard(root, () => {
+    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_DB_TOTAL_DATA_WIPE_BLOCKED');
+  });
+  assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8')).swimmers[0].id, 'keep');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('missing production database cannot be silently recreated from an ordinary write', { concurrency: false }, () => {
   const root = tempDir('athlyrax-data-safety-missing-');
   const destination = path.join(root, 'tenant', 'db.json');
@@ -174,15 +200,16 @@ test('invalid critical auth replacement is blocked before current store changes'
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('empty snapshot history remains a valid critical store and is backed up on replacement', { concurrency: false }, () => {
+test('non-empty snapshot history cannot be silently replaced by an empty critical store', { concurrency: false }, () => {
   const root = tempDir('athlyrax-critical-snapshot-');
   const storageRoot = path.join(root, 'storage');
   const destination = path.join(storageRoot, 'snapshot-submissions.json');
   const source = path.join(storageRoot, 'snapshot-submissions.json.tmp');
   writeJson(destination, [{ id: 'old' }]);
   writeJson(source, []);
-  withGuard(root, () => fs.renameSync(source, destination), { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
-  assert.deepEqual(JSON.parse(fs.readFileSync(destination, 'utf8')), []);
-  assert.equal(fs.existsSync(path.join(root, 'safety', 'pre-write-snapshot-submissions')), true);
+  withGuard(root, () => {
+    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED');
+  }, { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
+  assert.deepEqual(JSON.parse(fs.readFileSync(destination, 'utf8')), [{ id: 'old' }]);
   fs.rmSync(root, { recursive: true, force: true });
 });
