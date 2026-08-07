@@ -117,14 +117,36 @@ const safetySource = fs.readFileSync(path.join(root, 'scripts', 'storage-safety-
 for (const required of [
   'validateDatabaseObject(',
   'validateAuthStore(',
+  'validateAuthPrimaryBackupParity(',
+  'validateAuthBoundTenantDatabases(',
+  'Authentication primary and backup stores differ',
+  'Auth-bound tenant database',
+  'AUTH_REQUIRED must not be false in production',
+  'PHASE1_TENANT_ISOLATION must not be false in production',
+  'AUTH_ENFORCE_CANONICAL_STORE must not be false in production',
+  'AUTH_SECRET must be explicitly configured with at least 32 characters in production',
+  'STRIPE_WEBHOOK_SECRET is required in production whenever STRIPE_SECRET_KEY is configured',
+  'AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE must be false in production',
   'requireNonEmpty',
   'must not be empty in production',
   'must contain at least one user in production',
   'Global database',
   'Authentication user store is not valid JSON',
   'Authentication user backup',
+  `fsModule.renameSync(tempPath, markerPath)`,
 ]) {
-  if (!safetySource.includes(required)) failures.push(`scripts/storage-safety-lib.mjs: missing JSON validation token: ${required}`);
+  if (!safetySource.includes(required)) failures.push(`scripts/storage-safety-lib.mjs: missing production safety token: ${required}`);
+}
+
+const dataSafetySource = fs.readFileSync(path.join(root, 'scripts', 'data-safety-preload.mjs'), 'utf8');
+for (const required of [
+  'ATHLYRAX_CURRENT_DB_INVALID',
+  'ATHLYRAX_INCOMING_DB_INVALID',
+  'ATHLYRAX_DB_BACKUP_VERIFICATION_FAILED',
+  'invalid-current-blocked',
+  'sourceBytes.equals(backupBytes)',
+]) {
+  if (!dataSafetySource.includes(required)) failures.push(`scripts/data-safety-preload.mjs: missing database corruption guard token: ${required}`);
 }
 
 const approvalSource = fs.readFileSync(path.join(root, 'scripts', 'approve-storage-layout.mjs'), 'utf8');
@@ -173,9 +195,11 @@ if (!postinstall.includes('patch-canonical-storage-contract.mjs')) failures.push
 if (postinstall.includes('patch-tenant-storage-path.mjs')) failures.push('package.json: obsolete tenant-storage patch is still wired into postinstall.');
 if (Object.prototype.hasOwnProperty.call(packageJson?.scripts || {}, 'start:unsafe')) failures.push('package.json: start:unsafe bypass must not exist.');
 if (!start.includes('test:storage-all') || !start.includes('safe-start.mjs')) failures.push('package.json: production start must run the full storage test suite and safe-start.');
-for (const requiredScript of ['test:storage-safety', 'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths']) {
+for (const requiredScript of ['test:storage-safety', 'test:data-safety', 'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths']) {
   if (!storageAll.includes(requiredScript)) failures.push(`package.json: test:storage-all is missing ${requiredScript}.`);
 }
+
+if (!fs.existsSync(path.join(root, 'tests', 'data-safety.test.mjs'))) failures.push('tests/data-safety.test.mjs is missing.');
 
 if (failures.length) {
   console.error('ATHLYRAX_STORAGE_PATH_AUDIT_FAIL');
