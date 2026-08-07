@@ -23,10 +23,10 @@ function writeBase(storageRoot, users) {
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), raw);
   writeStorageReadyMarker(storageRoot);
 }
-function writeTenant(storageRoot, tenantId) {
+function writeTenant(storageRoot, tenantId, declaredTenantId = tenantId) {
   const file = path.join(storageRoot, 'tenants', tenantId, 'db.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify({ __meta: { tenantId }, swimmers: [] })}\n`);
+  fs.writeFileSync(file, `${JSON.stringify({ __meta: { tenantId: declaredTenantId }, swimmers: [] })}\n`);
 }
 
 test('demo.coach always validates demo-company even when stored tenantId is absent', () => {
@@ -56,5 +56,37 @@ test('only the configured primary software owner is exempt from tenant database 
   );
   writeTenant(storage, 'secondary-club');
   assert.doesNotThrow(() => runStorageSafetyCheck({ env: env(storage, backup), repoRoot: root, logger: { info() {}, warn() {} } }));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('tenant database declaring a different tenant is rejected before startup', () => {
+  const root = tempDir('athlyrax-routing-identity-');
+  const storage = path.join(root, 'storage');
+  const backup = path.join(root, 'backup');
+  writeBase(storage, [
+    { username: 'softwareowner', role: 'software-owner', passwordHash: 'x' },
+    { username: 'coach-a', role: 'head-coach', passwordHash: 'x', tenantId: 'club-a' },
+  ]);
+  writeTenant(storage, 'club-a', 'club-b');
+  assert.throws(
+    () => runStorageSafetyCheck({ env: env(storage, backup), repoRoot: root, logger: { info() {}, warn() {} } }),
+    /Refusing cross-tenant data routing/,
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('storage readiness marker cannot be transplanted to another storage root', () => {
+  const root = tempDir('athlyrax-routing-marker-');
+  const storageA = path.join(root, 'storage-a');
+  const storageB = path.join(root, 'storage-b');
+  const backup = path.join(root, 'backup');
+  const users = [{ username: 'softwareowner', role: 'software-owner', passwordHash: 'x' }];
+  writeBase(storageA, users);
+  writeBase(storageB, users);
+  fs.copyFileSync(path.join(storageA, '.athlyrax-storage-ready.json'), path.join(storageB, '.athlyrax-storage-ready.json'));
+  assert.throws(
+    () => runStorageSafetyCheck({ env: env(storageB, backup), repoRoot: root, logger: { info() {}, warn() {} } }),
+    /different storage root/,
+  );
   fs.rmSync(root, { recursive: true, force: true });
 });
