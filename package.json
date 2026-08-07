@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/patch-index-signup-legal.mjs && node scripts/patch-logout-csrf.mjs && node scripts/patch-canonical-storage-contract.mjs && node scripts/patch-persistence-integrity.mjs && node scripts/patch-durable-storage-writes.mjs",
-    "start": "npm run test:storage-all && node scripts/safe-start.mjs",
+    "start": "npm run test:storage-all && node scripts/production-start.mjs",
     "migrate:storage-once": "node scripts/migrate-storage-once.mjs",
     "check:storage-safety": "node scripts/check-storage-safety.mjs",
     "audit:storage-paths": "node scripts/audit-storage-paths.mjs",
