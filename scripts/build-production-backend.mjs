@@ -48,6 +48,7 @@ const transforms = [
   'scripts/patch-coach-link-lifecycle.mjs',
   'scripts/patch-coach-link-integrity.mjs',
   'scripts/patch-coach-link-ownership.mjs',
+  'scripts/patch-coach-link-routing.mjs',
   'scripts/patch-production-cors-origins.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
 ];
