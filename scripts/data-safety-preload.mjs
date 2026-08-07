@@ -109,6 +109,13 @@ function validateCriticalJsonPayload(payload, kind) {
   }
   return false;
 }
+function assertNoCriticalStoreWipe(current, incoming, kind) {
+  if (kind === 'snapshot-submissions' && Array.isArray(current) && current.length > 0 && Array.isArray(incoming) && incoming.length === 0) {
+    const error = new Error('Refusing to replace non-empty snapshot history with an empty history. Use an explicit controlled reset procedure.');
+    error.code = 'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED';
+    throw error;
+  }
+}
 function scopeToken(filePath) {
   const parent = path.basename(path.dirname(filePath)).replace(/[^a-zA-Z0-9._-]/g, '-') || 'root';
   const digest = crypto.createHash('sha256').update(path.resolve(filePath)).digest('hex').slice(0, 12);
@@ -227,6 +234,7 @@ export function installDataSafetyGuards(options = {}) {
           error.code = 'ATHLYRAX_CRITICAL_STORE_CURRENT_INVALID';
           throw error;
         }
+        assertNoCriticalStoreWipe(current, incoming, criticalKind);
         backupFile(destination, `pre-write-${criticalKind}`, env, maxFiles, fsModule);
       }
       return originalRenameSync(source, destination);
@@ -349,5 +357,5 @@ export function installExpressDbRevisionResponseGuard(expressModule, options = {
 export const dataSafetyInternals = Object.freeze({
   getRevisionTime, getStorageRevision, isDatabasePath, hasValidProvisioningProof,
   expectedTenantIdForDbPath, criticalJsonStoreKind, validateCriticalJsonPayload,
-  coreRecordCount, assertNoTotalDataWipe,
+  coreRecordCount, assertNoTotalDataWipe, assertNoCriticalStoreWipe,
 });
