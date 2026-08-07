@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
   assertCanonicalPathContract,
   canonicalStoragePaths,
+  migrateLegacyStorageIfNeeded,
   restoreBundledDemoTenantIfNeeded,
 } from '../scripts/storage-path-contract.mjs';
 
@@ -32,11 +33,11 @@ test('all live stores have one canonical path template', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('legacy tenants/clubs path fails the contract', () => {
+test('legacy tenants/clubs path fails the runtime contract', () => {
   assert.throws(() => assertCanonicalPathContract({ sourceRoot: '/tmp/source', storageRoot: '/tmp/storage', indexSource: `const DB_TENANTS_DIR = path.join(STORAGE_ROOT, 'tenants', 'clubs');` }), /Legacy tenants\/clubs path/);
 });
 
-test('legacy root-level auth-users path fails the contract', () => {
+test('legacy root-level auth-users path fails the runtime contract', () => {
   assert.throws(() => assertCanonicalPathContract({ sourceRoot: '/tmp/source', storageRoot: '/tmp/storage', indexSource: `const SHARED_AUTH_USERS_PATH = path.join(STORAGE_ROOT, 'auth-users.json');` }), /Legacy root-level auth-users path/);
 });
 
@@ -53,6 +54,65 @@ test('fully canonical backend source passes the contract', () => {
       `action: 'tenant_database_missing'`,
     ].join('\n'),
   }));
+});
+
+test('legacy root auth files and every legacy tenant database migrate to canonical paths without deleting sources', () => {
+  const root = tempDir('athlyrax-legacy-all-');
+  const sourceRoot = path.join(root, 'source');
+  const storageRoot = path.join(root, 'persistent');
+  const backupRoot = path.join(root, 'backup');
+  fs.mkdirSync(storageRoot, { recursive: true });
+
+  const users = [{ username: 'coach-a', role: 'head-coach' }];
+  fs.writeFileSync(path.join(storageRoot, 'auth-users.json'), `${JSON.stringify(users)}\n`, 'utf8');
+  fs.writeFileSync(path.join(storageRoot, 'auth-users.backup.json'), `${JSON.stringify(users)}\n`, 'utf8');
+
+  for (const tenantId of ['tenant-a', 'tenant-b']) {
+    const legacyDb = path.join(storageRoot, 'tenants', 'clubs', tenantId, 'db.json');
+    fs.mkdirSync(path.dirname(legacyDb), { recursive: true });
+    fs.writeFileSync(legacyDb, `${JSON.stringify({ swimmers: [{ id: `${tenantId}-swimmer` }] })}\n`, 'utf8');
+  }
+
+  const result = migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } });
+  assert.equal(result.count, 4);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), 'utf8')), users);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), 'utf8')), users);
+  for (const tenantId of ['tenant-a', 'tenant-b']) {
+    assert.equal(fs.existsSync(path.join(storageRoot, 'tenants', tenantId, 'db.json')), true);
+    assert.equal(fs.existsSync(path.join(storageRoot, 'tenants', 'clubs', tenantId, 'db.json')), true);
+  }
+  assert.equal(fs.existsSync(path.join(backupRoot, 'legacy-storage-migration')), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('legacy migration never overwrites a meaningful canonical tenant database', () => {
+  const root = tempDir('athlyrax-legacy-no-overwrite-');
+  const sourceRoot = path.join(root, 'source');
+  const storageRoot = path.join(root, 'persistent');
+  const backupRoot = path.join(root, 'backup');
+  const canonicalDb = path.join(storageRoot, 'tenants', 'tenant-a', 'db.json');
+  const legacyDb = path.join(storageRoot, 'tenants', 'clubs', 'tenant-a', 'db.json');
+  fs.mkdirSync(path.dirname(canonicalDb), { recursive: true });
+  fs.mkdirSync(path.dirname(legacyDb), { recursive: true });
+  const canonicalPayload = { swimmers: [{ id: 'canonical' }] };
+  const legacyPayload = { swimmers: [{ id: 'legacy' }] };
+  fs.writeFileSync(canonicalDb, `${JSON.stringify(canonicalPayload)}\n`, 'utf8');
+  fs.writeFileSync(legacyDb, `${JSON.stringify(legacyPayload)}\n`, 'utf8');
+
+  const result = migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } });
+  assert.equal(result.count, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(canonicalDb, 'utf8')), canonicalPayload);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('invalid legacy auth data fails closed instead of being copied', () => {
+  const root = tempDir('athlyrax-legacy-auth-invalid-');
+  const storageRoot = path.join(root, 'persistent');
+  fs.mkdirSync(storageRoot, { recursive: true });
+  fs.writeFileSync(path.join(storageRoot, 'auth-users.json'), '{invalid', 'utf8');
+  assert.throws(() => migrateLegacyStorageIfNeeded({ sourceRoot: root, storageRoot, backupRoot: path.join(root, 'backup'), logger: { info() {} } }), /Legacy auth users store is unreadable or invalid/);
+  assert.equal(fs.existsSync(path.join(storageRoot, 'auth', 'auth-users.json')), false);
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('missing canonical demo database is restored from bundled seed when no meaningful legacy database exists', () => {
