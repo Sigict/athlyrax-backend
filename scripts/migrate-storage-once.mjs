@@ -16,6 +16,9 @@ import {
 } from './storage-path-contract.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
+let readyMarkerPath = '';
+let previousReadyMarkerBytes = null;
+let markerRewritten = false;
 
 function parseArgs(argv) {
   if (argv.length % 2 !== 0) throw new Error(`Incomplete argument: ${argv[argv.length - 1]}`);
@@ -89,6 +92,18 @@ function assertMeaningfulDb(filePath, label, expectedTenantId = '') {
   }
   return parsed;
 }
+function restorePreviousReadyMarker() {
+  if (!markerRewritten || !readyMarkerPath) return;
+  try {
+    if (previousReadyMarkerBytes) {
+      fs.writeFileSync(readyMarkerPath, previousReadyMarkerBytes);
+    } else if (fs.existsSync(readyMarkerPath)) {
+      fs.unlinkSync(readyMarkerPath);
+    }
+  } catch (rollbackError) {
+    console.error('[storage-migration] Could not roll back storage approval marker:', rollbackError?.message || rollbackError);
+  }
+}
 
 try {
   const args = parseArgs(process.argv.slice(2));
@@ -113,6 +128,8 @@ try {
 
   assertCanonicalPathContract({ sourceRoot, storageRoot: configuration.storageRoot, indexSource });
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot: configuration.storageRoot });
+  readyMarkerPath = configuration.readyMarkerPath;
+  previousReadyMarkerBytes = fs.existsSync(readyMarkerPath) ? fs.readFileSync(readyMarkerPath) : null;
 
   // Never manufacture an "independent backup" by merely cloning the primary
   // authentication store. Migration may proceed only when a real canonical or
@@ -171,9 +188,10 @@ try {
     requiredTenants,
     verifiedFiles,
   });
+  markerRewritten = true;
 
   // Full production validation must pass after all copies and before the migration
-  // is finalized. If it fails, the process exits and the one-time marker is not finalized.
+  // is finalized. If it fails, the approval marker is rolled back below.
   runStorageSafetyCheck({
     repoRoot,
     requireFiles: true,
@@ -181,6 +199,7 @@ try {
   });
 
   finalizeLegacyStorageMigration({ storageRoot: configuration.storageRoot, migrationResult: migration });
+  markerRewritten = false;
 
   console.log('ATHLYRAX_STORAGE_MIGRATION_OK');
   console.log(`Canonical storage: ${configuration.storageRoot}`);
@@ -188,6 +207,7 @@ try {
   console.log(`Migrated items: ${migration.count || 0}`);
   console.log(`Demo recovery: ${demoRecovery.restored ? demoRecovery.source : demoRecovery.reason}`);
 } catch (error) {
+  restorePreviousReadyMarker();
   console.error('ATHLYRAX_STORAGE_MIGRATION_FAILED');
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
