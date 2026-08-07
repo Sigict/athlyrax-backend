@@ -25,6 +25,10 @@ const repoRoot = sourceRoot;
 const entryPath = path.join(sourceRoot, 'index.js');
 const indexSource = fs.readFileSync(entryPath, 'utf8');
 
+if (String(process.env.NODE_ENV || '').trim().toLowerCase() !== 'production') {
+  throw new Error('Safe production start requires NODE_ENV=production. Refusing development/default mode.');
+}
+
 const initialStorageConfiguration = resolveStorageConfiguration(process.env, repoRoot);
 if (initialStorageConfiguration.failures.length > 0) {
   const error = new Error(initialStorageConfiguration.failures.join('\n'));
@@ -52,10 +56,7 @@ restoreBundledDemoTenantIfNeeded({
 
 runStorageSafetyCheck({
   repoRoot,
-  requireFiles: String(
-    process.env.ATHLYRAX_CHECK_REQUIRE_FILES
-      ?? (String(process.env.NODE_ENV || '').toLowerCase() === 'production' ? 'true' : 'false'),
-  ).toLowerCase() !== 'false',
+  requireFiles: true,
   createDirectories: true,
 });
 
