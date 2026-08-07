@@ -13,6 +13,7 @@ function run(label, args) {
 
 const transforms = [
   'scripts/patch-data-safety-coverage.mjs',
+  'scripts/patch-storage-recovery-semantics.mjs',
   'scripts/patch-index-signup-legal.mjs',
   'scripts/patch-logout-csrf.mjs',
   'scripts/patch-canonical-storage-contract.mjs',
@@ -32,12 +33,12 @@ for (const relative of transforms) {
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
-  'scripts/index.js',
+  'index.js',
+  'scripts/storage-path-contract.mjs',
   'scripts/migrate-storage-once.mjs',
   'scripts/approve-storage-layout.mjs',
 ]) {
-  const actual = relative === 'scripts/index.js' ? 'index.js' : relative;
-  run(`${actual} syntax check`, ['--check', actual]);
+  run(`${relative} syntax check`, ['--check', relative]);
 }
 run('storage/path audit', ['scripts/audit-storage-paths.mjs']);
 
