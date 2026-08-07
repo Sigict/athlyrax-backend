@@ -5,30 +5,16 @@ import crypto from 'node:crypto';
 const LEGACY_MIGRATION_MARKER = '.athlyrax-legacy-storage-migration-v1.json';
 
 function normalizeTenantId(value) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 }
-
 function requireCanonicalTenantId(value, label = 'tenant ID') {
   const raw = String(value || '').trim();
   const normalized = normalizeTenantId(raw);
-  if (!normalized || raw !== normalized) {
-    throw new Error(`Unsafe or noncanonical ${label}: ${raw}. Expected lowercase letters, numbers, underscores or hyphens only.`);
-  }
+  if (!normalized || raw !== normalized) throw new Error(`Unsafe or noncanonical ${label}: ${raw}. Expected lowercase letters, numbers, underscores or hyphens only.`);
   return normalized;
 }
-
-function readJson(filePath) {
-  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
-  catch { return null; }
-}
-function readJsonObject(filePath) {
-  const parsed = readJson(filePath);
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-}
+function readJson(filePath) { try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return null; } }
+function readJsonObject(filePath) { const parsed = readJson(filePath); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null; }
 function validAuthStore(filePath) {
   if (!fs.existsSync(filePath)) return null;
   const payload = readJson(filePath);
@@ -53,14 +39,16 @@ function assertTenantIdentity(payload, expectedTenantId, label) {
   if (!declaredRaw) return;
   const declared = requireCanonicalTenantId(declaredRaw, 'declared tenant ID');
   const expected = requireCanonicalTenantId(expectedTenantId, 'expected tenant ID');
-  if (declared !== expected) {
-    throw new Error(`${label} declares tenant ${declared} but is being routed to ${expected}. Refusing cross-tenant migration or recovery.`);
-  }
+  if (declared !== expected) throw new Error(`${label} declares tenant ${declared} but is being routed to ${expected}. Refusing cross-tenant migration or recovery.`);
 }
 function hasMeaningfulDemoData(payload) {
   const keys = ['swimmers', 'squads', 'trainingSessions', 'trainingSessionSets', 'tests', 'attendance', 'competitions', 'fixtures', 'groups'];
   return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload)
     && keys.some((key) => Array.isArray(payload[key]) && payload[key].length > 0);
+}
+function validMeaningfulDemoDatabase(filePath) {
+  const candidate = validMeaningfulDatabase(filePath);
+  return candidate && hasMeaningfulDemoData(candidate.payload) ? candidate : null;
 }
 function durableWriteBytes(destination, bytes) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -70,21 +58,13 @@ function durableWriteBytes(destination, bytes) {
     handle = fs.openSync(temp, 'wx', 0o600);
     fs.writeFileSync(handle, bytes);
     fs.fsyncSync(handle);
-  } finally {
-    if (handle !== null) fs.closeSync(handle);
-  }
-  try {
-    fs.renameSync(temp, destination);
-  } catch (error) {
-    try { fs.unlinkSync(temp); } catch {}
-    throw error;
-  }
+  } finally { if (handle !== null) fs.closeSync(handle); }
+  try { fs.renameSync(temp, destination); }
+  catch (error) { try { fs.unlinkSync(temp); } catch {} throw error; }
   try {
     const directoryHandle = fs.openSync(path.dirname(destination), 'r');
     try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
-  } catch {
-    // Directory fsync is not supported by every hosted filesystem.
-  }
+  } catch {}
 }
 function copyExact(source, destination) {
   const sourceBytes = fs.readFileSync(source);
@@ -93,9 +73,7 @@ function copyExact(source, destination) {
   if (!sourceBytes.equals(destinationBytes)) throw new Error(`Verified copy failed: ${source} -> ${destination}`);
   return destinationBytes.length;
 }
-function writeAtomicJson(filePath, payload) {
-  durableWriteBytes(filePath, Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8'));
-}
+function writeAtomicJson(filePath, payload) { durableWriteBytes(filePath, Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, 'utf8')); }
 function listFilesRecursive(rootDir) {
   if (!fs.existsSync(rootDir)) return [];
   const output = [];
@@ -229,38 +207,39 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot });
   const liveDemo = paths.tenantDb('demo-company');
   const liveState = classifyDatabase(liveDemo);
+  if (liveState.state === 'invalid') throw new Error(`Canonical demo-company database is unreadable or invalid JSON: ${liveDemo}`);
   if (liveState.state === 'meaningful') {
     assertTenantIdentity(liveState.payload, 'demo-company', `Canonical demo-company database ${liveDemo}`);
-    return { restored: false, reason: 'live-demo-present', liveDemo };
+    if (hasMeaningfulDemoData(liveState.payload)) return { restored: false, reason: 'live-demo-present', liveDemo };
+    logger.warn('[storage-path] Canonical demo-company database exists but contains no meaningful demo records; recovery is required.');
   }
-  if (liveState.state === 'invalid') throw new Error(`Canonical demo-company database is unreadable or invalid JSON: ${liveDemo}`);
 
   const legacyDemo = path.join(paths.storageRoot, 'tenants', 'clubs', 'demo-company', 'db.json');
   const bundledDemo = path.join(paths.repositoryStorage, 'tenants', 'demo-company', 'db.json');
   const markerFinalized = Boolean(readMigrationMarker(paths.legacyMigrationMarker));
-  const legacyCandidate = markerFinalized ? null : validMeaningfulDatabase(legacyDemo);
-  const bundledCandidate = validMeaningfulDatabase(bundledDemo);
-  if (legacyCandidate) assertTenantIdentity(legacyCandidate.payload, 'demo-company', `Legacy demo-company database ${legacyDemo}`);
-  if (bundledCandidate) {
-    assertTenantIdentity(bundledCandidate.payload, 'demo-company', `Bundled demo-company database ${bundledDemo}`);
-    if (!hasMeaningfulDemoData(bundledCandidate.payload)) throw new Error(`Bundled demo-company database contains no meaningful demo records: ${bundledDemo}`);
-  }
+  const rawLegacyCandidate = markerFinalized ? null : validMeaningfulDatabase(legacyDemo);
+  if (rawLegacyCandidate) assertTenantIdentity(rawLegacyCandidate.payload, 'demo-company', `Legacy demo-company database ${legacyDemo}`);
+  const legacyCandidate = rawLegacyCandidate && hasMeaningfulDemoData(rawLegacyCandidate.payload) ? rawLegacyCandidate : null;
+  const bundledCandidate = validMeaningfulDemoDatabase(bundledDemo);
+  if (bundledCandidate) assertTenantIdentity(bundledCandidate.payload, 'demo-company', `Bundled demo-company database ${bundledDemo}`);
+  if (!bundledCandidate && fs.existsSync(bundledDemo)) throw new Error(`Bundled demo-company database contains no meaningful demo records: ${bundledDemo}`);
+
   const sourceCandidate = legacyCandidate || bundledCandidate;
-  if (!sourceCandidate) throw new Error('No valid demo-company recovery database is available.');
+  if (!sourceCandidate) throw new Error('No valid demo-company recovery database with meaningful demo records is available.');
 
   const backupDirectory = backupRoot ? path.join(path.resolve(backupRoot), 'demo-bootstrap-replaced') : '';
   if (backupDirectory) fs.mkdirSync(backupDirectory, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   if (fs.existsSync(liveDemo) && backupDirectory) copyExact(liveDemo, path.join(backupDirectory, `${stamp}-canonical-demo-before-recovery.json`));
-  if (legacyCandidate && backupDirectory) copyExact(legacyDemo, path.join(backupDirectory, `${stamp}-legacy-demo-source-preserved.json`));
+  if (rawLegacyCandidate && backupDirectory) copyExact(legacyDemo, path.join(backupDirectory, `${stamp}-legacy-demo-source-preserved.json`));
 
   const bytes = copyExact(sourceCandidate.filePath, liveDemo);
-  const restored = validMeaningfulDatabase(liveDemo);
-  if (!restored || restored.stat.size !== sourceCandidate.stat.size || !hasMeaningfulDemoData(restored.payload)) throw new Error('Demo-company recovery verification failed.');
+  const restored = validMeaningfulDemoDatabase(liveDemo);
+  if (!restored || restored.stat.size !== sourceCandidate.stat.size) throw new Error('Demo-company recovery verification failed.');
   assertTenantIdentity(restored.payload, 'demo-company', `Recovered demo-company database ${liveDemo}`);
   const sourceLabel = legacyCandidate ? 'legacy-live' : 'bundled-seed';
   logger.info(`[storage-path] Restored demo-company database from ${sourceLabel} source (${bytes} bytes).`);
-  return { restored: true, reason: 'live-demo-missing-or-empty', source: sourceLabel, liveDemo, bytes };
+  return { restored: true, reason: 'live-demo-missing-empty-or-no-records', source: sourceLabel, liveDemo, bytes };
 }
 
 export function assertCanonicalPathContract({ sourceRoot, storageRoot, indexSource = '' } = {}) {
