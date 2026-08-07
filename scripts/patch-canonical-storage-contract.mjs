@@ -44,7 +44,7 @@ if (markerIndex >= 0) {
 const authFailClosedMarker = `// ATHLYRAX_PRODUCTION_AUTH_STORE_FAIL_CLOSED`;
 if (!source.includes(authFailClosedMarker)) {
   const authAnchor = `\tconst cleanedFromBackup = sanitizeDemoUsers(fromBackup);\n\n\tif (`;
-  const authReplacement = `\tconst cleanedFromBackup = sanitizeDemoUsers(fromBackup);\n\n${authFailClosedMarker}\n\tif (IS_PRODUCTION && cleanedFromFile.length < 1) {\n\t\tthrow new Error('Production authentication store is empty. Refusing backup/environment/default account fallback.');\n\t}\n\tif (IS_PRODUCTION && cleanedFromBackup.length < 1) {\n\t\tthrow new Error('Production authentication backup is empty. Refusing startup without a valid backup baseline.');\n\t}\n\n\tif (`;
+  const authReplacement = `\tconst cleanedFromBackup = sanitizeDemoUsers(fromBackup);\n\n${authFailClosedMarker}\n\tif (IS_PRODUCTION && cleanedFromFile.length < 1) {\n\t\tthrow new Error('Production authentication store is empty. Refusing backup/environment/default account fallback.');\n\t}\n\tif (IS_PRODUCTION && cleanedFromBackup.length < 1) {\n\t\tthrow new Error('Production authentication backup is empty. Refusing startup without a valid backup baseline.');\n\t}\n\tif (IS_PRODUCTION && cleanedFromFile.length !== fromFile.length) {\n\t\tthrow new Error('Production authentication store contains removable seed/demo users. Refusing startup-time auth mutation.');\n\t}\n\tif (IS_PRODUCTION && cleanedFromBackup.length !== fromBackup.length) {\n\t\tthrow new Error('Production authentication backup contains removable seed/demo users. Refusing startup-time auth mutation.');\n\t}\n\tif (IS_PRODUCTION) {\n\t\treturn { users: cleanedFromFile, source: 'file' };\n\t}\n\n\tif (`;
   if (!source.includes(authAnchor)) throw new Error('Could not find authentication-store fallback anchor.');
   source = source.replace(authAnchor, authReplacement);
 }
@@ -65,7 +65,7 @@ if (!source.includes(authAtomicMarker)) {
 const inviteFailClosedMarker = `// ATHLYRAX_AUTH_INVITES_FAIL_CLOSED`;
 if (!source.includes(inviteFailClosedMarker)) {
   const legacyInviteLoader = `function loadOrCreateAuthInvites() {\n\tensureStorageLayout();\n\tconst fromFile = normalizeInviteRows(readJsonFile(AUTH_INVITES_PATH));\n\tif (fromFile.length > 0) return fromFile;\n\twriteJsonFile(AUTH_INVITES_PATH, []);\n\treturn [];\n}`;
-  const safeInviteLoader = `function loadOrCreateAuthInvites() {\n${inviteFailClosedMarker}\n\tensureStorageLayout();\n\tif (fs.existsSync(AUTH_INVITES_PATH)) {\n\t\tconst raw = readJsonFile(AUTH_INVITES_PATH);\n\t\tif (!Array.isArray(raw)) throw new Error('Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.');\n\t\treturn normalizeInviteRows(raw);\n\t}\n\twriteAtomicJsonFile(AUTH_INVITES_PATH, []);\n\treturn [];\n}`;
+  const safeInviteLoader = `function loadOrCreateAuthInvites() {\n${inviteFailClosedMarker}\n\tensureStorageLayout();\n\tif (fs.existsSync(AUTH_INVITES_PATH)) {\n\t\tconst raw = readJsonFile(AUTH_INVITES_PATH);\n\t\tif (!Array.isArray(raw)) throw new Error('Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.');\n\t\treturn normalizeInviteRows(raw);\n\t}\n\tif (IS_PRODUCTION) throw new Error('Authentication invite store is missing. Refusing startup-time creation.');\n\twriteAtomicJsonFile(AUTH_INVITES_PATH, []);\n\treturn [];\n}`;
   if (!source.includes(legacyInviteLoader)) throw new Error('Could not find authentication invite-loader anchor.');
   source = source.replace(legacyInviteLoader, safeInviteLoader);
 }
@@ -76,6 +76,22 @@ if (!source.includes(stripeWebhookMarker)) {
   const safeWebhookBlock = `${stripeWebhookMarker}\n\ttry {\n\t\tif (BILLING_STRIPE_WEBHOOK_SECRET) {\n\t\t\tif (!signature) {\n\t\t\t\tres.status(400).json({ error: 'Stripe webhook signature is required.' });\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tevent = stripeClient.webhooks.constructEvent(req.body, signature, BILLING_STRIPE_WEBHOOK_SECRET);\n\t\t} else {\n\t\t\tif (IS_PRODUCTION) {\n\t\t\t\tres.status(503).json({ error: 'Stripe webhook verification is not configured.' });\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tconst rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body || '{}');\n\t\t\tevent = JSON.parse(rawBody);\n\t\t}\n\t} catch (error) {`;
   if (!source.includes(unsafeWebhookBlock)) throw new Error('Could not find Stripe webhook anchor.');
   source = source.replace(unsafeWebhookBlock, safeWebhookBlock);
+}
+
+const billingEmailMarker = `// ATHLYRAX_PRODUCTION_BILLING_EMAIL_NO_CONSOLE`;
+if (!source.includes(billingEmailMarker)) {
+  const unsafeBillingEmail = `\t\tif (!AUTH_SMTP_HOST || !AUTH_SMTP_FROM) {\n\t\t\tconsole.log(\`[billing-email] \${email}\\n\${subject}\\n\${textBody}\`);\n\t\t\treturn { mode: 'console' };\n\t\t}`;
+  const safeBillingEmail = `\t\tif (!AUTH_SMTP_HOST || !AUTH_SMTP_FROM) {\n${billingEmailMarker}\n\t\t\tif (IS_PRODUCTION) return { mode: 'skipped', reason: 'smtp_not_configured' };\n\t\t\tconsole.log(\`[billing-email] \${email}\\n\${subject}\\n\${textBody}\`);\n\t\t\treturn { mode: 'console' };\n\t\t}`;
+  if (!source.includes(unsafeBillingEmail)) throw new Error('Could not find billing-email console fallback anchor.');
+  source = source.replace(unsafeBillingEmail, safeBillingEmail);
+}
+
+const startupHealMarker = `// ATHLYRAX_NO_PRODUCTION_STARTUP_AUTOHEAL`;
+if (!source.includes(startupHealMarker)) {
+  const unsafeHealStart = `function autoHealSwimmerBindingsAtStartup() {\n\tif (!AUTH_AUTO_HEAL_SWIMMER_BINDINGS) return;`;
+  const safeHealStart = `function autoHealSwimmerBindingsAtStartup() {\n${startupHealMarker}\n\tif (IS_PRODUCTION) return;\n\tif (!AUTH_AUTO_HEAL_SWIMMER_BINDINGS) return;`;
+  if (!source.includes(unsafeHealStart)) throw new Error('Could not find startup swimmer auto-heal anchor.');
+  source = source.replace(unsafeHealStart, safeHealStart);
 }
 
 const missingTenantResponse = `\t\tappendAuthAuditEvent({\n\t\t\taction: 'tenant_database_missing',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: 'missing_existing_tenant_database',\n\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t});\n\t\tres.status(503).json({\n\t\t\terror: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',\n\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t});\n\t\treturn;`;
@@ -115,9 +131,13 @@ for (const required of [
   `globalThis[Symbol.for('athlyrax.safeStartEnforced')] === true`,
   `Direct index.js startup is refused.`,
   authFailClosedMarker,
+  `Refusing startup-time auth mutation.`,
   authAtomicMarker,
   inviteFailClosedMarker,
+  `Authentication invite store is missing. Refusing startup-time creation.`,
   stripeWebhookMarker,
+  billingEmailMarker,
+  startupHealMarker,
   putMarker,
   registrationMarker,
   `crypto.createHmac('sha256', AUTH_SECRET).update(path.resolve(registrationTenantStorage.dbPath)).digest('hex')`,
