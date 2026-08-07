@@ -14,6 +14,7 @@ import {
 } from './storage-safety-lib.mjs';
 import {
   assertCanonicalPathContract,
+  finalizeLegacyStorageMigration,
   migrateLegacyStorageIfNeeded,
   restoreBundledDemoTenantIfNeeded,
 } from './storage-path-contract.mjs';
@@ -37,7 +38,7 @@ assertCanonicalPathContract({
   indexSource,
 });
 
-migrateLegacyStorageIfNeeded({
+const legacyMigration = migrateLegacyStorageIfNeeded({
   sourceRoot,
   storageRoot: initialStorageConfiguration.storageRoot,
   backupRoot: initialStorageConfiguration.backupRoot,
@@ -56,6 +57,11 @@ runStorageSafetyCheck({
       ?? (String(process.env.NODE_ENV || '').toLowerCase() === 'production' ? 'true' : 'false'),
   ).toLowerCase() !== 'false',
   createDirectories: true,
+});
+
+finalizeLegacyStorageMigration({
+  storageRoot: initialStorageConfiguration.storageRoot,
+  migrationResult: legacyMigration,
 });
 
 process.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';
