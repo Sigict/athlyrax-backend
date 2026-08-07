@@ -37,6 +37,7 @@ const transforms = [
   'scripts/patch-auth-tenant-integrity.mjs',
   'scripts/patch-migration-validation.mjs',
   'scripts/patch-runtime-auth-billing-safety.mjs',
+  'scripts/patch-auth-persistence-transaction.mjs',
   'scripts/patch-runtime-identity-event-safety.mjs',
   'scripts/patch-ownership-integrity.mjs',
   'scripts/patch-orphan-tenant-safety.mjs',
