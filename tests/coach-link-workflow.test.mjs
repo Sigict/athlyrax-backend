@@ -121,16 +121,19 @@ test('acceptance rejects stale requests, enforces billing/capacity, and copies b
   assert.ok(acceptSource.includes('writeAtomicJsonFile(targetPaths.dbPath, targetDb);'), 'target rollback missing if auth persistence fails');
 });
 
-test('disconnected archive can be safely reactivated without consuming active capacity', () => {
+test('disconnected archive reconnect is allowed but still consumes active capacity', () => {
   const acceptStart = source.indexOf("app.post('/coach/swimmer-links/:requestId/accept'");
   const rejectStart = source.indexOf("app.post('/coach/swimmer-links/:requestId/reject'", acceptStart);
   const acceptSource = source.slice(acceptStart, rejectStart);
   assert.ok(acceptSource.includes("existingTargetStatus !== 'approved' && existingTargetStatus !== 'disconnected'"));
+  assert.ok(acceptSource.includes('const acceptanceAddsActiveSwimmer = existingTargetIndex < 0 || currentTargetRows[existingTargetIndex]?.active === false;'));
+  assert.ok(acceptSource.includes('if (acceptanceAddsActiveSwimmer)'));
+  assert.ok(acceptSource.includes('activeSwimmerCount >= Number(maxSwimmers)'));
 
   const disconnectStart = source.indexOf("app.post('/swimmer/coach/disconnect'");
   const dbStart = source.indexOf('// Serve db.json at /db', disconnectStart);
   const disconnectSource = source.slice(disconnectStart, dbStart);
-  assert.ok(disconnectSource.includes("active: false"));
+  assert.ok(disconnectSource.includes('active: false'));
   assert.ok(disconnectSource.includes("coachLinkStatus: 'disconnected'"));
 });
 
