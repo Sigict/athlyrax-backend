@@ -21,6 +21,7 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_STRIPE_EVENT_ORDER_GUARD',
     'ATHLYRAX_SERVER_AUTHORITATIVE_OWNERSHIP_METADATA',
     'ATHLYRAX_ORPHAN_TENANT_CLAIM_BLOCKED',
+    'ATHLYRAX_LAST_TENANT_ACCOUNT_DELETE_BLOCKED',
   ]) assert.ok(source.includes(token), `missing runtime hardening token ${token}`);
 
   assert.equal(source.includes("const isBillingEnforced = isBillingEnabled && BILLING_ENFORCED;"), false);
@@ -31,6 +32,7 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.ok(source.includes("app.post('/db/ownership-backfill', requireAuth, requireAdminRole, requireBillingWriteAccess"));
   assert.ok(source.includes('Team storage already exists without an active membership. Automatic claiming is blocked'));
   assert.ok(source.includes('Each configured Stripe price ID may belong to only one billing plan.'));
+  assert.ok(source.includes('Cannot delete the last account for a tenant while its database still exists.'));
 });
 
 test('invite semantic validator rejects duplicates invalid tenant and impossible use count', () => {
