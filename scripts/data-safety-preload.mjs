@@ -9,7 +9,7 @@ const readContext = new AsyncLocalStorage();
 
 function resolveFilePath(value) {
   if (Buffer.isBuffer(value)) return path.resolve(value.toString());
-  if (value instanceof URL) return path.resolve(value.pathname);
+  if (value instanceof URL) return path.resolve(decodeURIComponent(value.pathname));
   return path.resolve(String(value || ''));
 }
 
@@ -34,16 +34,42 @@ function getStorageRevision(payload) {
 }
 
 function getRevisionTime(payload) {
-  for (const value of [
-    payload?.__meta?.storageUpdatedAt,
-    payload?.__meta?.updatedAt,
-    payload?.__savedAt,
-    payload?.updatedAt,
-  ]) {
+  for (const value of [payload?.__meta?.storageUpdatedAt, payload?.__meta?.updatedAt, payload?.__savedAt, payload?.updatedAt]) {
     const parsed = Date.parse(String(value || ''));
     if (Number.isFinite(parsed)) return parsed;
   }
   return Number.NaN;
+}
+
+function normalizeTenantId(value) {
+  const raw = String(value || '').trim();
+  return raw && /^[a-z0-9_-]+$/.test(raw) ? raw : '';
+}
+
+function expectedTenantIdForDbPath(dbPath, env) {
+  const storageRootRaw = String(env.ATHLYRAX_STORAGE_ROOT || '').trim();
+  if (!storageRootRaw) return '';
+  const tenantRoot = path.resolve(storageRootRaw, 'tenants');
+  const resolved = path.resolve(dbPath);
+  const relative = path.relative(tenantRoot, resolved);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return '';
+  const parts = relative.split(path.sep).filter(Boolean);
+  if (parts.length !== 2 || parts[1].toLowerCase() !== 'db.json') return '';
+  return normalizeTenantId(parts[0]);
+}
+
+function assertTenantIdentity(payload, destination, env, label) {
+  const expected = expectedTenantIdForDbPath(destination, env);
+  if (!expected) return '';
+  const declaredRaw = String(payload?.__meta?.tenantId || '').trim();
+  if (!declaredRaw) return expected;
+  const declared = normalizeTenantId(declaredRaw);
+  if (!declared || declared !== expected) {
+    const error = new Error(`${label} tenant identity does not match destination. Expected ${expected}, received ${declaredRaw || '(missing)'}.`);
+    error.code = 'ATHLYRAX_DB_TENANT_IDENTITY_CONFLICT';
+    throw error;
+  }
+  return expected;
 }
 
 function scopeToken(dbPath) {
@@ -61,9 +87,31 @@ function rotate(directory, maxFiles, fsModule = fs) {
     })
     .sort((left, right) => right.mtime - left.mtime);
   for (const stale of files.slice(maxFiles)) {
-    try { fsModule.unlinkSync(stale.fullPath); }
-    catch { /* retention cleanup must not block the database write */ }
+    try { fsModule.unlinkSync(stale.fullPath); } catch { /* retention cleanup must not block the database write */ }
   }
+}
+
+function durableWriteBytes(destination, bytes, fsModule = fs) {
+  fsModule.mkdirSync(path.dirname(destination), { recursive: true });
+  const temp = `${destination}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  let handle = null;
+  try {
+    handle = fsModule.openSync(temp, 'wx', 0o600);
+    fsModule.writeFileSync(handle, bytes);
+    fsModule.fsyncSync(handle);
+  } finally {
+    if (handle !== null) fsModule.closeSync(handle);
+  }
+  try {
+    fsModule.renameSync(temp, destination);
+  } catch (error) {
+    try { fsModule.unlinkSync(temp); } catch {}
+    throw error;
+  }
+  try {
+    const directoryHandle = fsModule.openSync(path.dirname(destination), 'r');
+    try { fsModule.fsyncSync(directoryHandle); } finally { fsModule.closeSync(directoryHandle); }
+  } catch {}
 }
 
 function backupDatabase(dbPath, reason, env, maxFiles, fsModule = fs) {
@@ -75,7 +123,7 @@ function backupDatabase(dbPath, reason, env, maxFiles, fsModule = fs) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const destination = path.join(directory, `${stamp}-${process.pid}-${crypto.randomBytes(4).toString('hex')}.json`);
   const sourceBytes = fsModule.readFileSync(dbPath);
-  fsModule.copyFileSync(dbPath, destination);
+  durableWriteBytes(destination, sourceBytes, fsModule);
   const backupBytes = fsModule.readFileSync(destination);
   if (!sourceBytes.equals(backupBytes)) {
     try { fsModule.unlinkSync(destination); } catch {}
@@ -87,18 +135,27 @@ function backupDatabase(dbPath, reason, env, maxFiles, fsModule = fs) {
   return destination;
 }
 
-function writeRevisionToIncoming(sourcePath, payload, revision, fsModule = fs) {
+function writeRevisionToIncoming(sourcePath, payload, revision, expectedTenantId = '', fsModule = fs) {
   const rawMeta = payload?.__meta && typeof payload.__meta === 'object' ? payload.__meta : {};
   const { provisioningToken: _discardedProvisioningToken, ...safeMeta } = rawMeta;
   const updated = {
     ...payload,
     __meta: {
       ...safeMeta,
+      ...(expectedTenantId ? { tenantId: expectedTenantId } : {}),
       storageRevision: revision,
       storageUpdatedAt: new Date().toISOString(),
     },
   };
-  fsModule.writeFileSync(sourcePath, `${JSON.stringify(updated, null, 2)}\n`, 'utf8');
+  let handle = null;
+  try {
+    handle = fsModule.openSync(sourcePath, 'r+');
+    fsModule.ftruncateSync(handle, 0);
+    fsModule.writeFileSync(handle, `${JSON.stringify(updated, null, 2)}\n`, 'utf8');
+    fsModule.fsyncSync(handle);
+  } finally {
+    if (handle !== null) fsModule.closeSync(handle);
+  }
 }
 
 function hasValidProvisioningProof(incoming, destination, env) {
@@ -158,12 +215,14 @@ export function installDataSafetyGuards(options = {}) {
       error.code = 'ATHLYRAX_CURRENT_DB_INVALID';
       throw error;
     }
-
     if (!incoming) {
       const error = new Error(`Refusing database replacement because the incoming database is unreadable or invalid JSON: ${source}`);
       error.code = 'ATHLYRAX_INCOMING_DB_INVALID';
       throw error;
     }
+
+    const expectedTenantId = assertTenantIdentity(incoming, destination, env, 'Incoming database');
+    if (current) assertTenantIdentity(current, destination, env, 'Current database');
 
     if (!destinationExists && isProduction && !hasValidProvisioningProof(incoming, destination, env)) {
       const error = new Error(`Refusing to create a missing production database outside explicit server-bound tenant provisioning: ${destination}`);
@@ -174,7 +233,6 @@ export function installDataSafetyGuards(options = {}) {
     const currentRevisionValue = getStorageRevision(current);
     const currentRevision = currentRevisionValue ?? 0;
     const incomingRevision = getStorageRevision(incoming);
-
     if (current && incomingRevision !== currentRevision) {
       const received = incomingRevision === null ? 'missing' : String(incomingRevision);
       const error = new Error(`Refusing database replacement. Expected storage revision ${currentRevision}, received ${received}.`);
@@ -190,7 +248,7 @@ export function installDataSafetyGuards(options = {}) {
       throw error;
     }
 
-    writeRevisionToIncoming(source, incoming, currentRevision + 1, fsModule);
+    writeRevisionToIncoming(source, incoming, currentRevision + 1, expectedTenantId, fsModule);
     const backup = backupDatabase(destination, 'pre-write', env, maxFiles, fsModule);
     try { return originalRenameSync(source, destination); }
     catch (error) {
@@ -260,4 +318,5 @@ export const dataSafetyInternals = Object.freeze({
   getStorageRevision,
   isDatabasePath,
   hasValidProvisioningProof,
+  expectedTenantIdForDbPath,
 });
