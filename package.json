@@ -8,7 +8,7 @@
     "start": "npm run test:storage-all && node scripts/production-start.mjs",
     "migrate:storage-once": "node scripts/migrate-storage-once.mjs",
     "check:storage-safety": "node scripts/check-storage-safety.mjs",
-    "audit:storage-paths": "node scripts/audit-storage-paths.mjs",
+    "audit:storage-paths": "node scripts/audit-storage-paths.mjs && node scripts/audit-production-transform-chain.mjs",
     "test:storage-safety": "node --test tests/storage-safety.test.mjs",
     "test:data-safety": "node --test tests/data-safety.test.mjs",
     "test:persistence-integrity": "node --test tests/persistence-integrity.test.mjs",
