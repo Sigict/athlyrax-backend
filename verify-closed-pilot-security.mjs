@@ -16,20 +16,42 @@ const AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE = String(process.env.AUTH_PASSWOR
 const FRONTEND_PUBLIC_ORIGIN = String(process.env.FRONTEND_PUBLIC_ORIGIN || '').trim().replace(/\/$/, '');
 const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '').trim();
 const AUTH_ALLOW_BEARER_COMPAT = String(process.env.AUTH_ALLOW_BEARER_COMPAT || 'false').toLowerCase() === 'true';
-const SAFE_START_ENFORCED = String(process.env.ATHLYRAX_SAFE_START_ENFORCED || '').trim() === 'true';
 const STORAGE_ROOT = String(process.env.ATHLYRAX_STORAGE_ROOT || '').trim();
 const SAFETY_BACKUP_ROOT = String(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();
 
-function checkWritableDir(dirPath) {
+function checkExistingWritableDir(dirPath) {
   try {
-    fs.mkdirSync(dirPath, { recursive: true });
-    const probePath = path.join(dirPath, `.athlyrax-write-probe-${process.pid}-${Date.now()}.tmp`);
-    fs.writeFileSync(probePath, 'ok', 'utf8');
-    fs.unlinkSync(probePath);
+    if (!dirPath || !fs.existsSync(dirPath)) return false;
+    if (!fs.statSync(dirPath).isDirectory()) return false;
+    fs.accessSync(dirPath, fs.constants.R_OK | fs.constants.W_OK);
     return true;
   } catch {
     return false;
   }
+}
+
+function verifyGuardedStartupContract() {
+  const failures = [];
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    const start = String(packageJson?.scripts?.start || '').trim();
+    if (!start.includes('node scripts/production-start.mjs')) failures.push('Package start command must launch scripts/production-start.mjs');
+  } catch {
+    failures.push('package.json could not be read while verifying guarded startup');
+  }
+  try {
+    const productionStart = fs.readFileSync(path.join(__dirname, 'scripts', 'production-start.mjs'), 'utf8');
+    if (!productionStart.includes("scripts', 'safe-start.mjs")) failures.push('production-start.mjs must delegate to safe-start.mjs');
+  } catch {
+    failures.push('production-start.mjs could not be read while verifying guarded startup');
+  }
+  try {
+    const safeStart = fs.readFileSync(path.join(__dirname, 'scripts', 'safe-start.mjs'), 'utf8');
+    if (!safeStart.includes("globalThis[Symbol.for('athlyrax.safeStartEnforced')] = true")) failures.push('safe-start.mjs must establish the in-process safe-start proof');
+  } catch {
+    failures.push('safe-start.mjs could not be read while verifying guarded startup');
+  }
+  return failures;
 }
 
 const REJECTED_DEMO_USERNAMES = new Set(['headcoach', 'assistant', 'viewer']);
@@ -87,7 +109,7 @@ function getDefaultCredentialFailures(users) {
 
 const failures = [];
 if (!IS_PRODUCTION) failures.push('NODE_ENV must be production');
-if (!SAFE_START_ENFORCED) failures.push('Safe-start enforcement flag missing');
+failures.push(...verifyGuardedStartupContract());
 if (!AUTH_REQUIRED) failures.push('AUTH_REQUIRED must be true');
 if (!AUTH_SECRET || AUTH_SECRET.length < 32 || AUTH_SECRET === 'athlyrax-dev-secret-change-me') {
   failures.push('AUTH_SECRET must be strong and non-default');
@@ -111,8 +133,8 @@ const configuredAuthPath = String(process.env.AUTH_USERS_PATH || '').trim();
 if (configuredAuthPath && path.resolve(configuredAuthPath) !== canonical.authUsers) {
   failures.push(`AUTH_USERS_PATH must equal canonical path: ${canonical.authUsers}`);
 }
-if (!checkWritableDir(resolvedStorageRoot)) failures.push('Storage root is not writable');
-if (!resolvedBackupRoot || !checkWritableDir(resolvedBackupRoot)) failures.push('Backup root is not writable');
+if (!checkExistingWritableDir(resolvedStorageRoot)) failures.push('Storage root must already exist and be readable/writable');
+if (!resolvedBackupRoot || !checkExistingWritableDir(resolvedBackupRoot)) failures.push('Backup root must already exist and be readable/writable');
 if (resolvedBackupRoot && resolvedStorageRoot && resolvedBackupRoot === resolvedStorageRoot) {
   failures.push('Backup root must be separate from storage root');
 }
