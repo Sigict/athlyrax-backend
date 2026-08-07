@@ -21,6 +21,7 @@ const transforms = [
   'scripts/patch-operational-integrity.mjs',
   'scripts/patch-runtime-data-retention.mjs',
   'scripts/patch-revision-integrity.mjs',
+  'scripts/patch-auth-tenant-integrity.mjs',
 ];
 
 for (const relative of transforms) {
