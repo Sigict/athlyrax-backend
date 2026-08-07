@@ -11,10 +11,10 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf8');
 }
 
-function withGuard(root, run) {
+function withGuard(root, run, extraEnv = {}) {
   const installation = installDataSafetyGuards({
     fsModule: fs,
-    env: { ATHLYRAX_SAFETY_BACKUP_ROOT: path.join(root, 'safety') },
+    env: { ATHLYRAX_SAFETY_BACKUP_ROOT: path.join(root, 'safety'), ...extraEnv },
     logger: { info() {}, error() {} },
   });
   try { return run(); }
@@ -72,5 +72,37 @@ test('valid matching-revision database replacement increments revision and prese
   assert.equal(next.__meta.storageRevision, 5);
   const backupRoot = path.join(root, 'safety', 'pre-write');
   assert.equal(fs.existsSync(backupRoot), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('missing production database cannot be silently recreated from an ordinary write', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-data-safety-missing-');
+  const destination = path.join(root, 'tenant', 'db.json');
+  const source = path.join(root, 'tenant', 'db.json.tmp');
+  writeJson(source, { swimmers: [] });
+
+  withGuard(root, () => {
+    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED');
+  }, { NODE_ENV: 'production' });
+
+  assert.equal(fs.existsSync(destination), false);
+  assert.equal(fs.existsSync(source), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('explicit authenticated tenant provisioning may create a new production database', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-data-safety-provision-');
+  const destination = path.join(root, 'tenant', 'db.json');
+  const source = path.join(root, 'tenant', 'db.json.tmp');
+  writeJson(source, {
+    __meta: { provisionedBy: 'auth-register', provisioningToken: 'provision-token' },
+    swimmers: [],
+  });
+
+  withGuard(root, () => fs.renameSync(source, destination), { NODE_ENV: 'production' });
+
+  const created = JSON.parse(fs.readFileSync(destination, 'utf8'));
+  assert.equal(created.__meta.provisionedBy, 'auth-register');
+  assert.equal(created.__meta.storageRevision, 1);
   fs.rmSync(root, { recursive: true, force: true });
 });
