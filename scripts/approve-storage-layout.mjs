@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { sha256File, writeStorageReadyMarker } from './storage-safety-lib.mjs';
+import { resolveStorageConfiguration, sha256File, writeStorageReadyMarker } from './storage-safety-lib.mjs';
 import { canonicalStoragePaths } from './storage-path-contract.mjs';
 
 function parseArgs(argv) {
@@ -15,27 +15,14 @@ function parseArgs(argv) {
   return result;
 }
 function clean(value) { return String(value ?? '').trim(); }
-function normalizeTenantId(value) {
-  return clean(value).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-}
-function isCanonicalTenantId(value) {
-  const raw = clean(value);
-  return Boolean(raw) && raw === normalizeTenantId(raw) && /^[a-z0-9_-]+$/.test(raw);
-}
-function slugTenantPart(value, fallback = 'default') {
-  const normalized = clean(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  return normalized || fallback;
-}
-function readJson(filePath, label) {
-  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); }
-  catch { throw new Error(`${label} is not valid JSON: ${filePath}`); }
-}
+function normalizeTenantId(value) { return clean(value).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, ''); }
+function isCanonicalTenantId(value) { const raw = clean(value); return Boolean(raw) && raw === normalizeTenantId(raw) && /^[a-z0-9_-]+$/.test(raw); }
+function slugTenantPart(value, fallback = 'default') { const normalized = clean(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); return normalized || fallback; }
+function readJson(filePath, label) { try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { throw new Error(`${label} is not valid JSON: ${filePath}`); } }
 function assertDbObject(filePath, label, expectedTenantId = '') {
   if (!fs.existsSync(filePath)) throw new Error(`Missing ${filePath}`);
   const parsed = readJson(filePath, label);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).length === 0) {
-    throw new Error(`${label} must contain a non-empty JSON object: ${filePath}`);
-  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).length === 0) throw new Error(`${label} must contain a non-empty JSON object: ${filePath}`);
   if (expectedTenantId) {
     const declaredRaw = clean(parsed?.__meta?.tenantId);
     if (declaredRaw) {
@@ -45,21 +32,12 @@ function assertDbObject(filePath, label, expectedTenantId = '') {
   }
   return parsed;
 }
-function assertJsonArray(filePath, label) {
-  if (!fs.existsSync(filePath)) throw new Error(`Missing ${filePath}`);
-  const parsed = readJson(filePath, label);
-  if (!Array.isArray(parsed)) throw new Error(`${label} must contain a JSON array: ${filePath}`);
-  return parsed;
-}
+function assertJsonArray(filePath, label) { if (!fs.existsSync(filePath)) throw new Error(`Missing ${filePath}`); const parsed = readJson(filePath, label); if (!Array.isArray(parsed)) throw new Error(`${label} must contain a JSON array: ${filePath}`); return parsed; }
 function assertBillingCatalog(filePath) {
   if (!fs.existsSync(filePath)) throw new Error(`Missing ${filePath}`);
   const parsed = readJson(filePath, 'Billing catalog');
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.plans) || parsed.plans.length < 1) {
-    throw new Error(`Billing catalog must contain at least one plan: ${filePath}`);
-  }
-  if (parsed.plans.some((plan) => !plan || typeof plan !== 'object' || !clean(plan.key))) {
-    throw new Error(`Billing catalog contains an invalid plan row: ${filePath}`);
-  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.plans) || parsed.plans.length < 1) throw new Error(`Billing catalog must contain at least one plan: ${filePath}`);
+  if (parsed.plans.some((plan) => !plan || typeof plan !== 'object' || !clean(plan.key))) throw new Error(`Billing catalog contains an invalid plan row: ${filePath}`);
   return parsed;
 }
 function assertAuthStore(filePath, label) {
@@ -69,11 +47,7 @@ function assertAuthStore(filePath, label) {
   if (!users || users.length === 0) throw new Error(`${label} must contain at least one user: ${filePath}`);
   return users;
 }
-function canonicalJson(value) {
-  if (Array.isArray(value)) return value.map(canonicalJson);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
-  return value;
-}
+function canonicalJson(value) { if (Array.isArray(value)) return value.map(canonicalJson); if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])])); return value; }
 function resolveTenantFromUser(user) {
   const username = clean(user?.username).toLowerCase();
   const role = clean(user?.role).toLowerCase();
@@ -89,25 +63,27 @@ function resolveTenantFromUser(user) {
   if (swimClub && teamName) return `${slugTenantPart(swimClub, 'club')}__${slugTenantPart(teamName, 'team')}`;
   return username ? `user-${slugTenantPart(username, 'unknown-user')}` : '';
 }
-function verifiedFile(filePath, extra = {}) {
-  return { path: filePath, sha256: sha256File(filePath), bytes: fs.statSync(filePath).size, ...extra };
-}
+function verifiedFile(filePath, extra = {}) { return { path: filePath, sha256: sha256File(filePath), bytes: fs.statSync(filePath).size, ...extra }; }
 
 try {
   const args = parseArgs(process.argv.slice(2));
   if (args['--approve'] !== 'CREATE_READY_MARKER') throw new Error('Explicit approval is required: --approve CREATE_READY_MARKER');
+  if (clean(process.env.NODE_ENV).toLowerCase() !== 'production') throw new Error('Storage approval requires NODE_ENV=production.');
+
   const rawStorageRoot = clean(args['--storage-root']);
   if (!rawStorageRoot) throw new Error('A valid --storage-root is required.');
   const storageRoot = path.resolve(rawStorageRoot);
   if (storageRoot === path.parse(storageRoot).root) throw new Error('A filesystem root cannot be used as --storage-root.');
 
+  const configuration = resolveStorageConfiguration(process.env, process.cwd());
+  if (configuration.failures.length) throw new Error(configuration.failures.join('\n'));
+  if (configuration.storageRoot !== storageRoot) throw new Error(`--storage-root must equal configured ATHLYRAX_STORAGE_ROOT: ${configuration.storageRoot}`);
+
   const paths = canonicalStoragePaths({ sourceRoot: process.cwd(), storageRoot });
   assertDbObject(paths.globalDb, 'Global database');
   const primaryUsers = assertAuthStore(paths.authUsers, 'Authentication user store');
   const backupUsers = assertAuthStore(paths.authUsersBackup, 'Authentication user backup');
-  if (JSON.stringify(canonicalJson(primaryUsers)) !== JSON.stringify(canonicalJson(backupUsers))) {
-    throw new Error('Authentication user store and backup differ. Refusing storage approval.');
-  }
+  if (JSON.stringify(canonicalJson(primaryUsers)) !== JSON.stringify(canonicalJson(backupUsers))) throw new Error('Authentication user store and backup differ. Refusing storage approval.');
   assertJsonArray(paths.authInvites, 'Authentication invite store');
   assertJsonArray(paths.snapshotSubmissions, 'Snapshot submissions store');
   assertBillingCatalog(paths.billingCatalog);
@@ -118,14 +94,7 @@ try {
   for (const tenantId of authBoundTenants) if (!isCanonicalTenantId(tenantId)) throw new Error(`Noncanonical auth-bound tenant ID: ${tenantId}`);
   const requiredTenants = [...new Set([...requestedTenants, ...authBoundTenants])].sort();
 
-  const verified = [
-    verifiedFile(paths.globalDb),
-    verifiedFile(paths.authUsers),
-    verifiedFile(paths.authUsersBackup),
-    verifiedFile(paths.authInvites),
-    verifiedFile(paths.snapshotSubmissions),
-    verifiedFile(paths.billingCatalog),
-  ];
+  const verified = [verifiedFile(paths.globalDb), verifiedFile(paths.authUsers), verifiedFile(paths.authUsersBackup), verifiedFile(paths.authInvites), verifiedFile(paths.snapshotSubmissions), verifiedFile(paths.billingCatalog)];
   for (const tenantId of requiredTenants) {
     const dbPath = paths.tenantDb(tenantId);
     assertDbObject(dbPath, `Tenant database ${tenantId}`, tenantId);
