@@ -8,7 +8,10 @@ import {
 } from './data-safety-preload.mjs';
 import { installDbRevisionPutResponse } from './db-revision-put-response.mjs';
 import { installSignupLegalAcceptanceGuard } from './signup-legal-acceptance-preload.mjs';
-import { runStorageSafetyCheck } from './storage-safety-lib.mjs';
+import {
+  resolveStorageConfiguration,
+  runStorageSafetyCheck,
+} from './storage-safety-lib.mjs';
 import {
   assertCanonicalPathContract,
   restoreBundledDemoTenantIfNeeded,
@@ -19,19 +22,24 @@ const sourceRoot = path.resolve(path.dirname(__filename), '..');
 const repoRoot = sourceRoot;
 const entryPath = path.join(sourceRoot, 'index.js');
 const indexSource = fs.readFileSync(entryPath, 'utf8');
-const configuredStorageRoot = path.resolve(
-  String(process.env.ATHLYRAX_STORAGE_ROOT || '').trim() || path.join(sourceRoot, 'storage'),
-);
-const configuredBackupRoot = path.resolve(
-  String(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim() || path.join(sourceRoot, '.athlyrax-safety-backups'),
-);
 
-assertCanonicalPathContract({ sourceRoot, storageRoot: configuredStorageRoot, indexSource });
+const initialStorageConfiguration = resolveStorageConfiguration(process.env, repoRoot);
+if (initialStorageConfiguration.failures.length > 0) {
+  const error = new Error(initialStorageConfiguration.failures.join('\n'));
+  error.code = 'ATHLYRAX_STORAGE_CONFIGURATION_INVALID';
+  throw error;
+}
+
+assertCanonicalPathContract({
+  sourceRoot,
+  storageRoot: initialStorageConfiguration.storageRoot,
+  indexSource,
+});
 
 restoreBundledDemoTenantIfNeeded({
   sourceRoot,
-  storageRoot: configuredStorageRoot,
-  backupRoot: configuredBackupRoot,
+  storageRoot: initialStorageConfiguration.storageRoot,
+  backupRoot: initialStorageConfiguration.backupRoot,
 });
 
 runStorageSafetyCheck({
