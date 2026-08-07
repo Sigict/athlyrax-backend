@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 export const STORAGE_READY_MARKER = '.athlyrax-storage-ready.json';
-export const STORAGE_LAYOUT_VERSION = 2;
+export const STORAGE_LAYOUT_VERSION = 1;
 
 function clean(value) {
   return String(value ?? '').trim();
