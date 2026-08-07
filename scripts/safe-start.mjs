@@ -7,7 +7,6 @@ import {
   installExpressDbRevisionResponseGuard,
 } from './data-safety-preload.mjs';
 import { installDbRevisionPutResponse } from './db-revision-put-response.mjs';
-import { installSignupLegalAcceptanceGuard } from './signup-legal-acceptance-preload.mjs';
 import {
   applyCanonicalAuthPaths,
   resolveStorageConfiguration,
@@ -87,6 +86,5 @@ globalThis[Symbol.for('athlyrax.safeStartEnforced')] = true;
 installDataSafetyGuards();
 installExpressDbRevisionResponseGuard(express);
 installDbRevisionPutResponse(express);
-installSignupLegalAcceptanceGuard(express);
 
 await import(pathToFileURL(entryPath).href);
