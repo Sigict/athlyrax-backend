@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "node scripts/patch-index-signup-legal.mjs && node scripts/patch-logout-csrf.mjs && node scripts/patch-canonical-storage-contract.mjs",
+    "postinstall": "node scripts/patch-index-signup-legal.mjs && node scripts/patch-logout-csrf.mjs && node scripts/patch-canonical-storage-contract.mjs && node scripts/patch-persistence-integrity.mjs",
     "start": "npm run test:storage-all && node scripts/safe-start.mjs",
     "check:storage-safety": "node scripts/check-storage-safety.mjs",
     "audit:storage-paths": "node scripts/audit-storage-paths.mjs",
