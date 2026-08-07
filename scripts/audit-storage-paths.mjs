@@ -53,11 +53,15 @@ for (const required of [
   `action: 'tenant_database_missing'`,
   `// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD`,
   `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
+  `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
   `resolveStorageConfiguration(process.env, __dirname)`,
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
   `runStorageSafetyCheck({`,
   `finalizeLegacyStorageMigration({`,
+  `registrationTenantStorage = resolveStoragePathsForTenantKey(tenantId)`,
+  `invited_tenant_database_missing`,
+  `provisioningToken: registrationTenantProvisioningToken`,
 ]) {
   if (!indexSource.includes(required)) failures.push(`index.js: missing canonical token: ${required}`);
 }
@@ -119,6 +123,19 @@ for (const required of [
   if (!approvalSource.includes(required)) failures.push(`scripts/approve-storage-layout.mjs: missing approval validation token: ${required}`);
 }
 
+const patchSource = fs.readFileSync(path.join(root, 'scripts', 'patch-canonical-storage-contract.mjs'), 'utf8');
+for (const required of [
+  `const registrationMarker = \`// ATHLYRAX_NEW_TENANT_DB_PROVISION\`;`,
+  `registrationTenantStorage = resolveStoragePathsForTenantKey(tenantId)`,
+  `invited_tenant_database_missing`,
+  `registrationTenantDbCreated = true`,
+  `try { persistAuthUsers(); } catch {}`,
+  `try { persistAuthInvites(); } catch {}`,
+  `provisioningToken: registrationTenantProvisioningToken`,
+]) {
+  if (!patchSource.includes(required)) failures.push(`scripts/patch-canonical-storage-contract.mjs: missing registration safety token: ${required}`);
+}
+
 const legalSource = fs.readFileSync(path.join(root, 'scripts', 'signup-legal-acceptance-preload.mjs'), 'utf8');
 for (const required of [
   `path.join(resolveStorageRoot(), 'legal-acceptances.jsonl')`,
@@ -134,7 +151,7 @@ const storageAll = String(packageJson?.scripts?.['test:storage-all'] || '');
 if (!postinstall.includes('patch-canonical-storage-contract.mjs')) failures.push('package.json: canonical storage patch is not wired into postinstall.');
 if (postinstall.includes('patch-tenant-storage-path.mjs')) failures.push('package.json: obsolete tenant-storage patch is still wired into postinstall.');
 if (Object.prototype.hasOwnProperty.call(packageJson?.scripts || {}, 'start:unsafe')) failures.push('package.json: start:unsafe bypass must not exist.');
-if (!start.includes('audit:storage-paths') || !start.includes('safe-start.mjs')) failures.push('package.json: production start must run storage audit and safe-start.');
+if (!start.includes('test:storage-all') || !start.includes('safe-start.mjs')) failures.push('package.json: production start must run the full storage test suite and safe-start.');
 for (const requiredScript of ['test:storage-safety', 'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths']) {
   if (!storageAll.includes(requiredScript)) failures.push(`package.json: test:storage-all is missing ${requiredScript}.`);
 }
