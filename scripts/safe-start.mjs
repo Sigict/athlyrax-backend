@@ -9,8 +9,9 @@ import {
 import { installDbRevisionPutResponse } from './db-revision-put-response.mjs';
 import { installSignupLegalAcceptanceGuard } from './signup-legal-acceptance-preload.mjs';
 import {
+  applyCanonicalAuthPaths,
   resolveStorageConfiguration,
-  runStorageSafetyCheck,
+  validateRequiredStorageFiles,
 } from './storage-safety-lib.mjs';
 import { assertCanonicalPathContract } from './storage-path-contract.mjs';
 
@@ -24,27 +25,47 @@ if (String(process.env.NODE_ENV || '').trim().toLowerCase() !== 'production') {
   throw new Error('Safe production start requires NODE_ENV=production. Refusing development/default mode.');
 }
 
-const initialStorageConfiguration = resolveStorageConfiguration(process.env, repoRoot);
-if (initialStorageConfiguration.failures.length > 0) {
-  const error = new Error(initialStorageConfiguration.failures.join('\n'));
+const configuration = resolveStorageConfiguration(process.env, repoRoot);
+if (configuration.failures.length > 0) {
+  const error = new Error(configuration.failures.join('\n'));
   error.code = 'ATHLYRAX_STORAGE_CONFIGURATION_INVALID';
   throw error;
 }
 
 assertCanonicalPathContract({
   sourceRoot,
-  storageRoot: initialStorageConfiguration.storageRoot,
+  storageRoot: configuration.storageRoot,
   indexSource,
 });
 
-// Production startup is validation-only. It must never migrate, restore, seed,
-// repair, or otherwise rewrite customer data. Any one-time canonical migration
-// must be run explicitly through scripts/migrate-storage-once.mjs.
-runStorageSafetyCheck({
-  repoRoot,
-  requireFiles: true,
-  createDirectories: false,
-});
+// Normal production startup is strictly read-only with respect to persistent
+// storage. It does not mkdir, probe-write, seed, restore, migrate or repair.
+for (const [directory, label] of [
+  [configuration.storageRoot, 'Primary storage root'],
+  [configuration.backupRoot, 'Safety backup root'],
+]) {
+  if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
+    const error = new Error(`${label} is missing or is not a directory: ${directory}`);
+    error.code = 'ATHLYRAX_STORAGE_ROOT_MISSING';
+    throw error;
+  }
+  fs.accessSync(directory, fs.constants.R_OK | fs.constants.W_OK);
+}
+
+process.env.ATHLYRAX_STORAGE_ROOT = configuration.storageRoot;
+process.env.ATHLYRAX_SAFETY_BACKUP_ROOT = configuration.backupRoot;
+applyCanonicalAuthPaths(configuration, process.env);
+
+const storageFailures = validateRequiredStorageFiles(configuration, process.env, fs);
+if (storageFailures.length > 0) {
+  const error = new Error(storageFailures.join('\n'));
+  error.code = 'ATHLYRAX_STORAGE_NOT_READY';
+  throw error;
+}
+
+console.info(`[storage-safety] Primary storage root: ${configuration.storageRoot}`);
+console.info(`[storage-safety] Safety backup root: ${configuration.backupRoot}`);
+console.info('[storage-safety] ATHLYRAX_STORAGE_SAFETY_OK');
 
 process.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';
 
