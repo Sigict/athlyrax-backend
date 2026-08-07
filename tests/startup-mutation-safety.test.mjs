@@ -10,6 +10,8 @@ test('normal safe start is strictly read-only before backend import', () => {
   const source = read('scripts/safe-start.mjs');
   assert.match(source, /validateRequiredStorageFiles\(/);
   assert.match(source, /fs\.accessSync\(directory, fs\.constants\.R_OK \| fs\.constants\.W_OK\)/);
+  assert.match(source, /assertNoSymlinkStorageLayout\(/);
+  assert.match(source, /assertNoActiveMigrationTransaction\(/);
   assert.match(source, /applyCanonicalAuthPaths\(/);
   assert.match(source, /globalThis\[Symbol\.for\('athlyrax\.safeStartEnforced'\)\] = true/);
   assert.match(source, /await import\(pathToFileURL\(entryPath\)\.href\)/);
@@ -33,6 +35,7 @@ test('canonical transformation makes imported production bootstrap non-mutating'
   assert.match(persistence, /ATHLYRAX_PRODUCTION_STORAGE_LAYOUT_READ_ONLY/);
   assert.match(persistence, /if \(IS_PRODUCTION\) return/);
   assert.match(persistence, /Snapshot submissions store is missing\. Refusing startup-time creation/);
+  assert.match(persistence, /ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED/);
   assert.match(persistence, /Refusing startup-time recovery, normalization or default bootstrap/);
 });
 
@@ -49,20 +52,23 @@ test('storage validator covers every store loaded during production bootstrap an
   ]) assert.ok(source.includes(token), `startup storage validation is missing ${token}`);
 });
 
-test('production wrapper runs migration only with the exact explicit approval value', () => {
+test('production wrapper gives interrupted migration journal precedence over finalized marker', () => {
   const source = read('scripts/production-start.mjs');
   assert.match(source, /ATHLYRAX_STORAGE_MIGRATION_APPROVAL/);
   assert.match(source, /MIGRATE_CANONICAL_STORAGE_ONCE/);
   assert.match(source, /migrationAlreadyCompleted/);
+  assert.match(source, /readActiveMigrationTransaction/);
+  assert.match(source, /interrupted \|\| !completed/);
   assert.match(source, /migrate-storage-once\.mjs/);
   assert.match(source, /safe-start\.mjs/);
   assert.match(source, /invalid value/);
 });
 
-test('storage migration is explicit, transactional, ordered and sanitizes demo before activation', () => {
+test('storage migration is explicit, crash-recoverable, transactional, ordered and sanitizes demo before activation', () => {
   const source = read('scripts/migrate-storage-once.mjs');
   for (const token of [
-    'MIGRATE_CANONICAL_STORAGE_ONCE', 'beginTransaction(', 'rollbackTransaction(',
+    'MIGRATE_CANONICAL_STORAGE_ONCE', 'recoverInterruptedTransaction(', 'beginTransaction(', 'rollbackTransaction(',
+    'activeMigrationTransactionPath(', 'transaction-manifest.json', 'assertNoSymlinkStorageLayout(',
     'migrateLegacyStorageIfNeeded({', 'restoreBundledDemoTenantIfNeeded({',
     'sanitizeDemoTenantDatabase({', 'writeStorageReadyMarker(', 'runStorageSafetyCheck({',
     'finalizeLegacyStorageMigration({', 'Migration failed; original storage was restored',
@@ -78,6 +84,22 @@ test('storage migration is explicit, transactional, ordered and sanitizes demo b
   ];
   assert.ok(order.every((value) => value >= 0));
   assert.ok(order.every((value, index) => index === 0 || value > order[index - 1]));
+});
+
+test('storage approval rejects ambiguous path state before marker creation', () => {
+  const source = read('scripts/approve-storage-layout.mjs');
+  assert.match(source, /assertNoSymlinkStorageLayout\(/);
+  assert.match(source, /assertNoActiveMigrationTransaction\(/);
+  assert.match(source, /contains duplicate username/);
+  assert.match(source, /contains duplicate plan keys/);
+});
+
+test('production storage check is read-only and uses the same path safety gates', () => {
+  const source = read('scripts/check-storage-safety.mjs');
+  assert.match(source, /if \(!production\)/);
+  assert.match(source, /assertNoSymlinkStorageLayout\(/);
+  assert.match(source, /assertNoActiveMigrationTransaction\(/);
+  assert.match(source, /validateRequiredStorageFiles\(/);
 });
 
 test('demo recovery rejects metadata-only canonical demo and requires real demo records', () => {
