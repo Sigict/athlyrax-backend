@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "node scripts/patch-index-signup-legal.mjs",
+    "postinstall": "node scripts/patch-index-signup-legal.mjs && node scripts/patch-logout-csrf.mjs",
     "start": "npm run test:signup-legal-acceptance && node scripts/safe-start.mjs",
     "start:unsafe": "node index.js",
     "check:storage-safety": "node scripts/check-storage-safety.mjs",
