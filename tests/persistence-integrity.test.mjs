@@ -13,9 +13,11 @@ test('installed backend contains all persistence fail-closed guards', () => {
   const source = read('index.js');
   for (const token of [
     '// ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED',
+    '// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION',
     '// ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED',
     '// ATHLYRAX_PRODUCTION_PASSWORD_RESET_NO_CONSOLE',
     '// ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',
+    '// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES',
     'Snapshot submissions store is unreadable or invalid. Refusing to replace it with an empty file.',
     'Snapshot submissions in-memory state is invalid. Refusing destructive persistence.',
     'loadLatestBillingCatalogBackupStrict(',
@@ -27,9 +29,10 @@ test('installed backend contains all persistence fail-closed guards', () => {
   }
 });
 
-test('installed backend does not retain destructive snapshot fallback', () => {
+test('installed backend does not retain destructive snapshot fallback or global history truncation', () => {
   const source = read('index.js');
   assert.ok(!source.includes('writeAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, Array.isArray(snapshotSubmissions) ? snapshotSubmissions : [])'));
+  assert.ok(!source.includes('snapshotSubmissions.length = 5000;'));
 });
 
 test('data safety layer blocks missing production db recreation and corrupt replacement', () => {
@@ -42,7 +45,9 @@ test('data safety layer blocks missing production db recreation and corrupt repl
   ]) assert.ok(source.includes(token), `missing data safety guard: ${token}`);
 });
 
-test('persistence patch is wired into postinstall', () => {
+test('persistence and durable-write patches are wired into postinstall', () => {
   const pkg = JSON.parse(read('package.json'));
-  assert.match(String(pkg?.scripts?.postinstall || ''), /patch-persistence-integrity\.mjs/);
+  const postinstall = String(pkg?.scripts?.postinstall || '');
+  assert.match(postinstall, /patch-persistence-integrity\.mjs/);
+  assert.match(postinstall, /patch-durable-storage-writes\.mjs/);
 });
