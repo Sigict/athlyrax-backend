@@ -24,17 +24,11 @@ function resolveConfiguredPath(raw, fallback) { return path.resolve(clean(raw) |
 function envFalse(value) { return clean(value).toLowerCase() === 'false'; }
 function envTrue(value) { return clean(value).toLowerCase() === 'true'; }
 function slugTenantPart(value, fallback = 'default') {
-  const normalized = clean(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  const normalized = clean(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return normalized || fallback;
 }
 function normalizeTenantId(value) {
-  return clean(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return clean(value).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 function isCanonicalTenantId(value) {
   const raw = clean(value);
@@ -51,6 +45,9 @@ export function resolveStorageConfiguration(env = process.env, repoRoot = proces
   const authUsersPath = path.join(storageRoot, 'auth', 'auth-users.json');
   const authUsersBackupPath = path.join(storageRoot, 'auth', 'auth-users.backup.json');
   const legalAcceptancePath = path.join(storageRoot, 'legal-acceptances.jsonl');
+  const authInvitesPath = path.join(storageRoot, 'auth-invites.json');
+  const snapshotSubmissionsPath = path.join(storageRoot, 'snapshot-submissions.json');
+  const billingCatalogPath = path.join(storageRoot, 'billing-catalog.json');
   const failures = [];
   const warnings = [];
 
@@ -75,17 +72,14 @@ export function resolveStorageConfiguration(env = process.env, repoRoot = proces
 
     const stripeSecret = clean(env.STRIPE_SECRET_KEY);
     const stripeWebhookSecret = clean(env.STRIPE_WEBHOOK_SECRET);
-    if (stripeSecret && !stripeWebhookSecret) {
-      failures.push('STRIPE_WEBHOOK_SECRET is required in production whenever STRIPE_SECRET_KEY is configured.');
-    }
+    if (stripeSecret && !stripeWebhookSecret) failures.push('STRIPE_WEBHOOK_SECRET is required in production whenever STRIPE_SECRET_KEY is configured.');
   }
 
-  const canonicalOverrides = [
+  for (const [name, canonical] of [
     ['AUTH_USERS_PATH', authUsersPath],
     ['AUTH_USERS_BACKUP_PATH', authUsersBackupPath],
     ['AUTH_LEGAL_ACCEPTANCE_PATH', legalAcceptancePath],
-  ];
-  for (const [name, canonical] of canonicalOverrides) {
+  ]) {
     const configured = clean(env[name]);
     if (configured && path.resolve(configured) !== canonical) failures.push(`${name} must equal the canonical path: ${canonical}`);
   }
@@ -104,6 +98,9 @@ export function resolveStorageConfiguration(env = process.env, repoRoot = proces
     authUsersPath,
     authUsersBackupPath,
     legalAcceptancePath,
+    authInvitesPath,
+    snapshotSubmissionsPath,
+    billingCatalogPath,
     readyMarkerPath: path.join(storageRoot, STORAGE_READY_MARKER),
     failures,
     warnings,
@@ -148,16 +145,13 @@ function readReadyMarker(markerPath, fsModule = fs) {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   } catch { return null; }
 }
-
 function readJsonForValidation(filePath, fsModule = fs) {
   try { return { ok: true, value: JSON.parse(fsModule.readFileSync(filePath, 'utf8')) }; }
   catch (error) { return { ok: false, error }; }
 }
-
 function authUsersArrayFromParsed(value) {
   return Array.isArray(value) ? value : (value && Array.isArray(value.users) ? value.users : null);
 }
-
 function validateDatabaseObject(filePath, label, fsModule = fs, requireNonEmpty = false) {
   if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
   const parsed = readJsonForValidation(filePath, fsModule);
@@ -166,19 +160,37 @@ function validateDatabaseObject(filePath, label, fsModule = fs, requireNonEmpty 
   if (requireNonEmpty && Object.keys(parsed.value).length === 0) return [`${label} must not be empty in production: ${filePath}`];
   return [];
 }
-
-function validateTenantDatabaseIdentity(filePath, expectedTenantId, label, fsModule = fs) {
+function validateJsonArray(filePath, label, fsModule = fs) {
+  if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
   const parsed = readJsonForValidation(filePath, fsModule);
-  if (!parsed.ok || !parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) return [];
-  const declaredTenantId = normalizeTenantId(parsed.value?.__meta?.tenantId);
-  if (!declaredTenantId) return [];
-  const expected = normalizeTenantId(expectedTenantId);
-  if (declaredTenantId !== expected) {
-    return [`${label} declares tenant ${declaredTenantId} but is stored at tenant ${expected}. Refusing cross-tenant data routing: ${filePath}`];
+  if (!parsed.ok) return [`${label} is not valid JSON: ${filePath}`];
+  if (!Array.isArray(parsed.value)) return [`${label} must contain a JSON array: ${filePath}`];
+  return [];
+}
+function validateBillingCatalog(filePath, fsModule = fs) {
+  if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
+  const parsed = readJsonForValidation(filePath, fsModule);
+  if (!parsed.ok) return [`Billing catalog is not valid JSON: ${filePath}`];
+  const value = parsed.value;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.plans) || value.plans.length < 1) {
+    return [`Billing catalog must contain at least one plan: ${filePath}`];
+  }
+  if (value.plans.some((plan) => !plan || typeof plan !== 'object' || !clean(plan.key))) {
+    return [`Billing catalog contains an invalid plan row: ${filePath}`];
   }
   return [];
 }
-
+function validateTenantDatabaseIdentity(filePath, expectedTenantId, label, fsModule = fs) {
+  const parsed = readJsonForValidation(filePath, fsModule);
+  if (!parsed.ok || !parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) return [];
+  const declaredRaw = clean(parsed.value?.__meta?.tenantId);
+  if (!declaredRaw) return [];
+  if (!isCanonicalTenantId(declaredRaw)) return [`${label} declares a noncanonical tenant ID: ${declaredRaw}. Refusing ambiguous routing: ${filePath}`];
+  const expected = clean(expectedTenantId);
+  if (!isCanonicalTenantId(expected)) return [`${label} expected tenant ID is noncanonical: ${expected}`];
+  if (declaredRaw !== expected) return [`${label} declares tenant ${declaredRaw} but is stored at tenant ${expected}. Refusing cross-tenant data routing: ${filePath}`];
+  return [];
+}
 function validateAuthStore(filePath, label = 'Authentication user store', fsModule = fs, requireNonEmpty = false) {
   if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
   const parsed = readJsonForValidation(filePath, fsModule);
@@ -188,15 +200,11 @@ function validateAuthStore(filePath, label = 'Authentication user store', fsModu
   if (requireNonEmpty && users.length === 0) return [`${label} must contain at least one user in production: ${filePath}`];
   return [];
 }
-
 function canonicalJson(value) {
   if (Array.isArray(value)) return value.map(canonicalJson);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
-  }
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
   return value;
 }
-
 function validateAuthPrimaryBackupParity(configuration, fsModule = fs) {
   const primaryParsed = readJsonForValidation(configuration.authUsersPath, fsModule);
   const backupParsed = readJsonForValidation(configuration.authUsersBackupPath, fsModule);
@@ -204,12 +212,11 @@ function validateAuthPrimaryBackupParity(configuration, fsModule = fs) {
   const primaryUsers = authUsersArrayFromParsed(primaryParsed.value);
   const backupUsers = authUsersArrayFromParsed(backupParsed.value);
   if (!primaryUsers || !backupUsers) return [];
-  const primary = JSON.stringify(canonicalJson(primaryUsers));
-  const backup = JSON.stringify(canonicalJson(backupUsers));
-  if (primary !== backup) return ['Authentication primary and backup stores differ. Refusing automatic overwrite or fallback.'];
+  if (JSON.stringify(canonicalJson(primaryUsers)) !== JSON.stringify(canonicalJson(backupUsers))) {
+    return ['Authentication primary and backup stores differ. Refusing automatic overwrite or fallback.'];
+  }
   return [];
 }
-
 function resolveTenantIdFromStoredUser(user, env = process.env) {
   const role = clean(user?.role).toLowerCase();
   const username = clean(user?.username).toLowerCase();
@@ -225,7 +232,6 @@ function resolveTenantIdFromStoredUser(user, env = process.env) {
   if (swimClub && teamName) return `${slugTenantPart(swimClub, 'club')}__${slugTenantPart(teamName, 'team')}`;
   return username ? `user-${slugTenantPart(username, 'unknown-user')}` : '';
 }
-
 function validateAuthBoundTenantDatabases(configuration, env = process.env, fsModule = fs) {
   const parsed = readJsonForValidation(configuration.authUsersPath, fsModule);
   if (!parsed.ok) return [];
@@ -238,6 +244,10 @@ function validateAuthBoundTenantDatabases(configuration, env = process.env, fsMo
     if (tenantId) tenantIds.add(tenantId);
   }
   for (const tenantId of tenantIds) {
+    if (!isCanonicalTenantId(tenantId)) {
+      failures.push(`Auth-bound tenant ID is noncanonical: ${tenantId}`);
+      continue;
+    }
     const tenantPath = path.join(configuration.tenantRootPath, tenantId, 'db.json');
     const label = `Auth-bound tenant database ${tenantId}`;
     failures.push(...validateDatabaseObject(tenantPath, label, fsModule, configuration.production));
@@ -253,6 +263,9 @@ export function validateRequiredStorageFiles(configuration, env = process.env, f
   failures.push(...validateAuthStore(configuration.authUsersPath, 'Authentication user store', fsModule, strict));
   failures.push(...validateAuthStore(configuration.authUsersBackupPath, 'Authentication user backup', fsModule, strict));
   if (strict) {
+    failures.push(...validateJsonArray(configuration.authInvitesPath, 'Authentication invite store', fsModule));
+    failures.push(...validateJsonArray(configuration.snapshotSubmissionsPath, 'Snapshot submissions store', fsModule));
+    failures.push(...validateBillingCatalog(configuration.billingCatalogPath, fsModule));
     failures.push(...validateAuthPrimaryBackupParity(configuration, fsModule));
     failures.push(...validateAuthBoundTenantDatabases(configuration, env, fsModule));
   }
@@ -310,13 +323,7 @@ export function writeStorageReadyMarker(storageRoot, details = {}, fsModule = fs
   fsModule.mkdirSync(resolvedStorageRoot, { recursive: true });
   const markerPath = path.join(resolvedStorageRoot, STORAGE_READY_MARKER);
   const tempPath = path.join(resolvedStorageRoot, `${STORAGE_READY_MARKER}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`);
-  const payload = {
-    ...details,
-    version: STORAGE_LAYOUT_VERSION,
-    approved: true,
-    storageRoot: resolvedStorageRoot,
-    createdAt: new Date().toISOString(),
-  };
+  const payload = { ...details, version: STORAGE_LAYOUT_VERSION, approved: true, storageRoot: resolvedStorageRoot, createdAt: new Date().toISOString() };
   let fileHandle = null;
   try {
     fileHandle = fsModule.openSync(tempPath, 'wx', 0o600);
@@ -325,17 +332,11 @@ export function writeStorageReadyMarker(storageRoot, details = {}, fsModule = fs
   } finally {
     if (fileHandle !== null) fsModule.closeSync(fileHandle);
   }
-  try {
-    fsModule.renameSync(tempPath, markerPath);
-  } catch (error) {
-    try { fsModule.unlinkSync(tempPath); } catch {}
-    throw error;
-  }
+  try { fsModule.renameSync(tempPath, markerPath); }
+  catch (error) { try { fsModule.unlinkSync(tempPath); } catch {} throw error; }
   try {
     const directoryHandle = fsModule.openSync(resolvedStorageRoot, 'r');
     try { fsModule.fsyncSync(directoryHandle); } finally { fsModule.closeSync(directoryHandle); }
-  } catch {
-    // Some hosted filesystems do not permit directory fsync.
-  }
+  } catch {}
   return markerPath;
 }
