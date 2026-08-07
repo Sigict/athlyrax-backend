@@ -31,11 +31,17 @@ export function canonicalStoragePaths({ sourceRoot, storageRoot } = {}) {
   });
 }
 
-function readJsonObject(filePath) {
+function readJson(filePath) {
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch { return null; }
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function readJsonObject(filePath) {
+  const parsed = readJson(filePath);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
 }
 
 function hasMeaningfulDemoData(payload) {
@@ -47,20 +53,110 @@ function hasMeaningfulDemoData(payload) {
 function validMeaningfulDatabase(filePath) {
   if (!fs.existsSync(filePath)) return null;
   const stat = fs.statSync(filePath);
-  if (stat.size < 1024) return null;
+  if (stat.size < 2) return null;
   const payload = readJsonObject(filePath);
-  if (!payload || !hasMeaningfulDemoData(payload)) return null;
+  if (!payload || Object.keys(payload).length === 0) return null;
   return { filePath, stat, payload };
 }
 
 function classifyDatabase(filePath) {
   if (!fs.existsSync(filePath)) return { state: 'missing' };
   const stat = fs.statSync(filePath);
-  if (stat.size <= 16) return { state: 'empty', stat };
+  if (stat.size <= 16) {
+    const tinyPayload = readJsonObject(filePath);
+    if (tinyPayload && Object.keys(tinyPayload).length === 0) return { state: 'empty', stat, payload: tinyPayload };
+  }
   const payload = readJsonObject(filePath);
   if (!payload) return { state: 'invalid', stat };
-  if (Object.keys(payload).length === 0 || !hasMeaningfulDemoData(payload)) return { state: 'empty', stat, payload };
+  if (Object.keys(payload).length === 0) return { state: 'empty', stat, payload };
   return { state: 'meaningful', stat, payload };
+}
+
+function validAuthStore(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  const stat = fs.statSync(filePath);
+  if (stat.size < 2) return null;
+  const payload = readJson(filePath);
+  const users = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.users) ? payload.users : null);
+  if (!users) return null;
+  return { filePath, stat, payload, users };
+}
+
+function copyExact(source, destination) {
+  const sourceBytes = fs.readFileSync(source);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination);
+  const destinationBytes = fs.readFileSync(destination);
+  if (!sourceBytes.equals(destinationBytes)) {
+    throw new Error(`Verified copy failed: ${source} -> ${destination}`);
+  }
+  return destinationBytes.length;
+}
+
+function backupLegacySource(source, backupRoot, relativeLabel) {
+  if (!backupRoot || !fs.existsSync(source)) return '';
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const destination = path.join(path.resolve(backupRoot), 'legacy-storage-migration', stamp, relativeLabel);
+  copyExact(source, destination);
+  return destination;
+}
+
+export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRoot, logger = console } = {}) {
+  const paths = canonicalStoragePaths({ sourceRoot, storageRoot });
+  const migrated = [];
+
+  const legacyAuthUsers = path.join(paths.storageRoot, 'auth-users.json');
+  const legacyAuthBackup = path.join(paths.storageRoot, 'auth-users.backup.json');
+
+  if (fs.existsSync(paths.authUsers) && !validAuthStore(paths.authUsers)) {
+    throw new Error(`Canonical auth users store is unreadable or invalid: ${paths.authUsers}`);
+  }
+  if (!fs.existsSync(paths.authUsers) && fs.existsSync(legacyAuthUsers)) {
+    if (!validAuthStore(legacyAuthUsers)) throw new Error(`Legacy auth users store is unreadable or invalid: ${legacyAuthUsers}`);
+    backupLegacySource(legacyAuthUsers, backupRoot, path.join('auth', 'auth-users.json'));
+    const bytes = copyExact(legacyAuthUsers, paths.authUsers);
+    migrated.push({ kind: 'auth-users', from: legacyAuthUsers, to: paths.authUsers, bytes });
+  }
+  if (!fs.existsSync(paths.authUsersBackup) && fs.existsSync(legacyAuthBackup)) {
+    if (!validAuthStore(legacyAuthBackup)) throw new Error(`Legacy auth users backup is unreadable or invalid: ${legacyAuthBackup}`);
+    backupLegacySource(legacyAuthBackup, backupRoot, path.join('auth', 'auth-users.backup.json'));
+    const bytes = copyExact(legacyAuthBackup, paths.authUsersBackup);
+    migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes });
+  }
+
+  const legacyTenantRoot = path.join(paths.storageRoot, 'tenants', 'clubs');
+  if (fs.existsSync(legacyTenantRoot)) {
+    for (const entry of fs.readdirSync(legacyTenantRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const tenantId = String(entry.name || '').trim();
+      if (!/^[a-zA-Z0-9._-]+$/.test(tenantId)) {
+        throw new Error(`Unsafe legacy tenant directory name: ${tenantId}`);
+      }
+      const legacyDb = path.join(legacyTenantRoot, tenantId, 'db.json');
+      if (!fs.existsSync(legacyDb)) continue;
+      const legacyCandidate = validMeaningfulDatabase(legacyDb);
+      if (!legacyCandidate) throw new Error(`Legacy tenant database is unreadable, invalid or empty: ${legacyDb}`);
+
+      const canonicalDb = paths.tenantDb(tenantId);
+      const canonicalState = classifyDatabase(canonicalDb);
+      if (canonicalState.state === 'invalid') {
+        throw new Error(`Canonical tenant database is unreadable or invalid JSON: ${canonicalDb}`);
+      }
+      if (canonicalState.state === 'meaningful') continue;
+
+      if (fs.existsSync(canonicalDb)) {
+        backupLegacySource(canonicalDb, backupRoot, path.join('canonical-before-migration', tenantId, 'db.json'));
+      }
+      backupLegacySource(legacyDb, backupRoot, path.join('legacy-tenants', tenantId, 'db.json'));
+      const bytes = copyExact(legacyDb, canonicalDb);
+      migrated.push({ kind: 'tenant-db', tenantId, from: legacyDb, to: canonicalDb, bytes });
+    }
+  }
+
+  for (const item of migrated) {
+    logger.info(`[storage-path] Migrated ${item.kind}${item.tenantId ? ` ${item.tenantId}` : ''} to canonical storage (${item.bytes} bytes).`);
+  }
+  return { migrated, count: migrated.length };
 }
 
 export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, backupRoot, logger = console } = {}) {
@@ -68,14 +164,15 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
   const liveDemo = paths.tenantDb('demo-company');
   const liveState = classifyDatabase(liveDemo);
   if (liveState.state === 'meaningful') return { restored: false, reason: 'live-demo-present', liveDemo };
-  if (liveState.state === 'invalid') {
-    throw new Error(`Canonical demo-company database is unreadable or invalid JSON: ${liveDemo}`);
-  }
+  if (liveState.state === 'invalid') throw new Error(`Canonical demo-company database is unreadable or invalid JSON: ${liveDemo}`);
 
   const legacyDemo = path.join(paths.storageRoot, 'tenants', 'clubs', 'demo-company', 'db.json');
   const bundledDemo = path.join(paths.repositoryStorage, 'tenants', 'demo-company', 'db.json');
   const legacyCandidate = validMeaningfulDatabase(legacyDemo);
   const bundledCandidate = validMeaningfulDatabase(bundledDemo);
+  if (bundledCandidate && !hasMeaningfulDemoData(bundledCandidate.payload)) {
+    throw new Error(`Bundled demo-company database contains no meaningful demo records: ${bundledDemo}`);
+  }
   const sourceCandidate = legacyCandidate || bundledCandidate;
   if (!sourceCandidate) throw new Error('No valid demo-company recovery database is available.');
 
@@ -84,24 +181,18 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
   if (backupDirectory) fs.mkdirSync(backupDirectory, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-  if (fs.existsSync(liveDemo) && backupDirectory) {
-    fs.copyFileSync(liveDemo, path.join(backupDirectory, `${stamp}-canonical-demo-before-recovery.json`));
-  }
-  if (legacyCandidate && backupDirectory) {
-    fs.copyFileSync(legacyDemo, path.join(backupDirectory, `${stamp}-legacy-demo-source-preserved.json`));
-  }
+  if (fs.existsSync(liveDemo) && backupDirectory) copyExact(liveDemo, path.join(backupDirectory, `${stamp}-canonical-demo-before-recovery.json`));
+  if (legacyCandidate && backupDirectory) copyExact(legacyDemo, path.join(backupDirectory, `${stamp}-legacy-demo-source-preserved.json`));
 
-  const sourceBytes = fs.readFileSync(sourceCandidate.filePath);
-  fs.copyFileSync(sourceCandidate.filePath, liveDemo);
-  const restoredBytes = fs.readFileSync(liveDemo);
+  const bytes = copyExact(sourceCandidate.filePath, liveDemo);
   const restored = validMeaningfulDatabase(liveDemo);
-  if (!restored || restored.stat.size !== sourceCandidate.stat.size || !sourceBytes.equals(restoredBytes)) {
+  if (!restored || restored.stat.size !== sourceCandidate.stat.size || !hasMeaningfulDemoData(restored.payload)) {
     throw new Error('Demo-company recovery verification failed.');
   }
 
   const sourceLabel = legacyCandidate ? 'legacy-live' : 'bundled-seed';
-  logger.info(`[storage-path] Restored demo-company database from ${sourceLabel} source (${restored.stat.size} bytes).`);
-  return { restored: true, reason: 'live-demo-missing-or-empty', source: sourceLabel, liveDemo, bytes: restored.stat.size };
+  logger.info(`[storage-path] Restored demo-company database from ${sourceLabel} source (${bytes} bytes).`);
+  return { restored: true, reason: 'live-demo-missing-or-empty', source: sourceLabel, liveDemo, bytes };
 }
 
 export function assertCanonicalPathContract({ sourceRoot, storageRoot, indexSource = '' } = {}) {
@@ -111,8 +202,8 @@ export function assertCanonicalPathContract({ sourceRoot, storageRoot, indexSour
   if (paths.repositoryStorage !== path.join(path.resolve(sourceRoot), 'storage')) failures.push('Repository bundled storage path is not sourceRoot/storage.');
   if (source) {
     const forbidden = [
-      [`path.join(STORAGE_ROOT, 'tenants', 'clubs')`, 'Legacy tenants/clubs path is still present.'],
-      [`path.join(STORAGE_ROOT, 'auth-users.json')`, 'Legacy root-level auth-users path is still present.'],
+      [`path.join(STORAGE_ROOT, 'tenants', 'clubs')`, 'Legacy tenants/clubs path is still present as a runtime declaration.'],
+      [`path.join(STORAGE_ROOT, 'auth-users.json')`, 'Legacy root-level auth-users path is still present as a runtime declaration.'],
       [`writeAtomicJsonFile(storagePaths.dbPath, {});`, 'Unsafe empty tenant database auto-creation is still present.'],
     ];
     for (const [token, message] of forbidden) if (source.includes(token)) failures.push(message);
