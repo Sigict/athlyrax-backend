@@ -17,6 +17,7 @@ const transforms = [
   'scripts/patch-canonical-storage-contract.mjs',
   'scripts/patch-persistence-integrity.mjs',
   'scripts/patch-durable-storage-writes.mjs',
+  'scripts/patch-operational-integrity.mjs',
 ];
 
 for (const relative of transforms) {
