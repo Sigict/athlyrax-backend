@@ -6,6 +6,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
   REQUIRED_SIGNUP_LEGAL_VERSIONS,
+  appendSignupLegalAcceptanceRecord,
   buildSignupLegalAcceptanceRecord,
   installSignupLegalAcceptanceGuard,
   validateSignupLegalAcceptance,
@@ -61,10 +62,34 @@ test('acceptance record contains account, tenant, versions and request evidence'
   assert.deepEqual(record.documentVersions, REQUIRED_SIGNUP_LEGAL_VERSIONS);
 });
 
+test('noncanonical legal acceptance path is rejected', () => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-legal-path-'));
+  const previousRoot = process.env.ATHLYRAX_STORAGE_ROOT;
+  const previousLegalPath = process.env.AUTH_LEGAL_ACCEPTANCE_PATH;
+  process.env.ATHLYRAX_STORAGE_ROOT = temporaryRoot;
+  process.env.AUTH_LEGAL_ACCEPTANCE_PATH = path.join(temporaryRoot, 'other', 'legal.jsonl');
+
+  try {
+    assert.throws(
+      () => appendSignupLegalAcceptanceRecord({ eventId: 'test' }),
+      /AUTH_LEGAL_ACCEPTANCE_PATH must equal the canonical path/,
+    );
+    assert.equal(fs.existsSync(process.env.AUTH_LEGAL_ACCEPTANCE_PATH), false);
+  } finally {
+    if (previousRoot === undefined) delete process.env.ATHLYRAX_STORAGE_ROOT;
+    else process.env.ATHLYRAX_STORAGE_ROOT = previousRoot;
+    if (previousLegalPath === undefined) delete process.env.AUTH_LEGAL_ACCEPTANCE_PATH;
+    else process.env.AUTH_LEGAL_ACCEPTANCE_PATH = previousLegalPath;
+    fs.rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test('register route rejects missing confirmations and records successful acceptance', async () => {
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-legal-'));
   const previousRoot = process.env.ATHLYRAX_STORAGE_ROOT;
+  const previousLegalPath = process.env.AUTH_LEGAL_ACCEPTANCE_PATH;
   process.env.ATHLYRAX_STORAGE_ROOT = temporaryRoot;
+  delete process.env.AUTH_LEGAL_ACCEPTANCE_PATH;
 
   try {
     const application = {
@@ -139,6 +164,8 @@ test('register route rejects missing confirmations and records successful accept
   } finally {
     if (previousRoot === undefined) delete process.env.ATHLYRAX_STORAGE_ROOT;
     else process.env.ATHLYRAX_STORAGE_ROOT = previousRoot;
+    if (previousLegalPath === undefined) delete process.env.AUTH_LEGAL_ACCEPTANCE_PATH;
+    else process.env.AUTH_LEGAL_ACCEPTANCE_PATH = previousLegalPath;
     fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
