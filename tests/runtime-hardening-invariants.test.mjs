@@ -30,6 +30,9 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_NO_PRODUCTION_STARTUP_AUTOHEAL',
     'ATHLYRAX_PRODUCTION_LOGIN_READ_ONLY',
     'ATHLYRAX_PRODUCTION_DB_GET_READ_ONLY',
+    'ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT',
+    'ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN',
+    'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED',
   ]) assert.ok(source.includes(token), `missing runtime hardening token ${token}`);
 
   assert.equal(source.includes("const isBillingEnforced = isBillingEnabled && BILLING_ENFORCED;"), false);
@@ -41,8 +44,11 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes('Under-18 approvals require parent email 1.'), false);
   assert.equal(source.includes('Under-18 approvals require parent 1 consent.'), false);
   assert.equal(source.includes('Parent 2 consent is required when parent email 2 is provided.'), false);
+  assert.equal(source.includes('function findAuthUserByIdentifier('), false);
   assert.ok(source.includes("'https://athlyrax.com'"));
   assert.ok(source.includes("'https://www.athlyrax.com'"));
+  assert.ok(source.includes(': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)'));
+  assert.ok(source.includes("origin === '*'"));
   assert.ok(source.includes("app.post('/db/ownership-backfill', requireAuth, requireAdminRole, requireBillingWriteAccess"));
   assert.ok(source.includes('Team storage already exists without an active membership. Automatic claiming is blocked'));
   assert.ok(source.includes('Each configured Stripe price ID may belong to only one billing plan.'));
