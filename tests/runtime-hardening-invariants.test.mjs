@@ -23,6 +23,7 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_ORPHAN_TENANT_CLAIM_BLOCKED',
     'ATHLYRAX_LAST_TENANT_ACCOUNT_DELETE_BLOCKED',
     'ATHLYRAX_SWIMMER_CANNOT_SELF_APPROVE_COACH_LINK',
+    'ATHLYRAX_PARENT_NOTIFICATION_ONLY',
     'ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED',
     'ATHLYRAX_OWNERSHIP_SUMMARY_STRICT_DB_READ',
     'ATHLYRAX_NO_PRODUCTION_STARTUP_AUTOHEAL',
@@ -36,11 +37,16 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes('Math.floor(Math.random() * alphabet.length)'), false);
   assert.equal(source.includes('buildExistingDbRowIdIndex('), false);
   assert.equal(source.includes("responsePayload = JSON.stringify({ swimmers: [] });"), false);
+  assert.equal(source.includes('Under-18 approvals require parent email 1.'), false);
+  assert.equal(source.includes('Under-18 approvals require parent 1 consent.'), false);
+  assert.equal(source.includes('Parent 2 consent is required when parent email 2 is provided.'), false);
   assert.ok(source.includes("app.post('/db/ownership-backfill', requireAuth, requireAdminRole, requireBillingWriteAccess"));
   assert.ok(source.includes('Team storage already exists without an active membership. Automatic claiming is blocked'));
   assert.ok(source.includes('Each configured Stripe price ID may belong to only one billing plan.'));
   assert.ok(source.includes('Cannot delete the last account for a tenant while its database still exists.'));
   assert.ok(source.includes('Coach connections become approved only through coach-side acceptance.'));
+  assert.ok(source.includes('Parent email 1 is invalid.'));
+  assert.ok(source.includes('Parent email 2 is invalid.'));
   assert.ok(source.includes('No empty result was substituted.'));
 });
 
