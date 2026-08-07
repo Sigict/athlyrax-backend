@@ -12,27 +12,24 @@ function resolveFilePath(value) {
   if (value instanceof URL) return path.resolve(decodeURIComponent(value.pathname));
   return path.resolve(String(value || ''));
 }
-
 function isDatabasePath(value) {
   const resolved = resolveFilePath(value);
   return Boolean(resolved) && path.basename(resolved).toLowerCase() === 'db.json';
 }
-
 function safeJsonRead(filePath, fsModule = fs) {
   try {
     if (!fsModule.existsSync(filePath)) return null;
-    const parsed = JSON.parse(fsModule.readFileSync(filePath, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+    return JSON.parse(fsModule.readFileSync(filePath, 'utf8'));
+  } catch { return null; }
 }
-
+function safeJsonObject(filePath, fsModule = fs) {
+  const parsed = safeJsonRead(filePath, fsModule);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+}
 function getStorageRevision(payload) {
   const parsed = Number.parseInt(String(payload?.__meta?.storageRevision ?? ''), 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
-
 function getRevisionTime(payload) {
   for (const value of [payload?.__meta?.storageUpdatedAt, payload?.__meta?.updatedAt, payload?.__savedAt, payload?.updatedAt]) {
     const parsed = Date.parse(String(value || ''));
@@ -40,12 +37,10 @@ function getRevisionTime(payload) {
   }
   return Number.NaN;
 }
-
 function normalizeTenantId(value) {
   const raw = String(value || '').trim();
   return raw && /^[a-z0-9_-]+$/.test(raw) ? raw : '';
 }
-
 function expectedTenantIdForDbPath(dbPath, env) {
   const storageRootRaw = String(env.ATHLYRAX_STORAGE_ROOT || '').trim();
   if (!storageRootRaw) return '';
@@ -57,7 +52,6 @@ function expectedTenantIdForDbPath(dbPath, env) {
   if (parts.length !== 2 || parts[1].toLowerCase() !== 'db.json') return '';
   return normalizeTenantId(parts[0]);
 }
-
 function assertTenantIdentity(payload, destination, env, label) {
   const expected = expectedTenantIdForDbPath(destination, env);
   if (!expected) return '';
@@ -71,26 +65,47 @@ function assertTenantIdentity(payload, destination, env, label) {
   }
   return expected;
 }
-
-function scopeToken(dbPath) {
-  const parent = path.basename(path.dirname(dbPath)).replace(/[^a-zA-Z0-9._-]/g, '-') || 'root';
-  const digest = crypto.createHash('sha256').update(path.resolve(dbPath)).digest('hex').slice(0, 12);
+function criticalJsonStoreKind(value, env) {
+  const rootRaw = String(env.ATHLYRAX_STORAGE_ROOT || '').trim();
+  if (!rootRaw) return '';
+  const root = path.resolve(rootRaw);
+  const destination = resolveFilePath(value);
+  const entries = new Map([
+    [path.join(root, 'auth', 'auth-users.json'), 'auth-users'],
+    [path.join(root, 'auth', 'auth-users.backup.json'), 'auth-users-backup'],
+    [path.join(root, 'auth-invites.json'), 'auth-invites'],
+    [path.join(root, 'snapshot-submissions.json'), 'snapshot-submissions'],
+    [path.join(root, 'billing-catalog.json'), 'billing-catalog'],
+  ]);
+  return entries.get(destination) || '';
+}
+function validateCriticalJsonPayload(payload, kind) {
+  if (kind === 'auth-users' || kind === 'auth-users-backup') {
+    const users = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.users) ? payload.users : null);
+    return Array.isArray(users) && users.length > 0;
+  }
+  if (kind === 'auth-invites' || kind === 'snapshot-submissions') return Array.isArray(payload);
+  if (kind === 'billing-catalog') {
+    return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload)
+      && Array.isArray(payload.plans) && payload.plans.length > 0
+      && payload.plans.every((plan) => plan && typeof plan === 'object' && String(plan.key || '').trim());
+  }
+  return false;
+}
+function scopeToken(filePath) {
+  const parent = path.basename(path.dirname(filePath)).replace(/[^a-zA-Z0-9._-]/g, '-') || 'root';
+  const digest = crypto.createHash('sha256').update(path.resolve(filePath)).digest('hex').slice(0, 12);
   return `${parent}-${digest}`;
 }
-
 function rotate(directory, maxFiles, fsModule = fs) {
   const files = fsModule.readdirSync(directory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-    .map((entry) => {
-      const fullPath = path.join(directory, entry.name);
-      return { fullPath, mtime: fsModule.statSync(fullPath).mtimeMs };
-    })
+    .map((entry) => { const fullPath = path.join(directory, entry.name); return { fullPath, mtime: fsModule.statSync(fullPath).mtimeMs }; })
     .sort((left, right) => right.mtime - left.mtime);
   for (const stale of files.slice(maxFiles)) {
-    try { fsModule.unlinkSync(stale.fullPath); } catch { /* retention cleanup must not block the database write */ }
+    try { fsModule.unlinkSync(stale.fullPath); } catch {}
   }
 }
-
 function durableWriteBytes(destination, bytes, fsModule = fs) {
   fsModule.mkdirSync(path.dirname(destination), { recursive: true });
   const temp = `${destination}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
@@ -99,53 +114,40 @@ function durableWriteBytes(destination, bytes, fsModule = fs) {
     handle = fsModule.openSync(temp, 'wx', 0o600);
     fsModule.writeFileSync(handle, bytes);
     fsModule.fsyncSync(handle);
-  } finally {
-    if (handle !== null) fsModule.closeSync(handle);
-  }
-  try {
-    fsModule.renameSync(temp, destination);
-  } catch (error) {
-    try { fsModule.unlinkSync(temp); } catch {}
-    throw error;
-  }
+  } finally { if (handle !== null) fsModule.closeSync(handle); }
+  try { fsModule.renameSync(temp, destination); }
+  catch (error) { try { fsModule.unlinkSync(temp); } catch {} throw error; }
   try {
     const directoryHandle = fsModule.openSync(path.dirname(destination), 'r');
     try { fsModule.fsyncSync(directoryHandle); } finally { fsModule.closeSync(directoryHandle); }
   } catch {}
 }
-
-function backupDatabase(dbPath, reason, env, maxFiles, fsModule = fs) {
-  if (!fsModule.existsSync(dbPath)) return '';
+function backupFile(filePath, reason, env, maxFiles, fsModule = fs) {
+  if (!fsModule.existsSync(filePath)) return '';
   const configuredRoot = String(env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();
-  const root = path.resolve(configuredRoot || path.join(path.dirname(dbPath), 'safety-backups'));
-  const directory = path.join(root, reason, scopeToken(dbPath));
+  const root = path.resolve(configuredRoot || path.join(path.dirname(filePath), 'safety-backups'));
+  const directory = path.join(root, reason, scopeToken(filePath));
   fsModule.mkdirSync(directory, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const destination = path.join(directory, `${stamp}-${process.pid}-${crypto.randomBytes(4).toString('hex')}.json`);
-  const sourceBytes = fsModule.readFileSync(dbPath);
+  const sourceBytes = fsModule.readFileSync(filePath);
   durableWriteBytes(destination, sourceBytes, fsModule);
   const backupBytes = fsModule.readFileSync(destination);
   if (!sourceBytes.equals(backupBytes)) {
     try { fsModule.unlinkSync(destination); } catch {}
-    const error = new Error(`Safety backup verification failed for ${dbPath}.`);
-    error.code = 'ATHLYRAX_DB_BACKUP_VERIFICATION_FAILED';
+    const error = new Error(`Safety backup verification failed for ${filePath}.`);
+    error.code = 'ATHLYRAX_BACKUP_VERIFICATION_FAILED';
     throw error;
   }
   rotate(directory, maxFiles, fsModule);
   return destination;
 }
-
 function writeRevisionToIncoming(sourcePath, payload, revision, expectedTenantId = '', fsModule = fs) {
   const rawMeta = payload?.__meta && typeof payload.__meta === 'object' ? payload.__meta : {};
   const { provisioningToken: _discardedProvisioningToken, ...safeMeta } = rawMeta;
   const updated = {
     ...payload,
-    __meta: {
-      ...safeMeta,
-      ...(expectedTenantId ? { tenantId: expectedTenantId } : {}),
-      storageRevision: revision,
-      storageUpdatedAt: new Date().toISOString(),
-    },
+    __meta: { ...safeMeta, ...(expectedTenantId ? { tenantId: expectedTenantId } : {}), storageRevision: revision, storageUpdatedAt: new Date().toISOString() },
   };
   let handle = null;
   try {
@@ -153,11 +155,8 @@ function writeRevisionToIncoming(sourcePath, payload, revision, expectedTenantId
     fsModule.ftruncateSync(handle, 0);
     fsModule.writeFileSync(handle, `${JSON.stringify(updated, null, 2)}\n`, 'utf8');
     fsModule.fsyncSync(handle);
-  } finally {
-    if (handle !== null) fsModule.closeSync(handle);
-  }
+  } finally { if (handle !== null) fsModule.closeSync(handle); }
 }
-
 function hasValidProvisioningProof(incoming, destination, env) {
   const provisionedBy = String(incoming?.__meta?.provisionedBy || '').trim();
   const provisioningToken = String(incoming?.__meta?.provisioningToken || '').trim();
@@ -172,7 +171,6 @@ function hasValidProvisioningProof(incoming, destination, env) {
 export function installDataSafetyGuards(options = {}) {
   const fsModule = options.fsModule || fs;
   if (fsModule[INSTALL_MARK]) return fsModule[INSTALL_MARK];
-
   const env = options.env || process.env;
   const logger = options.logger || console;
   const isProduction = String(env.NODE_ENV || '').trim().toLowerCase() === 'production';
@@ -192,25 +190,44 @@ export function installDataSafetyGuards(options = {}) {
   };
 
   fsModule.renameSync = function guardedRenameSync(sourceValue, destinationValue) {
-    if (!isDatabasePath(destinationValue)) return originalRenameSync(sourceValue, destinationValue);
-
-    const source = resolveFilePath(sourceValue);
     const destination = resolveFilePath(destinationValue);
-    const context = readContext.getStore();
+    const criticalKind = criticalJsonStoreKind(destination, env);
+    if (!isDatabasePath(destination) && !criticalKind) return originalRenameSync(sourceValue, destinationValue);
+    const source = resolveFilePath(sourceValue);
 
+    if (criticalKind) {
+      const incoming = safeJsonRead(source, fsModule);
+      if (!validateCriticalJsonPayload(incoming, criticalKind)) {
+        const error = new Error(`Refusing invalid replacement for critical store ${criticalKind}: ${source}`);
+        error.code = 'ATHLYRAX_CRITICAL_STORE_INCOMING_INVALID';
+        throw error;
+      }
+      if (fsModule.existsSync(destination)) {
+        const current = safeJsonRead(destination, fsModule);
+        if (!validateCriticalJsonPayload(current, criticalKind)) {
+          const preserved = backupFile(destination, `invalid-current-${criticalKind}`, env, maxFiles, fsModule);
+          const error = new Error(`Refusing to replace invalid current critical store ${criticalKind}: ${destination}${preserved ? `; current bytes preserved at ${preserved}` : ''}`);
+          error.code = 'ATHLYRAX_CRITICAL_STORE_CURRENT_INVALID';
+          throw error;
+        }
+        backupFile(destination, `pre-write-${criticalKind}`, env, maxFiles, fsModule);
+      }
+      return originalRenameSync(source, destination);
+    }
+
+    const context = readContext.getStore();
     if (context?.dbPath === destination) {
-      const preview = backupDatabase(destination, 'read-time-rewrite-blocked', env, maxFiles, fsModule);
+      const preview = backupFile(destination, 'read-time-rewrite-blocked', env, maxFiles, fsModule);
       try { fsModule.unlinkSync(source); } catch {}
       logger.error(`[data-safety] Blocked database mutation during a read: ${destination}${preview ? `; current database preserved at ${preview}` : ''}`);
       return;
     }
 
     const destinationExists = fsModule.existsSync(destination);
-    const current = safeJsonRead(destination, fsModule);
-    const incoming = safeJsonRead(source, fsModule);
-
+    const current = safeJsonObject(destination, fsModule);
+    const incoming = safeJsonObject(source, fsModule);
     if (destinationExists && !current) {
-      const preview = backupDatabase(destination, 'invalid-current-blocked', env, maxFiles, fsModule);
+      const preview = backupFile(destination, 'invalid-current-blocked', env, maxFiles, fsModule);
       const error = new Error(`Refusing database replacement because the current database is unreadable or invalid JSON: ${destination}${preview ? `; current bytes preserved at ${preview}` : ''}`);
       error.code = 'ATHLYRAX_CURRENT_DB_INVALID';
       throw error;
@@ -223,7 +240,6 @@ export function installDataSafetyGuards(options = {}) {
 
     const expectedTenantId = assertTenantIdentity(incoming, destination, env, 'Incoming database');
     if (current) assertTenantIdentity(current, destination, env, 'Current database');
-
     if (!destinationExists && isProduction && !hasValidProvisioningProof(incoming, destination, env)) {
       const error = new Error(`Refusing to create a missing production database outside explicit server-bound tenant provisioning: ${destination}`);
       error.code = 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED';
@@ -239,7 +255,6 @@ export function installDataSafetyGuards(options = {}) {
       error.code = 'ATHLYRAX_DB_REVISION_CONFLICT';
       throw error;
     }
-
     const currentTime = getRevisionTime(current);
     const incomingTime = getRevisionTime(incoming);
     if (Number.isFinite(currentTime) && Number.isFinite(incomingTime) && incomingTime + staleToleranceMs < currentTime) {
@@ -249,7 +264,7 @@ export function installDataSafetyGuards(options = {}) {
     }
 
     writeRevisionToIncoming(source, incoming, currentRevision + 1, expectedTenantId, fsModule);
-    const backup = backupDatabase(destination, 'pre-write', env, maxFiles, fsModule);
+    const backup = backupFile(destination, 'pre-write', env, maxFiles, fsModule);
     try { return originalRenameSync(source, destination); }
     catch (error) {
       logger.error(`[data-safety] Database replacement failed for ${destination}${backup ? `; previous version preserved at ${backup}` : ''}`);
@@ -266,7 +281,7 @@ export function installDataSafetyGuards(options = {}) {
     },
   });
   Object.defineProperty(fsModule, INSTALL_MARK, { configurable: true, enumerable: false, value: installation });
-  logger.info('[data-safety] Database write guards installed.');
+  logger.info('[data-safety] Database and critical-store write guards installed.');
   return installation;
 }
 
@@ -274,16 +289,13 @@ export function installExpressDbRevisionResponseGuard(expressModule, options = {
   const responsePrototype = expressModule?.response;
   if (!responsePrototype || typeof responsePrototype.send !== 'function') throw new Error('Express response prototype is required.');
   if (responsePrototype[EXPRESS_INSTALL_MARK]) return responsePrototype[EXPRESS_INSTALL_MARK];
-
   const logger = options.logger || console;
   const originalSend = responsePrototype.send;
   responsePrototype.send = function guardedSend(body) {
     try {
       const requestPath = String(this?.req?.originalUrl || this?.req?.url || '').split('?')[0];
       const successfulDbRead = String(this?.req?.method || '').toUpperCase() === 'GET'
-        && requestPath === '/db'
-        && Number(this?.statusCode || 200) >= 200
-        && Number(this?.statusCode || 200) < 300;
+        && requestPath === '/db' && Number(this?.statusCode || 200) >= 200 && Number(this?.statusCode || 200) < 300;
       if (successfulDbRead) {
         const wasBuffer = Buffer.isBuffer(body);
         const wasString = typeof body === 'string' || wasBuffer;
@@ -301,22 +313,15 @@ export function installExpressDbRevisionResponseGuard(expressModule, options = {
     }
     return originalSend.call(this, body);
   };
-
   const installation = Object.freeze({
     installed: true,
-    uninstall() {
-      responsePrototype.send = originalSend;
-      delete responsePrototype[EXPRESS_INSTALL_MARK];
-    },
+    uninstall() { responsePrototype.send = originalSend; delete responsePrototype[EXPRESS_INSTALL_MARK]; },
   });
   Object.defineProperty(responsePrototype, EXPRESS_INSTALL_MARK, { configurable: true, enumerable: false, value: installation });
   return installation;
 }
 
 export const dataSafetyInternals = Object.freeze({
-  getRevisionTime,
-  getStorageRevision,
-  isDatabasePath,
-  hasValidProvisioningProof,
-  expectedTenantIdForDbPath,
+  getRevisionTime, getStorageRevision, isDatabasePath, hasValidProvisioningProof,
+  expectedTenantIdForDbPath, criticalJsonStoreKind, validateCriticalJsonPayload,
 });
