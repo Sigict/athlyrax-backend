@@ -12,13 +12,7 @@ import {
   resolveStorageConfiguration,
   runStorageSafetyCheck,
 } from './storage-safety-lib.mjs';
-import {
-  assertCanonicalPathContract,
-  canonicalStoragePaths,
-  finalizeLegacyStorageMigration,
-  migrateLegacyStorageIfNeeded,
-  restoreBundledDemoTenantIfNeeded,
-} from './storage-path-contract.mjs';
+import { assertCanonicalPathContract } from './storage-path-contract.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const sourceRoot = path.resolve(path.dirname(__filename), '..');
@@ -43,43 +37,13 @@ assertCanonicalPathContract({
   indexSource,
 });
 
-const canonicalPaths = canonicalStoragePaths({
-  sourceRoot,
-  storageRoot: initialStorageConfiguration.storageRoot,
-});
-const legacyAuthBackup = path.join(initialStorageConfiguration.storageRoot, 'auth-users.backup.json');
-if (
-  !fs.existsSync(canonicalPaths.legacyMigrationMarker)
-  && fs.existsSync(canonicalPaths.authUsers)
-  && !fs.existsSync(canonicalPaths.authUsersBackup)
-  && !fs.existsSync(legacyAuthBackup)
-) {
-  const error = new Error('Canonical authentication store exists but its backup is missing and no legacy backup is available. Refusing to manufacture a replacement backup.');
-  error.code = 'ATHLYRAX_AUTH_BACKUP_MISSING';
-  throw error;
-}
-
-const legacyMigration = migrateLegacyStorageIfNeeded({
-  sourceRoot,
-  storageRoot: initialStorageConfiguration.storageRoot,
-  backupRoot: initialStorageConfiguration.backupRoot,
-});
-
-restoreBundledDemoTenantIfNeeded({
-  sourceRoot,
-  storageRoot: initialStorageConfiguration.storageRoot,
-  backupRoot: initialStorageConfiguration.backupRoot,
-});
-
+// Production startup is validation-only. It must never migrate, restore, seed,
+// repair, or otherwise rewrite customer data. Any one-time canonical migration
+// must be run explicitly through scripts/migrate-storage-once.mjs.
 runStorageSafetyCheck({
   repoRoot,
   requireFiles: true,
-  createDirectories: true,
-});
-
-finalizeLegacyStorageMigration({
-  storageRoot: initialStorageConfiguration.storageRoot,
-  migrationResult: legacyMigration,
+  createDirectories: false,
 });
 
 process.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';
