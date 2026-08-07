@@ -52,13 +52,17 @@ test('storage validator covers every store loaded during production bootstrap an
   ]) assert.ok(source.includes(token), `startup storage validation is missing ${token}`);
 });
 
-test('production wrapper gives interrupted migration journal precedence over finalized marker', () => {
+test('production wrapper gives interrupted migration recovery precedence and refuses stale approval after completion', () => {
   const source = read('scripts/production-start.mjs');
   assert.match(source, /ATHLYRAX_STORAGE_MIGRATION_APPROVAL/);
   assert.match(source, /MIGRATE_CANONICAL_STORAGE_ONCE/);
   assert.match(source, /migrationAlreadyCompleted/);
   assert.match(source, /readActiveMigrationTransaction/);
-  assert.match(source, /interrupted \|\| !completed/);
+  assert.match(source, /ATHLYRAX_ONE_TIME_MIGRATION_APPROVAL_MUST_BE_REMOVED/);
+  assert.match(source, /if \(interrupted\)/);
+  assert.match(source, /else if \(completed\)/);
+  assert.match(source, /Remove ATHLYRAX_STORAGE_MIGRATION_APPROVAL before normal production startup/);
+  assert.doesNotMatch(source, /interrupted \|\| !completed/);
   assert.match(source, /migrate-storage-once\.mjs/);
   assert.match(source, /safe-start\.mjs/);
   assert.match(source, /invalid value/);
@@ -130,7 +134,7 @@ test('demo sanitizer preserves a safety copy and rejects remaining personal data
   assert.match(source, /Demo sanitization verification failed/);
 });
 
-test('package postinstall uses one verified production build orchestrator', () => {
+test('package postinstall uses one verified production build orchestrator and one top-level coach-link transform', () => {
   const pkg = JSON.parse(read('package.json'));
   const start = String(pkg?.scripts?.start || '');
   const postinstall = String(pkg?.scripts?.postinstall || '');
@@ -143,8 +147,14 @@ test('package postinstall uses one verified production build orchestrator', () =
   const build = read('scripts/build-production-backend.mjs');
   for (const transform of [
     'patch-index-signup-legal.mjs', 'patch-logout-csrf.mjs', 'patch-canonical-storage-contract.mjs',
-    'patch-persistence-integrity.mjs', 'patch-durable-storage-writes.mjs',
+    'patch-persistence-integrity.mjs', 'patch-durable-storage-writes.mjs', 'patch-coach-link-suite.mjs',
   ]) assert.ok(build.includes(transform));
+  for (const internalCoachStep of [
+    'patch-swimmer-coach-authority.mjs', 'patch-parent-notification-semantics.mjs',
+    'patch-coach-link-workflow.mjs', 'patch-coach-link-lifecycle.mjs', 'patch-coach-link-integrity.mjs',
+    'patch-coach-link-ownership.mjs', 'patch-coach-link-routing.mjs', 'patch-coach-link-reconnect.mjs',
+    'patch-coach-link-transaction-integrity.mjs',
+  ]) assert.ok(!build.includes(`'scripts/${internalCoachStep}'`), `internal coach-link step leaked into top-level build: ${internalCoachStep}`);
   assert.match(build, /--check/);
   assert.match(build, /audit-storage-paths\.mjs/);
   assert.match(build, /ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK/);
