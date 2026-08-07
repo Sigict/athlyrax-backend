@@ -111,6 +111,7 @@ export function installDataSafetyGuards(options = {}) {
 
   const env = options.env || process.env;
   const logger = options.logger || console;
+  const isProduction = String(env.NODE_ENV || '').trim().toLowerCase() === 'production';
   const maxFiles = Math.max(
     1,
     Number.parseInt(String(env.ATHLYRAX_SAFETY_MAX_BACKUPS || '30'), 10) || 30,
@@ -176,6 +177,17 @@ export function installDataSafetyGuards(options = {}) {
       const error = new Error(`Refusing database replacement because the incoming database is unreadable or invalid JSON: ${source}`);
       error.code = 'ATHLYRAX_INCOMING_DB_INVALID';
       throw error;
+    }
+
+    if (!destinationExists && isProduction) {
+      const provisionedBy = String(incoming?.__meta?.provisionedBy || '').trim();
+      const provisioningToken = String(incoming?.__meta?.provisioningToken || '').trim();
+      const explicitProvisioning = provisionedBy === 'auth-register' && Boolean(provisioningToken);
+      if (!explicitProvisioning) {
+        const error = new Error(`Refusing to create a missing production database outside explicit tenant provisioning: ${destination}`);
+        error.code = 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED';
+        throw error;
+      }
     }
 
     const currentRevisionValue = getStorageRevision(current);
