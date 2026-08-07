@@ -4,8 +4,9 @@ import path from 'node:path';
 function clean(value) { return String(value ?? '').trim(); }
 
 function assertDirectoryRoot(rootPath, label, fsModule = fs) {
-  const resolved = path.resolve(clean(rootPath));
-  if (!clean(rootPath)) throw new Error(`${label} is not configured.`);
+  const raw = clean(rootPath);
+  if (!raw) throw new Error(`${label} is not configured.`);
+  const resolved = path.resolve(raw);
   if (!fsModule.existsSync(resolved)) throw new Error(`${label} is missing: ${resolved}`);
   const stat = fsModule.lstatSync(resolved);
   if (stat.isSymbolicLink()) {
@@ -14,6 +15,12 @@ function assertDirectoryRoot(rootPath, label, fsModule = fs) {
     throw error;
   }
   if (!stat.isDirectory()) throw new Error(`${label} is not a directory: ${resolved}`);
+  const real = path.resolve(fsModule.realpathSync(resolved));
+  if (real !== resolved) {
+    const error = new Error(`${label} is routed through a symbolic-link ancestor. Configured ${resolved}, real path ${real}.`);
+    error.code = 'ATHLYRAX_STORAGE_SYMLINK_BLOCKED';
+    throw error;
+  }
   return resolved;
 }
 
