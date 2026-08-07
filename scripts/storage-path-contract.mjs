@@ -53,20 +53,24 @@ function validMeaningfulDatabase(filePath) {
   return { filePath, stat, payload };
 }
 
-function isEffectivelyEmptyDatabase(filePath) {
-  if (!fs.existsSync(filePath)) return true;
+function classifyDatabase(filePath) {
+  if (!fs.existsSync(filePath)) return { state: 'missing' };
   const stat = fs.statSync(filePath);
-  if (stat.size <= 16) return true;
-  const parsed = readJsonObject(filePath);
-  if (!parsed) return false;
-  if (Object.keys(parsed).length === 0) return true;
-  return !hasMeaningfulDemoData(parsed);
+  if (stat.size <= 16) return { state: 'empty', stat };
+  const payload = readJsonObject(filePath);
+  if (!payload) return { state: 'invalid', stat };
+  if (Object.keys(payload).length === 0 || !hasMeaningfulDemoData(payload)) return { state: 'empty', stat, payload };
+  return { state: 'meaningful', stat, payload };
 }
 
 export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, backupRoot, logger = console } = {}) {
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot });
   const liveDemo = paths.tenantDb('demo-company');
-  if (!isEffectivelyEmptyDatabase(liveDemo)) return { restored: false, reason: 'live-demo-present', liveDemo };
+  const liveState = classifyDatabase(liveDemo);
+  if (liveState.state === 'meaningful') return { restored: false, reason: 'live-demo-present', liveDemo };
+  if (liveState.state === 'invalid') {
+    throw new Error(`Canonical demo-company database is unreadable or invalid JSON: ${liveDemo}`);
+  }
 
   const legacyDemo = path.join(paths.storageRoot, 'tenants', 'clubs', 'demo-company', 'db.json');
   const bundledDemo = path.join(paths.repositoryStorage, 'tenants', 'demo-company', 'db.json');
@@ -87,9 +91,13 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
     fs.copyFileSync(legacyDemo, path.join(backupDirectory, `${stamp}-legacy-demo-source-preserved.json`));
   }
 
+  const sourceBytes = fs.readFileSync(sourceCandidate.filePath);
   fs.copyFileSync(sourceCandidate.filePath, liveDemo);
+  const restoredBytes = fs.readFileSync(liveDemo);
   const restored = validMeaningfulDatabase(liveDemo);
-  if (!restored || restored.stat.size !== sourceCandidate.stat.size) throw new Error('Demo-company recovery verification failed.');
+  if (!restored || restored.stat.size !== sourceCandidate.stat.size || !sourceBytes.equals(restoredBytes)) {
+    throw new Error('Demo-company recovery verification failed.');
+  }
 
   const sourceLabel = legacyCandidate ? 'legacy-live' : 'bundled-seed';
   logger.info(`[storage-path] Restored demo-company database from ${sourceLabel} source (${restored.stat.size} bytes).`);
