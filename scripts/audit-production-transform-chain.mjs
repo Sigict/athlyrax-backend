@@ -32,6 +32,7 @@ const expectedTransforms = [
   'scripts/patch-orphan-tenant-safety.mjs',
   'scripts/patch-billing-catalog-integrity.mjs',
   'scripts/patch-account-lifecycle-integrity.mjs',
+  'scripts/patch-auth-enumeration-safety.mjs',
   'scripts/patch-swimmer-coach-authority.mjs',
   'scripts/patch-parent-notification-semantics.mjs',
   'scripts/patch-coach-link-workflow.mjs',
@@ -47,6 +48,7 @@ const expectedTransforms = [
 
 for (const relative of expectedTransforms) read(relative);
 read('tests/auth-persistence-transaction.test.mjs');
+read('tests/auth-enumeration-safety.test.mjs');
 read('tests/coach-link-transaction.test.mjs');
 
 const build = read('scripts/build-production-backend.mjs');
@@ -73,6 +75,7 @@ for (const required of [
 const transformedIndex = read('index.js');
 for (const marker of [
   'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION',
+  'ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE',
   'ATHLYRAX_COACH_LINK_WORKFLOW_V1',
   'ATHLYRAX_COACH_LINK_LIFECYCLE_V1',
@@ -96,6 +99,14 @@ for (const token of [
   'restorePrevious(AUTH_USERS_BACKUP_PATH',
   'rollback was incomplete',
 ]) if (!authPersistencePatch.includes(token)) failures.push(`scripts/patch-auth-persistence-transaction.mjs: missing required token ${token}`);
+
+const authEnumerationPatch = read('scripts/patch-auth-enumeration-safety.mjs');
+for (const token of [
+  'ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE',
+  'ATHLYRAX_PASSWORD_RESET_REQUEST_GENERIC_FAILURE_RESPONSE',
+  'ATHLYRAX_SNAPSHOT_PASSWORD_RESET_REQUEST_GENERIC_FAILURE_RESPONSE',
+  'ATHLYRAX_PASSWORD_RESET_CONFIRM_GENERIC_UNKNOWN_ACCOUNT',
+]) if (!authEnumerationPatch.includes(token)) failures.push(`scripts/patch-auth-enumeration-safety.mjs: missing required token ${token}`);
 
 const coachTransactionPatch = read('scripts/patch-coach-link-transaction-integrity.mjs');
 for (const token of [
@@ -127,6 +138,7 @@ for (const requiredTest of [
   'test:data-safety',
   'test:persistence-integrity',
   'test:auth-persistence-transaction',
+  'test:auth-enumeration-safety',
   'test:storage-routing-safety',
   'test:storage-migration-identity',
   'test:storage-extra-invariants',
@@ -143,7 +155,7 @@ for (const requiredTest of [
 ]) {
   if (!storageAll.includes(requiredTest)) failures.push(`package.json: test:storage-all missing ${requiredTest}`);
 }
-for (const requiredTest of ['test:auth-persistence-transaction', 'test:coach-link-workflow', 'audit:storage-paths']) {
+for (const requiredTest of ['test:auth-persistence-transaction', 'test:auth-enumeration-safety', 'test:coach-link-workflow', 'audit:storage-paths']) {
   if (!securityVerify.includes(requiredTest)) failures.push(`package.json: verify:closed-pilot-security missing ${requiredTest}`);
 }
 
