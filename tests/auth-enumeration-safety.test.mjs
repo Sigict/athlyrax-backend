@@ -53,10 +53,10 @@ test('snapshot sign-in rejects ambiguous identifiers instead of selecting first 
   assert.equal(body.includes('findAuthUserByIdentifier(identifier)'), false);
 });
 
-test('onboarding cannot change an account onto another account email', () => {
+test('onboarding email uniqueness has one authoritative guard', () => {
   const body = route("app.post('/auth/onboarding/complete'");
-  assert.ok(body.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS'));
-  assert.ok(body.includes("String(row?.username || '').trim() !== username"));
-  assert.ok(body.includes("String(row?.email || '').trim().toLowerCase() === normalizedOnboardingEmail"));
+  assert.ok(body.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUE'));
+  assert.equal(body.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS'), false);
+  assert.ok(body.includes('duplicateOnboardingEmail'));
   assert.ok(body.includes("res.status(409).json({ error: 'Email is already registered.' });"));
 });
