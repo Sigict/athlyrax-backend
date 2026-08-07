@@ -194,10 +194,12 @@ function validateAuthPrimaryBackupParity(configuration, fsModule = fs) {
   return [];
 }
 
-function resolveTenantIdFromStoredUser(user) {
+function resolveTenantIdFromStoredUser(user, env = process.env) {
   const role = clean(user?.role).toLowerCase();
   const username = clean(user?.username).toLowerCase();
-  if (role === 'software-owner') return '';
+  const primaryOwnerUsername = clean(env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').toLowerCase();
+  if (username === 'demo.coach') return 'demo-company';
+  if (role === 'software-owner' && username === primaryOwnerUsername) return '';
   const explicit = normalizeTenantId(user?.tenantId);
   if (explicit) return explicit;
   const swimClub = clean(user?.swimClub);
@@ -206,7 +208,7 @@ function resolveTenantIdFromStoredUser(user) {
   return username ? `user-${slugTenantPart(username, 'unknown-user')}` : '';
 }
 
-function validateAuthBoundTenantDatabases(configuration, fsModule = fs) {
+function validateAuthBoundTenantDatabases(configuration, env = process.env, fsModule = fs) {
   const parsed = readJsonForValidation(configuration.authUsersPath, fsModule);
   if (!parsed.ok) return [];
   const users = authUsersArrayFromParsed(parsed.value);
@@ -214,7 +216,7 @@ function validateAuthBoundTenantDatabases(configuration, fsModule = fs) {
   const failures = [];
   const tenantIds = new Set();
   for (const user of users) {
-    const tenantId = resolveTenantIdFromStoredUser(user);
+    const tenantId = resolveTenantIdFromStoredUser(user, env);
     if (tenantId) tenantIds.add(tenantId);
   }
   for (const tenantId of tenantIds) {
@@ -232,7 +234,7 @@ export function validateRequiredStorageFiles(configuration, env = process.env, f
   failures.push(...validateAuthStore(configuration.authUsersBackupPath, 'Authentication user backup', fsModule, strict));
   if (strict) {
     failures.push(...validateAuthPrimaryBackupParity(configuration, fsModule));
-    failures.push(...validateAuthBoundTenantDatabases(configuration, fsModule));
+    failures.push(...validateAuthBoundTenantDatabases(configuration, env, fsModule));
   }
 
   const tenants = clean(env.ATHLYRAX_REQUIRED_TENANTS).split(',').map((value) => value.trim()).filter(Boolean);
