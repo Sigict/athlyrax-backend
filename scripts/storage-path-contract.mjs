@@ -4,19 +4,28 @@ import path from 'node:path';
 export function canonicalStoragePaths({ sourceRoot, storageRoot } = {}) {
   const source = path.resolve(String(sourceRoot || process.cwd()));
   const storage = path.resolve(String(storageRoot || path.join(source, 'storage')));
+  const tenantRoot = path.join(storage, 'tenants');
+  const authRoot = path.join(storage, 'auth');
   return Object.freeze({
     sourceRoot: source,
     repositoryStorage: path.join(source, 'storage'),
     storageRoot: storage,
     globalDb: path.join(storage, 'db.json'),
-    tenantRoot: path.join(storage, 'tenants'),
-    authRoot: path.join(storage, 'auth'),
-    authUsers: path.join(storage, 'auth', 'auth-users.json'),
-    authUsersBackup: path.join(storage, 'auth', 'auth-users.backup.json'),
+    targetBackup: path.join(storage, 'trainingPlannerTargets.backup.json'),
+    snapshotDir: path.join(storage, 'db-snapshots'),
+    tenantRoot,
+    billingCatalog: path.join(storage, 'billing-catalog.json'),
+    billingBackupDir: path.join(storage, 'billing-catalog-backups'),
+    authRoot,
+    authUsers: path.join(authRoot, 'auth-users.json'),
+    authUsersBackup: path.join(authRoot, 'auth-users.backup.json'),
+    authInvites: path.join(storage, 'auth-invites.json'),
+    snapshotSubmissions: path.join(storage, 'snapshot-submissions.json'),
+    authAuditDir: path.join(storage, 'auth-audit'),
     tenantDb(tenantId) {
       const clean = String(tenantId || '').trim();
       if (!/^[a-zA-Z0-9._-]+$/.test(clean)) throw new Error(`Unsafe tenant ID: ${clean}`);
-      return path.join(storage, 'tenants', clean, 'db.json');
+      return path.join(tenantRoot, clean, 'db.json');
     },
   });
 }
@@ -33,15 +42,8 @@ function readJsonObject(filePath) {
 function hasMeaningfulDemoData(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
   const collectionKeys = [
-    'swimmers',
-    'squads',
-    'trainingSessions',
-    'trainingSessionSets',
-    'tests',
-    'attendance',
-    'competitions',
-    'fixtures',
-    'groups',
+    'swimmers', 'squads', 'trainingSessions', 'trainingSessionSets', 'tests',
+    'attendance', 'competitions', 'fixtures', 'groups',
   ];
   return collectionKeys.some((key) => Array.isArray(payload?.[key]) && payload[key].length > 0);
 }
@@ -61,9 +63,7 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
   const bundledDemo = path.join(paths.repositoryStorage, 'tenants', 'demo-company', 'db.json');
   const liveDemo = paths.tenantDb('demo-company');
 
-  if (!fs.existsSync(bundledDemo)) {
-    return { restored: false, reason: 'bundled-demo-not-present', liveDemo };
-  }
+  if (!fs.existsSync(bundledDemo)) return { restored: false, reason: 'bundled-demo-not-present', liveDemo };
 
   const bundledStat = fs.statSync(bundledDemo);
   const bundledPayload = readJsonObject(bundledDemo);
@@ -71,12 +71,9 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
     throw new Error('Bundled demo-company database is invalid, unexpectedly small, or contains no demo records.');
   }
 
-  if (!isEffectivelyEmptyDatabase(liveDemo)) {
-    return { restored: false, reason: 'live-demo-present', liveDemo };
-  }
+  if (!isEffectivelyEmptyDatabase(liveDemo)) return { restored: false, reason: 'live-demo-present', liveDemo };
 
   fs.mkdirSync(path.dirname(liveDemo), { recursive: true });
-
   if (fs.existsSync(liveDemo) && backupRoot) {
     const backupDirectory = path.join(path.resolve(backupRoot), 'demo-bootstrap-replaced');
     fs.mkdirSync(backupDirectory, { recursive: true });
@@ -97,16 +94,33 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
 
 export function assertCanonicalPathContract({ sourceRoot, storageRoot, indexSource = '' } = {}) {
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot });
+  const source = String(indexSource || '');
   const failures = [];
+
   if (paths.repositoryStorage !== path.join(path.resolve(sourceRoot), 'storage')) {
-    failures.push('Repository storage path is not sourceRoot/storage.');
+    failures.push('Repository bundled storage path is not sourceRoot/storage.');
   }
-  if (String(indexSource || '').includes(`path.join(STORAGE_ROOT, 'tenants', 'clubs')`)) {
-    failures.push('Legacy tenants/clubs path is still present.');
+
+  if (source) {
+    const forbidden = [
+      [`path.join(STORAGE_ROOT, 'tenants', 'clubs')`, 'Legacy tenants/clubs path is still present.'],
+      [`path.join(STORAGE_ROOT, 'auth-users.json')`, 'Legacy root-level auth-users path is still present.'],
+      [`writeAtomicJsonFile(storagePaths.dbPath, {});`, 'Unsafe empty tenant database auto-creation is still present.'],
+    ];
+    for (const [token, message] of forbidden) {
+      if (source.includes(token)) failures.push(message);
+    }
+
+    const required = [
+      [`path.join(STORAGE_ROOT, 'tenants')`, 'Canonical tenant root is missing from backend source.'],
+      [`path.join(STORAGE_ROOT, 'auth', 'auth-users.json')`, 'Canonical auth-users path is missing from backend source.'],
+      [`action: 'tenant_database_missing'`, 'Fail-closed missing-tenant handling is missing from backend source.'],
+    ];
+    for (const [token, message] of required) {
+      if (!source.includes(token)) failures.push(message);
+    }
   }
-  if (String(indexSource || '') && !String(indexSource).includes(`path.join(STORAGE_ROOT, 'tenants')`)) {
-    failures.push('Canonical tenants root is missing from backend source.');
-  }
+
   if (failures.length) {
     const error = new Error(failures.join('\n'));
     error.code = 'ATHLYRAX_STORAGE_PATH_CONTRACT_FAILED';
