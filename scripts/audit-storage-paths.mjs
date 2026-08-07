@@ -28,16 +28,8 @@ const forbiddenByFile = new Map([
     `path.join(storageRootPath, 'auth-users.json')`,
     `path.join(resolvedStorageRoot, 'auth-users.json')`,
   ]],
-  ['scripts/storage-safety-lib.mjs', [
-    'linkRepositoryStorage',
-    'symlinkSync(',
-    'repositoryStoragePath',
-  ]],
-  ['scripts/prod-isolation-smoke.mjs', [
-    'Demo tenant expected empty',
-    'Research tenant view expected empty',
-    'authorization: `Bearer',
-  ]],
+  ['scripts/storage-safety-lib.mjs', ['linkRepositoryStorage', 'symlinkSync(', 'repositoryStoragePath']],
+  ['scripts/prod-isolation-smoke.mjs', ['Demo tenant expected empty', 'Research tenant view expected empty', 'authorization: `Bearer']],
   ['scripts/safe-start.mjs', ['linkStorage: true']],
 ]);
 
@@ -59,6 +51,7 @@ for (const required of [
   `path.join(STORAGE_ROOT, 'auth', 'auth-users.json')`,
   `action: 'tenant_database_missing'`,
   `// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD`,
+  `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
   `runStorageSafetyCheck({`,
   `restoreBundledDemoTenantIfNeeded({`,
 ]) {
@@ -68,18 +61,10 @@ for (const required of [
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const postinstall = String(packageJson?.scripts?.postinstall || '');
 const start = String(packageJson?.scripts?.start || '');
-if (!postinstall.includes('patch-canonical-storage-contract.mjs')) {
-  failures.push('package.json: canonical storage patch is not wired into postinstall.');
-}
-if (postinstall.includes('patch-tenant-storage-path.mjs')) {
-  failures.push('package.json: obsolete tenant-storage patch is still wired into postinstall.');
-}
-if (Object.prototype.hasOwnProperty.call(packageJson?.scripts || {}, 'start:unsafe')) {
-  failures.push('package.json: start:unsafe bypass must not exist.');
-}
-if (!start.includes('audit:storage-paths') || !start.includes('safe-start.mjs')) {
-  failures.push('package.json: production start must run storage audit and safe-start.');
-}
+if (!postinstall.includes('patch-canonical-storage-contract.mjs')) failures.push('package.json: canonical storage patch is not wired into postinstall.');
+if (postinstall.includes('patch-tenant-storage-path.mjs')) failures.push('package.json: obsolete tenant-storage patch is still wired into postinstall.');
+if (Object.prototype.hasOwnProperty.call(packageJson?.scripts || {}, 'start:unsafe')) failures.push('package.json: start:unsafe bypass must not exist.');
+if (!start.includes('audit:storage-paths') || !start.includes('safe-start.mjs')) failures.push('package.json: production start must run storage audit and safe-start.');
 
 if (failures.length) {
   console.error('ATHLYRAX_STORAGE_PATH_AUDIT_FAIL');
