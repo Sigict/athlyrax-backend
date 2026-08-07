@@ -14,6 +14,7 @@ import {
   validateRequiredStorageFiles,
 } from './storage-safety-lib.mjs';
 import { validateAuthStoreSemanticIntegrity } from './auth-store-integrity.mjs';
+import { validateInviteStoreSemanticIntegrity } from './invite-store-integrity.mjs';
 import { validateTenantDatabaseSemanticIntegrity } from './tenant-db-integrity.mjs';
 import { assertCanonicalPathContract } from './storage-path-contract.mjs';
 import { assertNoSymlinkStorageLayout } from './storage-path-integrity.mjs';
@@ -66,6 +67,7 @@ applyCanonicalAuthPaths(configuration, process.env);
 const storageFailures = [
   ...validateRequiredStorageFiles(configuration, process.env, fs),
   ...validateAuthStoreSemanticIntegrity(configuration, process.env, fs),
+  ...validateInviteStoreSemanticIntegrity(configuration, process.env, fs),
   ...validateTenantDatabaseSemanticIntegrity(configuration, process.env, fs),
 ];
 if (storageFailures.length > 0) {
