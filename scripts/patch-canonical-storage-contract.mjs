@@ -35,15 +35,23 @@ for (const [legacy, canonical] of replacements) {
 
 const runtimeGuardMarker = `// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD`;
 const appAnchor = `const app = express();`;
-const runtimeGuard = `${runtimeGuardMarker}\nif (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {\n\tconst runtimeStorageConfiguration = resolveStorageConfiguration(process.env, __dirname);\n\tif (runtimeStorageConfiguration.failures.length > 0) {\n\t\tconst error = new Error(runtimeStorageConfiguration.failures.join('\\n'));\n\t\terror.code = 'ATHLYRAX_STORAGE_CONFIGURATION_INVALID';\n\t\tthrow error;\n\t}\n\tconst runtimeLegacyMigration = migrateLegacyStorageIfNeeded({\n\t\tsourceRoot: __dirname,\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tbackupRoot: runtimeStorageConfiguration.backupRoot,\n\t});\n\trestoreBundledDemoTenantIfNeeded({\n\t\tsourceRoot: __dirname,\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tbackupRoot: runtimeStorageConfiguration.backupRoot,\n\t});\n\trunStorageSafetyCheck({ repoRoot: __dirname, requireFiles: true, createDirectories: true });\n\tfinalizeLegacyStorageMigration({\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tmigrationResult: runtimeLegacyMigration,\n\t});\n\tprocess.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';\n}\n\n${appAnchor}`;
+const runtimeGuard = `${runtimeGuardMarker}\nconst athlyraxRuntimeIsProduction = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';\nif (process.env.RENDER_SERVICE_ID && !athlyraxRuntimeIsProduction) {\n\tthrow new Error('Render runtime requires NODE_ENV=production. Refusing unsafe development/default mode.');\n}\nif (athlyraxRuntimeIsProduction) {\n\tconst runtimeStorageConfiguration = resolveStorageConfiguration(process.env, __dirname);\n\tif (runtimeStorageConfiguration.failures.length > 0) {\n\t\tconst error = new Error(runtimeStorageConfiguration.failures.join('\\n'));\n\t\terror.code = 'ATHLYRAX_STORAGE_CONFIGURATION_INVALID';\n\t\tthrow error;\n\t}\n\tconst runtimeLegacyMigration = migrateLegacyStorageIfNeeded({\n\t\tsourceRoot: __dirname,\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tbackupRoot: runtimeStorageConfiguration.backupRoot,\n\t});\n\trestoreBundledDemoTenantIfNeeded({\n\t\tsourceRoot: __dirname,\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tbackupRoot: runtimeStorageConfiguration.backupRoot,\n\t});\n\trunStorageSafetyCheck({ repoRoot: __dirname, requireFiles: true, createDirectories: true });\n\tfinalizeLegacyStorageMigration({\n\t\tstorageRoot: runtimeStorageConfiguration.storageRoot,\n\t\tmigrationResult: runtimeLegacyMigration,\n\t});\n\tprocess.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';\n}\n\n${appAnchor}`;
 
 if (!source.includes(runtimeGuardMarker)) {
   if (!source.includes(appAnchor)) throw new Error('Could not find Express app anchor for canonical storage guard.');
   source = source.replace(appAnchor, runtimeGuard);
 } else {
-  for (const required of ['runtimeStorageConfiguration = resolveStorageConfiguration', 'runtimeLegacyMigration = migrateLegacyStorageIfNeeded({', 'finalizeLegacyStorageMigration({']) {
+  for (const required of ['athlyraxRuntimeIsProduction', 'RENDER_SERVICE_ID', 'runtimeStorageConfiguration = resolveStorageConfiguration', 'runtimeLegacyMigration = migrateLegacyStorageIfNeeded({', 'finalizeLegacyStorageMigration({']) {
     if (!source.includes(required)) throw new Error(`Existing canonical runtime guard is stale: missing ${required}`);
   }
+}
+
+const authFailClosedMarker = `// ATHLYRAX_PRODUCTION_AUTH_STORE_FAIL_CLOSED`;
+if (!source.includes(authFailClosedMarker)) {
+  const authAnchor = `\tconst cleanedFromBackup = sanitizeDemoUsers(fromBackup);\n\n\tif (`;
+  const authReplacement = `\tconst cleanedFromBackup = sanitizeDemoUsers(fromBackup);\n\n${authFailClosedMarker}\n\tif (IS_PRODUCTION && cleanedFromFile.length < 1) {\n\t\tthrow new Error('Production authentication store is empty. Refusing backup/environment/default account fallback.');\n\t}\n\tif (IS_PRODUCTION && cleanedFromBackup.length < 1) {\n\t\tthrow new Error('Production authentication backup is empty. Refusing startup without a valid backup baseline.');\n\t}\n\n\tif (`;
+  if (!source.includes(authAnchor)) throw new Error('Could not find authentication store fallback anchor.');
+  source = source.replace(authAnchor, authReplacement);
 }
 
 const missingTenantResponse = `\t\tappendAuthAuditEvent({\n\t\t\taction: 'tenant_database_missing',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: 'missing_existing_tenant_database',\n\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t});\n\t\tres.status(503).json({\n\t\t\terror: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',\n\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t});\n\t\treturn;`;
@@ -95,8 +103,11 @@ for (const token of [
   storageSafetyImport,
   storageContractImport,
   runtimeGuardMarker,
+  authFailClosedMarker,
   putMarker,
   registrationMarker,
+  `Render runtime requires NODE_ENV=production`,
+  `Production authentication store is empty. Refusing backup/environment/default account fallback.`,
   `resolveStorageConfiguration(process.env, __dirname)`,
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
