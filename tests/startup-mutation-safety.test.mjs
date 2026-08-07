@@ -11,6 +11,7 @@ test('normal safe start is strictly read-only against persistent storage', () =>
   assert.match(source, /validateRequiredStorageFiles\(/);
   assert.match(source, /fs\.accessSync\(directory, fs\.constants\.R_OK \| fs\.constants\.W_OK\)/);
   assert.match(source, /applyCanonicalAuthPaths\(/);
+  assert.match(source, /globalThis\[Symbol\.for\('athlyrax\.safeStartEnforced'\)\] = true/);
   assert.match(source, /await import\(pathToFileURL\(entryPath\)\.href\)/);
 
   for (const forbidden of [
