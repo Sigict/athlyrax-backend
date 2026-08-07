@@ -43,18 +43,25 @@ const safeStart = requireTokens('scripts/safe-start.mjs', [
   `Safe production start requires NODE_ENV=production`,
   `resolveStorageConfiguration(process.env, repoRoot)`,
   `assertCanonicalPathContract({`,
-  `runStorageSafetyCheck({`,
-  `requireFiles: true`,
-  `createDirectories: false`,
+  `validateRequiredStorageFiles(`,
+  `applyCanonicalAuthPaths(`,
+  `fs.accessSync(directory, fs.constants.R_OK | fs.constants.W_OK)`,
   `ATHLYRAX_SAFE_START_ENFORCED`,
 ]);
 for (const forbidden of [
+  'runStorageSafetyCheck(',
+  'ensureStorageDirectories(',
+  'ensureWritableDirectory(',
   'migrateLegacyStorageIfNeeded(',
   'restoreBundledDemoTenantIfNeeded(',
   'finalizeLegacyStorageMigration(',
   'writeStorageReadyMarker(',
+  'writeFileSync(',
   'copyFileSync(',
-]) if (safeStart.includes(forbidden)) failures.push(`scripts/safe-start.mjs: normal startup must not mutate storage through ${forbidden}`);
+  'mkdirSync(',
+  'renameSync(',
+  'unlinkSync(',
+]) if (safeStart.includes(forbidden)) failures.push(`scripts/safe-start.mjs: normal startup must be read-only; forbidden token: ${forbidden}`);
 
 requireTokens('scripts/production-start.mjs', [
   `ATHLYRAX_STORAGE_MIGRATION_APPROVAL`,
@@ -70,6 +77,7 @@ const migration = requireTokens('scripts/migrate-storage-once.mjs', [
   `Refusing to manufacture a backup from the primary store`,
   `migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
+  `sanitizeDemoTenantDatabase({`,
   `writeStorageReadyMarker(`,
   `runStorageSafetyCheck({`,
   `finalizeLegacyStorageMigration({`,
@@ -79,14 +87,23 @@ const migration = requireTokens('scripts/migrate-storage-once.mjs', [
 const migrationOrder = [
   migration.indexOf('migrateLegacyStorageIfNeeded({'),
   migration.indexOf('restoreBundledDemoTenantIfNeeded({'),
+  migration.indexOf('sanitizeDemoTenantDatabase({'),
   migration.indexOf('writeStorageReadyMarker('),
   migration.indexOf('runStorageSafetyCheck({'),
   migration.indexOf('finalizeLegacyStorageMigration({'),
 ];
 if (migrationOrder.some((value) => value < 0) || !migrationOrder.every((value, index) => index === 0 || value > migrationOrder[index - 1])) {
-  failures.push('scripts/migrate-storage-once.mjs: expected migrate -> demo recovery -> marker -> full check -> finalize ordering.');
+  failures.push('scripts/migrate-storage-once.mjs: expected migrate -> demo recovery -> demo sanitization -> marker -> full check -> finalize ordering.');
 }
 
+requireTokens('scripts/demo-data-sanitizer.mjs', [
+  `demo-pre-sanitization`,
+  `demoDataSynthetic`,
+  `tenantId: 'demo-company'`,
+  `containsObviousContactData`,
+  `example.invalid`,
+  `Demo sanitization verification failed`,
+]);
 requireTokens('scripts/storage-path-contract.mjs', [
   `const LEGACY_MIGRATION_MARKER = '.athlyrax-legacy-storage-migration-v1.json'`,
   `path.join(paths.storageRoot, 'tenants', 'clubs')`,
