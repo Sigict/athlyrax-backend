@@ -44,6 +44,15 @@ function hasMeaningfulDemoData(payload) {
   return collectionKeys.some((key) => Array.isArray(payload?.[key]) && payload[key].length > 0);
 }
 
+function validMeaningfulDatabase(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  const stat = fs.statSync(filePath);
+  if (stat.size < 1024) return null;
+  const payload = readJsonObject(filePath);
+  if (!payload || !hasMeaningfulDemoData(payload)) return null;
+  return { filePath, stat, payload };
+}
+
 function isEffectivelyEmptyDatabase(filePath) {
   if (!fs.existsSync(filePath)) return true;
   const stat = fs.statSync(filePath);
@@ -56,31 +65,35 @@ function isEffectivelyEmptyDatabase(filePath) {
 
 export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, backupRoot, logger = console } = {}) {
   const paths = canonicalStoragePaths({ sourceRoot, storageRoot });
-  const bundledDemo = path.join(paths.repositoryStorage, 'tenants', 'demo-company', 'db.json');
   const liveDemo = paths.tenantDb('demo-company');
-  if (!fs.existsSync(bundledDemo)) return { restored: false, reason: 'bundled-demo-not-present', liveDemo };
-
-  const bundledStat = fs.statSync(bundledDemo);
-  const bundledPayload = readJsonObject(bundledDemo);
-  if (!bundledPayload || bundledStat.size < 1024 || !hasMeaningfulDemoData(bundledPayload)) {
-    throw new Error('Bundled demo-company database is invalid, unexpectedly small, or contains no demo records.');
-  }
   if (!isEffectivelyEmptyDatabase(liveDemo)) return { restored: false, reason: 'live-demo-present', liveDemo };
 
+  const legacyDemo = path.join(paths.storageRoot, 'tenants', 'clubs', 'demo-company', 'db.json');
+  const bundledDemo = path.join(paths.repositoryStorage, 'tenants', 'demo-company', 'db.json');
+  const legacyCandidate = validMeaningfulDatabase(legacyDemo);
+  const bundledCandidate = validMeaningfulDatabase(bundledDemo);
+  const sourceCandidate = legacyCandidate || bundledCandidate;
+  if (!sourceCandidate) throw new Error('No valid demo-company recovery database is available.');
+
   fs.mkdirSync(path.dirname(liveDemo), { recursive: true });
-  if (fs.existsSync(liveDemo) && backupRoot) {
-    const backupDirectory = path.join(path.resolve(backupRoot), 'demo-bootstrap-replaced');
-    fs.mkdirSync(backupDirectory, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    fs.copyFileSync(liveDemo, path.join(backupDirectory, `${stamp}-demo-company-db.json`));
+  const backupDirectory = backupRoot ? path.join(path.resolve(backupRoot), 'demo-bootstrap-replaced') : '';
+  if (backupDirectory) fs.mkdirSync(backupDirectory, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  if (fs.existsSync(liveDemo) && backupDirectory) {
+    fs.copyFileSync(liveDemo, path.join(backupDirectory, `${stamp}-canonical-demo-before-recovery.json`));
+  }
+  if (legacyCandidate && backupDirectory) {
+    fs.copyFileSync(legacyDemo, path.join(backupDirectory, `${stamp}-legacy-demo-source-preserved.json`));
   }
 
-  fs.copyFileSync(bundledDemo, liveDemo);
-  const restoredStat = fs.statSync(liveDemo);
-  const restoredPayload = readJsonObject(liveDemo);
-  if (restoredStat.size !== bundledStat.size || !hasMeaningfulDemoData(restoredPayload)) throw new Error('Demo-company restore verification failed.');
-  logger.info(`[storage-path] Restored demo-company database from bundled source (${restoredStat.size} bytes).`);
-  return { restored: true, reason: 'live-demo-missing-or-empty', liveDemo, bytes: restoredStat.size };
+  fs.copyFileSync(sourceCandidate.filePath, liveDemo);
+  const restored = validMeaningfulDatabase(liveDemo);
+  if (!restored || restored.stat.size !== sourceCandidate.stat.size) throw new Error('Demo-company recovery verification failed.');
+
+  const sourceLabel = legacyCandidate ? 'legacy-live' : 'bundled-seed';
+  logger.info(`[storage-path] Restored demo-company database from ${sourceLabel} source (${restored.stat.size} bytes).`);
+  return { restored: true, reason: 'live-demo-missing-or-empty', source: sourceLabel, liveDemo, bytes: restored.stat.size };
 }
 
 export function assertCanonicalPathContract({ sourceRoot, storageRoot, indexSource = '' } = {}) {
@@ -88,7 +101,6 @@ export function assertCanonicalPathContract({ sourceRoot, storageRoot, indexSour
   const source = String(indexSource || '');
   const failures = [];
   if (paths.repositoryStorage !== path.join(path.resolve(sourceRoot), 'storage')) failures.push('Repository bundled storage path is not sourceRoot/storage.');
-
   if (source) {
     const forbidden = [
       [`path.join(STORAGE_ROOT, 'tenants', 'clubs')`, 'Legacy tenants/clubs path is still present.'],
@@ -103,7 +115,6 @@ export function assertCanonicalPathContract({ sourceRoot, storageRoot, indexSour
     ];
     for (const [token, message] of required) if (!source.includes(token)) failures.push(message);
   }
-
   if (failures.length) {
     const error = new Error(failures.join('\n'));
     error.code = 'ATHLYRAX_STORAGE_PATH_CONTRACT_FAILED';
