@@ -1,174 +1,103 @@
-# Render persistent-storage migration
+# AthlyraX production storage contract
 
-Status: **preparation only**. This branch must not be merged or deployed until the live files have been copied and independently verified.
+This document describes the current production storage layout. The previous repository-storage symlink design is obsolete and must not be reintroduced.
 
-## What this change prepares
+## One canonical live root
 
-The current backend writes mutable data beneath the repository checkout. The migration branch adds:
-
-- a fail-closed production start wrapper;
-- explicit `ATHLYRAX_STORAGE_ROOT` and `ATHLYRAX_SAFETY_BACKUP_ROOT` validation;
-- a runtime link from the repository `storage/` path to the mounted persistent root;
-- canonical authentication paths beneath the persistent root;
-- required-file and required-tenant checks;
-- a signed-off storage-ready marker;
-- pre-write database backups and stale-write protection;
-- a staging-only restore tool for the API exports;
-- a separate approval step before the storage root can be accepted as ready.
-
-The wrapper does not deploy itself and does not migrate live data automatically.
-
-## Current preserved API exports
-
-The existing local backup contains distinct API exports for:
-
-- `global-owner`;
-- `demo-company`.
-
-Those exports preserve the database payloads, but they do **not** preserve all filesystem-only records. Before production activation, the raw Render files must also be copied.
-
-## Files that must be copied from the current Render filesystem
-
-Copy these without displaying their contents:
-
-- `storage/db.json`
-- `storage/trainingPlannerTargets.backup.json`
-- `storage/snapshot-submissions.json`
-- `storage/auth-invites.json`
-- `storage/billing-catalog.json`
-- `storage/db-snapshots/`
-- `storage/billing-catalog-backups/`
-- `storage/auth-audit/`
-- `storage/tenants/`
-- `../storage/auth/auth-users.json`
-- `../storage/auth/auth-users.backup.json`
-
-The raw authentication files are essential because the API export intentionally excludes password hashes.
-
-## Critical preservation gate
-
-Do **not** upgrade, restart, redeploy, attach a disk, change the start command, or change environment variables merely to obtain shell access. Any action that replaces or restarts the current instance may destroy its ephemeral filesystem before the raw files are copied.
-
-Before any Render change, obtain written confirmation from Render Support of one of these supported options:
-
-1. temporary read-only access to the currently running instance without restarting or replacing it;
-2. a provider-created archive or snapshot of the current ephemeral filesystem; or
-3. another documented procedure that preserves the existing instance filesystem until the archive has been downloaded and verified.
-
-The support request must explicitly state that Render must not restart, redeploy, upgrade, replace, or modify the service without separate approval.
-
-## Required safe sequence
-
-1. Keep the existing API backup unchanged and copy it to a second independent location.
-2. Contact Render Support and obtain written confirmation of a preservation method that does not restart or replace the current instance before the archive exists.
-3. Do not perform any Render change until that confirmation is received and reviewed.
-4. Using the confirmed preservation method, create and download a complete archive of the filesystem paths listed above.
-5. Verify the archive checksum outside Render and keep a second encrypted copy.
-6. Only after the raw archive is safely preserved, select the paid service and persistent-disk migration procedure.
-7. Attach the persistent disk and restore the archived files into the chosen primary storage root.
-8. Use the API exports only to cross-check or replace the global and tenant `db.json` files when their checksums and record counts have been reviewed.
-9. Create the storage-ready marker with `approve-storage-layout.mjs`.
-10. Run `npm run check:storage-safety`.
-11. Only after the check returns `ATHLYRAX_STORAGE_SAFETY_OK`, merge this PR, configure the environment variables, change the Render start command and deploy.
-12. Verify both tenants, authentication, Planner targets, snapshots, billing and audit history.
-13. Perform one controlled restart and confirm the same checksums and record counts remain.
-
-## Render Support request
-
-Use this wording, replacing nothing except contact details when required:
-
-```text
-I have a Free web service using an ephemeral filesystem.
-
-Service ID: srv-d7rp137lk1mc73daq49g
-
-The currently running instance contains production files that must be preserved before any restart, redeployment, upgrade, replacement or persistent-disk change.
-
-Please confirm whether Render can provide one of the following without restarting or replacing the currently running instance:
-
-1. temporary read-only shell or filesystem access;
-2. a provider-created snapshot/archive of the current ephemeral filesystem; or
-3. another supported procedure that preserves the current instance filesystem until I can download and verify a complete archive.
-
-Do not restart, redeploy, upgrade, replace, attach a disk to, or otherwise modify the service without my separate explicit approval.
-```
-
-## Suggested production configuration
-
-Example paths only; confirm the actual disk mount in Render:
+Production mutable data lives only under the configured persistent root:
 
 ```text
 ATHLYRAX_STORAGE_ROOT=/var/data/athlyrax
+```
+
+Canonical live paths:
+
+```text
+/var/data/athlyrax/db.json
+/var/data/athlyrax/tenants/<tenant-id>/db.json
+/var/data/athlyrax/auth/auth-users.json
+/var/data/athlyrax/auth/auth-users.backup.json
+/var/data/athlyrax/auth-invites.json
+/var/data/athlyrax/legal-acceptances.jsonl
+/var/data/athlyrax/trainingPlannerTargets.backup.json
+/var/data/athlyrax/db-snapshots/
+/var/data/athlyrax/billing-catalog.json
+/var/data/athlyrax/billing-catalog-backups/
+/var/data/athlyrax/snapshot-submissions.json
+/var/data/athlyrax/auth-audit/
+```
+
+The demo tenant path is therefore:
+
+```text
+/var/data/athlyrax/tenants/demo-company/db.json
+```
+
+`tenants/clubs/<tenant-id>` is a legacy path and must never be used by runtime code.
+
+## Repository storage is not live storage
+
+`<source-root>/storage/` contains bundled recovery/seed material. It is not a production write target and is not symlinked to the persistent disk.
+
+The bundled demo database may be used only by the guarded demo recovery routine when the canonical live demo database is missing or effectively empty. If a meaningful legacy demo database exists at the old `tenants/clubs/demo-company/db.json` location, it is preserved to the safety-backup root and preferred over the bundled seed so newer demo data is not discarded.
+
+## Safety backup root
+
+A separate configured directory is required:
+
+```text
 ATHLYRAX_SAFETY_BACKUP_ROOT=/var/data/athlyrax-safety
-ATHLYRAX_REQUIRED_TENANTS=demo-company
-ATHLYRAX_CHECK_REQUIRE_FILES=true
 ```
 
-The primary and safety roots must be different and must not be nested. Two directories on the same disk protect against an accidental database replacement, but they are not independent disaster recovery. Retain an encrypted external backup.
+It must not equal or be nested inside the primary root. This protects against accidental replacement but is not independent disaster recovery. Keep an external encrypted backup as well.
 
-The wrapper automatically defaults these paths unless explicitly overridden:
+## Fail-closed rules
 
-```text
-AUTH_USERS_PATH=$ATHLYRAX_STORAGE_ROOT/auth/auth-users.json
-AUTH_USERS_BACKUP_PATH=$ATHLYRAX_STORAGE_ROOT/auth/auth-users.backup.json
-```
+Production refuses to start when:
 
-Future Render start command:
-
-```text
-node scripts/safe-start.mjs
-```
-
-Do not change the current Render start command until the persistent root has been populated and approved.
-
-## Stage the API exports locally
-
-This command writes only to a new, empty local staging directory and refuses Render paths:
-
-```powershell
-node scripts/stage-storage-restore.mjs `
-  --destination "C:\safe\athlyrax-storage-stage" `
-  --global-db "C:\backup\global-owner-db.json" `
-  --tenant "demo-company=C:\backup\demo-company-db.json" `
-  --approve STAGE_ONLY
-```
-
-It deliberately does not create the production approval marker because the API export is incomplete by itself.
-
-## Approve a complete restored storage root
-
-After the raw authentication files and all required databases have been restored:
-
-```text
-node scripts/approve-storage-layout.mjs \
-  --storage-root /var/data/athlyrax \
-  --required-tenants demo-company \
-  --approve CREATE_READY_MARKER
-```
-
-Then run:
-
-```text
-npm run check:storage-safety
-```
-
-The production wrapper refuses to start when:
-
-- either root is missing;
-- a root points into `/opt/render/project`;
+- the primary or safety root is missing;
+- either root points into `/opt/render/project`;
 - the roots are equal or nested;
 - `db.json` is missing;
-- `auth/auth-users.json` is missing;
+- canonical `auth/auth-users.json` is missing;
 - a required tenant database is missing;
-- the storage-ready marker is absent or invalid.
+- the storage-ready marker is absent or invalid;
+- an auth or legal-record path environment override points somewhere other than the canonical location.
 
-## Rollback
+`GET /db` and `PUT /db` must not create an empty replacement for a missing existing tenant database. They return an error and record an audit event instead.
 
-Before activation, preserve:
+## Required production start
 
-- the full old filesystem archive;
-- the API export folder and checksum manifest;
-- the pre-deploy Git commit;
-- checksums of all restored global and tenant databases.
+Use:
 
-If verification fails, do not write through the new backend. Restore the previous start command and deployment only after confirming the old data source remains intact.
+```text
+npm start
+```
+
+`npm start` executes the storage-path tests and audit before `safe-start.mjs`. The install step also patches and verifies the production entrypoint so a direct `node index.js` production start still enforces the canonical persistent-storage guard.
+
+There is no supported `start:unsafe` command.
+
+## Pre-deploy verification
+
+Run:
+
+```text
+npm run test:storage-all
+npm run test:closed-pilot-security
+npm run verify:closed-pilot-security
+```
+
+The storage audit must return:
+
+```text
+ATHLYRAX_STORAGE_PATH_AUDIT_OK
+```
+
+The storage safety check must return:
+
+```text
+ATHLYRAX_STORAGE_SAFETY_OK
+```
+
+Do not deploy if either check fails.
