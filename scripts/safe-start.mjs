@@ -67,7 +67,7 @@ console.info(`[storage-safety] Primary storage root: ${configuration.storageRoot
 console.info(`[storage-safety] Safety backup root: ${configuration.backupRoot}`);
 console.info('[storage-safety] ATHLYRAX_STORAGE_SAFETY_OK');
 
-process.env.ATHLYRAX_SAFE_START_ENFORCED = 'true';
+globalThis[Symbol.for('athlyrax.safeStartEnforced')] = true;
 
 installDataSafetyGuards();
 installExpressDbRevisionResponseGuard(express);
