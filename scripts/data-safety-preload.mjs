@@ -80,7 +80,15 @@ function backupDatabase(dbPath, reason, env, maxFiles, fsModule = fs) {
     directory,
     `${stamp}-${process.pid}-${crypto.randomBytes(4).toString('hex')}.json`,
   );
+  const sourceBytes = fsModule.readFileSync(dbPath);
   fsModule.copyFileSync(dbPath, destination);
+  const backupBytes = fsModule.readFileSync(destination);
+  if (!sourceBytes.equals(backupBytes)) {
+    try { fsModule.unlinkSync(destination); } catch {}
+    const error = new Error(`Safety backup verification failed for ${dbPath}.`);
+    error.code = 'ATHLYRAX_DB_BACKUP_VERIFICATION_FAILED';
+    throw error;
+  }
   rotate(directory, maxFiles, fsModule);
   return destination;
 }
@@ -150,8 +158,26 @@ export function installDataSafetyGuards(options = {}) {
       return;
     }
 
+    const destinationExists = fsModule.existsSync(destination);
     const current = safeJsonRead(destination, fsModule);
     const incoming = safeJsonRead(source, fsModule);
+
+    if (destinationExists && !current) {
+      const preview = backupDatabase(destination, 'invalid-current-blocked', env, maxFiles, fsModule);
+      const error = new Error(
+        `Refusing database replacement because the current database is unreadable or invalid JSON: ${destination}`
+        + (preview ? `; current bytes preserved at ${preview}` : ''),
+      );
+      error.code = 'ATHLYRAX_CURRENT_DB_INVALID';
+      throw error;
+    }
+
+    if (!incoming) {
+      const error = new Error(`Refusing database replacement because the incoming database is unreadable or invalid JSON: ${source}`);
+      error.code = 'ATHLYRAX_INCOMING_DB_INVALID';
+      throw error;
+    }
+
     const currentRevisionValue = getStorageRevision(current);
     const currentRevision = currentRevisionValue ?? 0;
     const incomingRevision = getStorageRevision(incoming);
@@ -177,7 +203,7 @@ export function installDataSafetyGuards(options = {}) {
       throw error;
     }
 
-    if (incoming) writeRevisionToIncoming(source, incoming, currentRevision + 1, fsModule);
+    writeRevisionToIncoming(source, incoming, currentRevision + 1, fsModule);
     const backup = backupDatabase(destination, 'pre-write', env, maxFiles, fsModule);
     try {
       return originalRenameSync(source, destination);
