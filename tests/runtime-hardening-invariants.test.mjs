@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { validateInviteStoreSemanticIntegrity } from '../scripts/invite-store-integrity.mjs';
 
-test('production build contains runtime auth billing identity and ownership hardening', () => {
+test('production build contains runtime auth billing identity ownership and tenant hardening', () => {
   const source = fs.readFileSync(path.resolve('index.js'), 'utf8');
   for (const token of [
     'ATHLYRAX_AUTH_ROW_METADATA_PRESERVED',
@@ -14,11 +14,13 @@ test('production build contains runtime auth billing identity and ownership hard
     'ATHLYRAX_BILLING_CHECKOUT_POLICY_ENFORCED',
     'ATHLYRAX_BILLING_MEMORY_ROLLBACK',
     'ATHLYRAX_BILLING_CATALOG_MEMORY_ROLLBACK',
+    'ATHLYRAX_BILLING_CATALOG_PARTIAL_UPDATE_PRESERVES_STATE',
     'ATHLYRAX_INVITE_ROW_METADATA_PRESERVED',
     'ATHLYRAX_INVITE_CODE_CRYPTO_RNG',
     'ATHLYRAX_INVITE_CODE_UNIQUENESS_FAIL_CLOSED',
     'ATHLYRAX_STRIPE_EVENT_ORDER_GUARD',
     'ATHLYRAX_SERVER_AUTHORITATIVE_OWNERSHIP_METADATA',
+    'ATHLYRAX_ORPHAN_TENANT_CLAIM_BLOCKED',
   ]) assert.ok(source.includes(token), `missing runtime hardening token ${token}`);
 
   assert.equal(source.includes("const isBillingEnforced = isBillingEnabled && BILLING_ENFORCED;"), false);
@@ -27,6 +29,8 @@ test('production build contains runtime auth billing identity and ownership hard
   assert.equal(source.includes('Math.floor(Math.random() * alphabet.length)'), false);
   assert.equal(source.includes('buildExistingDbRowIdIndex('), false);
   assert.ok(source.includes("app.post('/db/ownership-backfill', requireAuth, requireAdminRole, requireBillingWriteAccess"));
+  assert.ok(source.includes('Team storage already exists without an active membership. Automatic claiming is blocked'));
+  assert.ok(source.includes('Each configured Stripe price ID may belong to only one billing plan.'));
 });
 
 test('invite semantic validator rejects duplicates invalid tenant and impossible use count', () => {
