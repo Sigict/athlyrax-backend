@@ -16,6 +16,7 @@ import {
 import { validateAuthStoreSemanticIntegrity } from './auth-store-integrity.mjs';
 import { validateInviteStoreSemanticIntegrity } from './invite-store-integrity.mjs';
 import { validateTenantDatabaseSemanticIntegrity } from './tenant-db-integrity.mjs';
+import { validateBillingCatalogSemanticIntegrity } from './billing-catalog-store-integrity.mjs';
 import { assertCanonicalPathContract } from './storage-path-contract.mjs';
 import { assertNoSymlinkStorageLayout } from './storage-path-integrity.mjs';
 import { assertNoActiveMigrationTransaction } from './migration-transaction-state.mjs';
@@ -69,6 +70,7 @@ const storageFailures = [
   ...validateAuthStoreSemanticIntegrity(configuration, process.env, fs),
   ...validateInviteStoreSemanticIntegrity(configuration, process.env, fs),
   ...validateTenantDatabaseSemanticIntegrity(configuration, process.env, fs),
+  ...validateBillingCatalogSemanticIntegrity(configuration, process.env, fs),
 ];
 if (storageFailures.length > 0) {
   const error = new Error(storageFailures.join('\n'));
