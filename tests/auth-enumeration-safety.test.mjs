@@ -12,7 +12,7 @@ function route(startText) {
   return source.slice(start, next >= 0 ? next : source.length);
 }
 
-test('password reset request endpoints do not reveal delivery outcome', () => {
+test('password reset request endpoints do not reveal delivery outcome or use first-match identity lookup', () => {
   for (const startText of [
     "app.post('/auth/password-reset/request'",
     "app.post('/snapshot/account/password-reset/request'",
@@ -21,6 +21,8 @@ test('password reset request endpoints do not reveal delivery outcome', () => {
     assert.ok(body.includes("If an account exists, a reset code has been issued."));
     assert.equal(body.includes('Could not issue reset code. Please contact your administrator.'), false);
     assert.equal(body.includes('Could not issue reset code. Please try again.'), false);
+    assert.equal(body.includes('findAuthUserByIdentifier(identifier)'), false);
+    assert.ok(body.includes('resolveLoginUserByIdentifier(identifier)'));
   }
 });
 
@@ -34,4 +36,22 @@ test('password reset confirm endpoints do not reveal whether the account exists'
     assert.equal(body.includes("res.status(404).json({ error: 'User not found.' });"), false);
     assert.ok(body.includes("res.status(400).json({ error: 'Reset code is invalid or expired.' });"));
   }
+  const snapshotConfirm = route("app.post('/snapshot/account/password-reset/confirm'");
+  assert.equal(snapshotConfirm.includes('findAuthUserByIdentifier(identifier)'), false);
+  assert.ok(snapshotConfirm.includes('resolveLoginUserByIdentifier(identifier)'));
+});
+
+test('snapshot sign-in rejects ambiguous identifiers instead of selecting first match', () => {
+  const body = route("app.post('/snapshot/account/auth'");
+  assert.ok(body.includes('ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE'));
+  assert.ok(body.includes('resolveLoginUserByIdentifier(identifier)'));
+  assert.equal(body.includes('findAuthUserByIdentifier(identifier)'), false);
+});
+
+test('onboarding cannot change an account onto another account email', () => {
+  const body = route("app.post('/auth/onboarding/complete'");
+  assert.ok(body.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS'));
+  assert.ok(body.includes("String(row?.username || '').trim() !== username"));
+  assert.ok(body.includes("String(row?.email || '').trim().toLowerCase() === normalizedOnboardingEmail"));
+  assert.ok(body.includes("res.status(409).json({ error: 'Email is already registered.' });"));
 });
