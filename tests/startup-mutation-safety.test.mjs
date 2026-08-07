@@ -39,6 +39,23 @@ test('canonical transformation makes imported production bootstrap non-mutating'
   assert.match(persistence, /Refusing startup-time recovery, normalization or default bootstrap/);
 });
 
+test('production transforms have single ownership for tenant contracts and retention', () => {
+  const operational = read('scripts/patch-operational-integrity.mjs');
+  const authTenant = read('scripts/patch-auth-tenant-integrity.mjs');
+  const retention = read('scripts/patch-runtime-data-retention.mjs');
+  for (const token of ['ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT', 'ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN']) {
+    assert.ok(operational.includes(token), `operational transform must own ${token}`);
+    assert.ok(authTenant.includes(token), `auth-tenant transform must verify earlier ${token}`);
+  }
+  assert.equal(authTenant.includes('function replaceRequired('), false, 'auth-tenant transform must not rewrite earlier creation/invite guards');
+  for (const temporary of ['ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE', 'ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE']) {
+    assert.equal(operational.includes(temporary), false, `operational transform must not install temporary retention behavior: ${temporary}`);
+    assert.equal(retention.includes(temporary), true, `runtime retention must explicitly reject temporary marker: ${temporary}`);
+  }
+  assert.ok(retention.includes('ATHLYRAX_PRODUCTION_AUDIT_ARCHIVE_BEFORE_DELETE'));
+  assert.ok(retention.includes('ATHLYRAX_BOUNDED_PRIMARY_DB_SNAPSHOT_RETENTION'));
+});
+
 test('storage validator covers every store loaded during production bootstrap and demo data', () => {
   const source = read('scripts/storage-safety-lib.mjs');
   for (const token of [
