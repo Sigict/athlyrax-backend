@@ -9,6 +9,7 @@ test('coach link workflow exists and is coach-authoritative', () => {
   for (const token of [
     'ATHLYRAX_COACH_LINK_WORKFLOW_V1',
     'ATHLYRAX_COACH_LINK_LIFECYCLE_V1',
+    'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE',
     "app.post('/swimmer/coach/request'",
     "app.get('/coach/swimmer-links'",
     "app.post('/coach/swimmer-links/:requestId/accept'",
@@ -17,6 +18,32 @@ test('coach link workflow exists and is coach-authoritative', () => {
     'coachLinkSourceTenantId',
     'ATHLYRAX_COACH_LINK_PARENT_CONTACTS_PRIVATE',
   ]) assert.ok(source.includes(token), `missing coach-link workflow token ${token}`);
+});
+
+test('generic swimmer profile sync cannot create or mutate coach-link lifecycle state', () => {
+  const syncStart = source.indexOf("app.post('/swimmer/profile/sync'");
+  const requestStart = source.indexOf("app.post('/swimmer/coach/request'", syncStart);
+  assert.ok(syncStart >= 0 && requestStart > syncStart, 'swimmer profile sync route bounds missing');
+  const syncSource = source.slice(syncStart, requestStart);
+
+  for (const token of [
+    "const nextCoachLinkStatus = previousCoachLinkStatus;",
+    "coachConnected: previousCoachConnected",
+    "coachEmail: String(existingRow?.coachEmail || '')",
+    "coachCode: String(existingRow?.coachCode || '')",
+    "coachRequestAt: String(existingRow?.coachRequestAt || '')",
+    "coachReplyAt: String(existingRow?.coachReplyAt || '')",
+    "coachApprovalAt: String(existingRow?.coachApprovalAt || '')",
+  ]) assert.ok(syncSource.includes(token), `generic profile sync does not preserve server coach-link authority: ${token}`);
+
+  for (const forbidden of [
+    "requestedCoachLinkStatus === 'pending'",
+    "coachConnected: sanitizedSync.payload.coachConnected",
+    "coachLinkStatus: sanitizedSync.payload.coachLinkStatus",
+    "coachEmail: sanitizedSync.payload.coachEmail",
+    "coachRequestAt: sanitizedSync.payload.coachRequestAt",
+    "coachApprovalAt: sanitizedSync.payload.coachApprovalAt",
+  ]) assert.equal(syncSource.includes(forbidden), false, `generic profile sync still controls coach-link state: ${forbidden}`);
 });
 
 test('assistant coaches can view requests but only session coordinator can accept or reject', () => {
