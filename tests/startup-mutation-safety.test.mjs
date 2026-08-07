@@ -39,14 +39,11 @@ test('canonical transformation makes imported production bootstrap non-mutating'
 test('storage validator covers every store loaded during production bootstrap', () => {
   const source = read('scripts/storage-safety-lib.mjs');
   for (const token of [
-    'authInvitesPath',
-    'snapshotSubmissionsPath',
-    'billingCatalogPath',
+    'authInvitesPath', 'snapshotSubmissionsPath', 'billingCatalogPath',
     'validateJsonArray(configuration.authInvitesPath',
     'validateJsonArray(configuration.snapshotSubmissionsPath',
     'validateBillingCatalog(configuration.billingCatalogPath',
-    'validateAuthPrimaryBackupParity',
-    'validateAuthBoundTenantDatabases',
+    'validateAuthPrimaryBackupParity', 'validateAuthBoundTenantDatabases',
   ]) assert.ok(source.includes(token), `startup storage validation is missing ${token}`);
 });
 
@@ -60,18 +57,22 @@ test('production wrapper runs migration only with the exact explicit approval va
   assert.match(source, /invalid value/);
 });
 
-test('storage migration is explicit, ordered and sanitizes demo data before activation', () => {
+test('storage migration is explicit, rollback-safe, ordered and sanitizes demo data before activation', () => {
   const source = read('scripts/migrate-storage-once.mjs');
   assert.match(source, /MIGRATE_CANONICAL_STORAGE_ONCE/);
   assert.match(source, /Refusing to manufacture a backup from the primary store/);
+  assert.match(source, /beginTransaction\(/);
+  assert.match(source, /migration-transaction-snapshots/);
+  assert.match(source, /rollbackTransaction\(/);
+  assert.match(source, /Migration rollback verification failed/);
   assert.match(source, /migrateLegacyStorageIfNeeded\(\{/);
   assert.match(source, /restoreBundledDemoTenantIfNeeded\(\{/);
   assert.match(source, /sanitizeDemoTenantDatabase\(\{/);
   assert.match(source, /writeStorageReadyMarker\(/);
   assert.match(source, /runStorageSafetyCheck\(\{/);
   assert.match(source, /finalizeLegacyStorageMigration\(\{/);
-  assert.match(source, /restorePreviousReadyMarker/);
   const order = [
+    source.indexOf('beginTransaction(configuration.storageRoot'),
     source.indexOf('migrateLegacyStorageIfNeeded({'),
     source.indexOf('restoreBundledDemoTenantIfNeeded({'),
     source.indexOf('sanitizeDemoTenantDatabase({'),
@@ -85,6 +86,8 @@ test('storage migration is explicit, ordered and sanitizes demo data before acti
 
 test('approval marker validates all startup stores and all auth-bound tenants', () => {
   const source = read('scripts/approve-storage-layout.mjs');
+  assert.match(source, /Storage approval requires NODE_ENV=production/);
+  assert.match(source, /--storage-root must equal configured ATHLYRAX_STORAGE_ROOT/);
   assert.match(source, /assertJsonArray\(paths\.authInvites/);
   assert.match(source, /assertJsonArray\(paths\.snapshotSubmissions/);
   assert.match(source, /assertBillingCatalog\(paths\.billingCatalog/);
