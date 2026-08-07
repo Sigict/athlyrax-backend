@@ -36,6 +36,10 @@ function normalizeTenantId(value) {
     .replace(/[^a-z0-9_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
+function isCanonicalTenantId(value) {
+  const raw = clean(value);
+  return Boolean(raw) && raw === normalizeTenantId(raw) && /^[a-z0-9_-]+$/.test(raw);
+}
 
 export function resolveStorageConfiguration(env = process.env, repoRoot = process.cwd()) {
   const resolvedRepoRoot = path.resolve(repoRoot);
@@ -253,8 +257,8 @@ export function validateRequiredStorageFiles(configuration, env = process.env, f
 
   const tenants = clean(env.ATHLYRAX_REQUIRED_TENANTS).split(',').map((value) => value.trim()).filter(Boolean);
   for (const tenantId of tenants) {
-    if (!/^[a-zA-Z0-9._-]+$/.test(tenantId)) {
-      failures.push(`Invalid tenant key in ATHLYRAX_REQUIRED_TENANTS: ${tenantId}`);
+    if (!isCanonicalTenantId(tenantId)) {
+      failures.push(`Invalid or noncanonical tenant key in ATHLYRAX_REQUIRED_TENANTS: ${tenantId}`);
       continue;
     }
     const tenantPath = path.join(configuration.tenantRootPath, tenantId, 'db.json');
@@ -265,9 +269,10 @@ export function validateRequiredStorageFiles(configuration, env = process.env, f
 
   if (configuration.production) {
     const marker = readReadyMarker(configuration.readyMarkerPath, fsModule);
-    if (!marker || marker.version !== STORAGE_LAYOUT_VERSION || marker.approved !== true) failures.push(`Storage approval marker is missing or invalid: ${configuration.readyMarkerPath}`);
-    if (marker?.storageRoot && path.resolve(marker.storageRoot) !== configuration.storageRoot) {
-      failures.push(`Storage approval marker belongs to a different storage root: ${marker.storageRoot}`);
+    if (!marker || marker.version !== STORAGE_LAYOUT_VERSION || marker.approved !== true) {
+      failures.push(`Storage approval marker is missing or invalid: ${configuration.readyMarkerPath}`);
+    } else if (!marker.storageRoot || path.resolve(marker.storageRoot) !== configuration.storageRoot) {
+      failures.push(`Storage approval marker is not bound to this storage root: ${configuration.readyMarkerPath}`);
     }
   }
   return failures;
