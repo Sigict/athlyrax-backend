@@ -2,6 +2,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { canonicalStoragePaths } from './scripts/storage-path-contract.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,16 +50,14 @@ function verifyPassword(plainPassword, storedHash) {
     const salt = Buffer.from(parts[1], 'base64');
     const expected = Buffer.from(parts[2], 'base64');
     const candidate = crypto.scryptSync(String(plainPassword || ''), salt, expected.length);
-    if (candidate.length !== expected.length) return false;
-    return crypto.timingSafeEqual(candidate, expected);
+    return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
   } catch {
     return false;
   }
 }
 
-function loadAuthUsers(storageRootPath) {
+function loadAuthUsers(authUsersPath) {
   try {
-    const authUsersPath = path.join(storageRootPath, 'auth-users.json');
     if (!fs.existsSync(authUsersPath)) return [];
     const rows = JSON.parse(fs.readFileSync(authUsersPath, 'utf8'));
     if (Array.isArray(rows)) return rows;
@@ -79,8 +78,7 @@ function getDefaultCredentialFailures(users) {
       continue;
     }
     const defaultPassword = KNOWN_DEFAULT_PASSWORDS.get(username);
-    if (!defaultPassword) continue;
-    if (verifyPassword(defaultPassword, row?.passwordHash)) {
+    if (defaultPassword && verifyPassword(defaultPassword, row?.passwordHash)) {
       failures.push(`Known default password is still active for account: ${username}`);
     }
   }
@@ -88,7 +86,6 @@ function getDefaultCredentialFailures(users) {
 }
 
 const failures = [];
-
 if (!IS_PRODUCTION) failures.push('NODE_ENV must be production');
 if (!SAFE_START_ENFORCED) failures.push('Safe-start enforcement flag missing');
 if (!AUTH_REQUIRED) failures.push('AUTH_REQUIRED must be true');
@@ -109,17 +106,20 @@ if (!SAFETY_BACKUP_ROOT) failures.push('ATHLYRAX_SAFETY_BACKUP_ROOT must be set'
 
 const resolvedStorageRoot = STORAGE_ROOT ? path.resolve(STORAGE_ROOT) : path.join(__dirname, 'storage');
 const resolvedBackupRoot = SAFETY_BACKUP_ROOT ? path.resolve(SAFETY_BACKUP_ROOT) : '';
+const canonical = canonicalStoragePaths({ sourceRoot: __dirname, storageRoot: resolvedStorageRoot });
+const configuredAuthPath = String(process.env.AUTH_USERS_PATH || '').trim();
+if (configuredAuthPath && path.resolve(configuredAuthPath) !== canonical.authUsers) {
+  failures.push(`AUTH_USERS_PATH must equal canonical path: ${canonical.authUsers}`);
+}
 if (!checkWritableDir(resolvedStorageRoot)) failures.push('Storage root is not writable');
 if (!resolvedBackupRoot || !checkWritableDir(resolvedBackupRoot)) failures.push('Backup root is not writable');
 if (resolvedBackupRoot && resolvedStorageRoot && resolvedBackupRoot === resolvedStorageRoot) {
   failures.push('Backup root must be separate from storage root');
 }
-const authUsers = loadAuthUsers(resolvedStorageRoot);
-if (authUsers === null) {
-  failures.push('Auth users file could not be parsed');
-} else {
-  failures.push(...getDefaultCredentialFailures(authUsers));
-}
+
+const authUsers = loadAuthUsers(canonical.authUsers);
+if (authUsers === null) failures.push('Auth users file could not be parsed');
+else failures.push(...getDefaultCredentialFailures(authUsers));
 
 if (failures.length > 0) {
   console.error('ATHLYRAX_CLOSED_PILOT_SECURITY_FAIL');
