@@ -35,6 +35,8 @@ requireAll('index.js', [
   `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
   `// ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
   `// ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION`,
+  `// ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED`,
+  `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
 ]);
 forbidAll('index.js', [
@@ -83,6 +85,12 @@ requireAll('scripts/patch-auth-persistence-transaction.mjs', [
   `Authentication primary/backup verification failed after persistence.`,
   `restorePrevious(AUTH_USERS_PATH`,
   `restorePrevious(AUTH_USERS_BACKUP_PATH`,
+]);
+requireAll('scripts/patch-auth-enumeration-safety.mjs', [
+  `ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED`,
+  `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [`,
+  `ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE`,
+  `ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS`,
 ]);
 
 requireAll('scripts/safe-start.mjs', [
@@ -199,9 +207,10 @@ if (!start.includes('test:storage-all') || !start.includes('production-start.mjs
 if (start.includes('migrate-storage-once.mjs')) failures.push('package.json: normal start must not invoke migration directly.');
 for (const required of [
   'test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:auth-persistence-transaction',
-  'test:storage-routing-safety', 'test:storage-migration-identity', 'test:storage-extra-invariants', 'test:startup-mutation-safety',
-  'test:storage-path-integrity', 'test:storage-path-contract', 'test:signup-legal-acceptance',
-  'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths',
+  'test:auth-enumeration-safety', 'test:storage-routing-safety', 'test:storage-migration-identity',
+  'test:storage-extra-invariants', 'test:startup-mutation-safety', 'test:storage-path-integrity',
+  'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore',
+  'test:closed-pilot-security', 'audit:storage-paths',
 ]) if (!storageAll.includes(required)) failures.push(`package.json: test:storage-all missing ${required}`);
 
 if (failures.length) {
