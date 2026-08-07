@@ -4,6 +4,14 @@ import path from 'node:path';
 const indexPath = path.resolve('index.js');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
+const layoutMarker = `// ATHLYRAX_PRODUCTION_STORAGE_LAYOUT_READ_ONLY`;
+if (!source.includes(layoutMarker)) {
+  const layoutStart = `function ensureStorageLayout(storagePaths = null) {\n\tconst dbPath = storagePaths?.dbPath || DB_PATH;`;
+  const safeLayoutStart = `function ensureStorageLayout(storagePaths = null) {\n${layoutMarker}\n\tif (IS_PRODUCTION) return;\n\tconst dbPath = storagePaths?.dbPath || DB_PATH;`;
+  if (!source.includes(layoutStart)) throw new Error('Could not find storage-layout bootstrap anchor.');
+  source = source.replace(layoutStart, safeLayoutStart);
+}
+
 const snapshotMarker = `// ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`;
 if (!source.includes(snapshotMarker)) {
   const unsafeSnapshotLoader = `function loadOrCreateSnapshotSubmissions() {\n\tconst parsed = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);\n\tif (Array.isArray(parsed)) return parsed;\n\ttry {\n\t\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, []);\n\t} catch {\n\t\t// Keep boot resilient when first-write fails.\n\t}\n\treturn [];\n}\n\nfunction persistSnapshotSubmissions() {\n\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, Array.isArray(snapshotSubmissions) ? snapshotSubmissions : []);\n}`;
@@ -41,6 +49,7 @@ if (!source.includes(passwordResetMarker)) {
 }
 
 for (const token of [
+  layoutMarker,
   snapshotMarker,
   snapshotRetentionMarker,
   billingMarker,
