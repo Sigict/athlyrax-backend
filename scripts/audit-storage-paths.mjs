@@ -37,6 +37,7 @@ requireAll('index.js', [
   `// ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION`,
   `// ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED`,
   `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [`,
+  `// ATHLYRAX_ONBOARDING_EMAIL_UNIQUE`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
 ]);
 forbidAll('index.js', [
@@ -47,6 +48,7 @@ forbidAll('index.js', [
   `process.env.ATHLYRAX_SAFE_START_ENFORCED`,
   `const registrationTenantProvisioningToken = crypto.randomUUID();`,
   `// ATHLYRAX_AUTH_STORE_PAIR_TRANSACTION`,
+  `// ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS`,
 ]);
 
 requireAll('scripts/patch-canonical-storage-contract.mjs', [
@@ -90,8 +92,9 @@ requireAll('scripts/patch-auth-enumeration-safety.mjs', [
   `ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED`,
   `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [`,
   `ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE`,
-  `ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS`,
+  `ATHLYRAX_ONBOARDING_EMAIL_UNIQUE`,
 ]);
+forbidAll('scripts/patch-auth-enumeration-safety.mjs', [`ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS`]);
 
 requireAll('scripts/safe-start.mjs', [
   `validateRequiredStorageFiles(`,
