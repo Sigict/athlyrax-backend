@@ -21,12 +21,14 @@ if (!source.includes(authTransactionMarker)) {
 }
 
 const snapshotMarker = `// ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`;
+const snapshotWipeMarker = `// ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`;
 if (!source.includes(snapshotMarker)) {
   const unsafeSnapshotLoader = `function loadOrCreateSnapshotSubmissions() {\n\tconst parsed = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);\n\tif (Array.isArray(parsed)) return parsed;\n\ttry {\n\t\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, []);\n\t} catch {\n\t\t// Keep boot resilient when first-write fails.\n\t}\n\treturn [];\n}\n\nfunction persistSnapshotSubmissions() {\n\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, Array.isArray(snapshotSubmissions) ? snapshotSubmissions : []);\n}`;
-  const safeSnapshotLoader = `function loadOrCreateSnapshotSubmissions() {\n${snapshotMarker}\n\tif (fs.existsSync(SNAPSHOT_SUBMISSIONS_PATH)) {\n\t\tconst parsed = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);\n\t\tif (!Array.isArray(parsed)) {\n\t\t\tthrow new Error('Snapshot submissions store is unreadable or invalid. Refusing to replace it with an empty file.');\n\t\t}\n\t\treturn parsed;\n\t}\n\tif (IS_PRODUCTION) {\n\t\tthrow new Error('Snapshot submissions store is missing. Refusing startup-time creation.');\n\t}\n\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, []);\n\treturn [];\n}\n\nfunction persistSnapshotSubmissions() {\n\tif (!Array.isArray(snapshotSubmissions)) {\n\t\tthrow new Error('Snapshot submissions in-memory state is invalid. Refusing destructive persistence.');\n\t}\n\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, snapshotSubmissions);\n}`;
+  const safeSnapshotLoader = `function loadOrCreateSnapshotSubmissions() {\n${snapshotMarker}\n\tif (fs.existsSync(SNAPSHOT_SUBMISSIONS_PATH)) {\n\t\tconst parsed = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);\n\t\tif (!Array.isArray(parsed)) {\n\t\t\tthrow new Error('Snapshot submissions store is unreadable or invalid. Refusing to replace it with an empty file.');\n\t\t}\n\t\treturn parsed;\n\t}\n\tif (IS_PRODUCTION) {\n\t\tthrow new Error('Snapshot submissions store is missing. Refusing startup-time creation.');\n\t}\n\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, []);\n\treturn [];\n}\n\nfunction persistSnapshotSubmissions() {\n\tif (!Array.isArray(snapshotSubmissions)) {\n\t\tthrow new Error('Snapshot submissions in-memory state is invalid. Refusing destructive persistence.');\n\t}\n${snapshotWipeMarker}\n\tif (IS_PRODUCTION && snapshotSubmissions.length === 0 && fs.existsSync(SNAPSHOT_SUBMISSIONS_PATH)) {\n\t\tconst current = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);\n\t\tif (!Array.isArray(current)) throw new Error('Snapshot submissions store is unreadable or invalid. Refusing destructive persistence.');\n\t\tif (current.length > 0) {\n\t\t\tconst error = new Error('Refusing to replace non-empty snapshot history with an empty history. Use an explicit controlled reset procedure.');\n\t\t\terror.code = 'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED';\n\t\t\tthrow error;\n\t\t}\n\t}\n\twriteAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, snapshotSubmissions);\n}`;
   if (!source.includes(unsafeSnapshotLoader)) throw new Error('Could not find snapshot submissions loader anchor.');
   source = source.replace(unsafeSnapshotLoader, safeSnapshotLoader);
 }
+if (!source.includes(snapshotWipeMarker)) throw new Error('Snapshot history empty-wipe guard is missing.');
 
 const snapshotRetentionMarker = `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`;
 if (!source.includes(snapshotRetentionMarker)) {
@@ -59,6 +61,8 @@ for (const token of [
   authTransactionMarker,
   `ATHLYRAX_AUTH_STORE_TRANSACTION_ROLLBACK_FAILED`,
   snapshotMarker,
+  snapshotWipeMarker,
+  `ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
   snapshotRetentionMarker,
   billingMarker,
   passwordResetMarker,
