@@ -12,16 +12,10 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf8');
 }
 function withGuard(root, run, extraEnv = {}) {
-  const installation = installDataSafetyGuards({
-    fsModule: fs,
-    env: { ATHLYRAX_SAFETY_BACKUP_ROOT: path.join(root, 'safety'), ...extraEnv },
-    logger: { info() {}, error() {} },
-  });
+  const installation = installDataSafetyGuards({ fsModule: fs, env: { ATHLYRAX_SAFETY_BACKUP_ROOT: path.join(root, 'safety'), ...extraEnv }, logger: { info() {}, error() {} } });
   try { return run(); } finally { installation.uninstall(); }
 }
-function provisioningToken(secret, destination) {
-  return crypto.createHmac('sha256', secret).update(path.resolve(destination)).digest('hex');
-}
+function provisioningToken(secret, destination) { return crypto.createHmac('sha256', secret).update(path.resolve(destination)).digest('hex'); }
 
 test('corrupt current database is never overwritten and its bytes are backed up', { concurrency: false }, () => {
   const root = tempDir('athlyrax-data-safety-current-');
@@ -31,9 +25,7 @@ test('corrupt current database is never overwritten and its bytes are backed up'
   const corrupt = '{not valid json';
   fs.writeFileSync(destination, corrupt, 'utf8');
   writeJson(source, { swimmers: [], __meta: { storageRevision: 0 } });
-  withGuard(root, () => {
-    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_CURRENT_DB_INVALID');
-  });
+  withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_CURRENT_DB_INVALID'); });
   assert.equal(fs.readFileSync(destination, 'utf8'), corrupt);
   const backupRoot = path.join(root, 'safety', 'invalid-current-blocked');
   assert.equal(fs.existsSync(backupRoot), true);
@@ -49,9 +41,7 @@ test('invalid incoming database is rejected before replacement', { concurrency: 
   const source = path.join(root, 'tenant', 'db.json.tmp');
   writeJson(destination, { swimmers: [{ id: 'keep' }], __meta: { storageRevision: 3 } });
   fs.writeFileSync(source, '{invalid', 'utf8');
-  withGuard(root, () => {
-    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_INCOMING_DB_INVALID');
-  });
+  withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_INCOMING_DB_INVALID'); });
   assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8')).swimmers[0].id, 'keep');
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -83,15 +73,39 @@ test('legacy database without storage revision can be adopted exactly once at re
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('legacy database accepts an explicit incoming revision zero and advances to revision one', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-data-safety-legacy-zero-');
+  const destination = path.join(root, 'tenant', 'db.json');
+  const source = path.join(root, 'tenant', 'db.json.tmp');
+  writeJson(destination, { swimmers: [{ id: 'old' }], __meta: {} });
+  writeJson(source, { swimmers: [{ id: 'new-zero' }], __meta: { storageRevision: 0 } });
+  withGuard(root, () => fs.renameSync(source, destination));
+  const next = JSON.parse(fs.readFileSync(destination, 'utf8'));
+  assert.equal(next.swimmers[0].id, 'new-zero');
+  assert.equal(next.__meta.storageRevision, 1);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('legacy database rejects an incoming positive revision instead of guessing lineage', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-data-safety-legacy-positive-conflict-');
+  const destination = path.join(root, 'tenant', 'db.json');
+  const source = path.join(root, 'tenant', 'db.json.tmp');
+  writeJson(destination, { swimmers: [{ id: 'keep' }], __meta: {} });
+  writeJson(source, { swimmers: [{ id: 'wrong-lineage' }], __meta: { storageRevision: 2 } });
+  withGuard(root, () => {
+    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_DB_REVISION_CONFLICT');
+  });
+  assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8')).swimmers[0].id, 'keep');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('existing database with core records cannot be replaced by a zero-record payload', { concurrency: false }, () => {
   const root = tempDir('athlyrax-data-safety-total-wipe-');
   const destination = path.join(root, 'tenant', 'db.json');
   const source = path.join(root, 'tenant', 'db.json.tmp');
   writeJson(destination, { swimmers: [{ id: 'keep' }], tests: [{ id: 'test-1' }], __meta: { storageRevision: 2 } });
   writeJson(source, { swimmers: [], tests: [], __meta: { storageRevision: 2 } });
-  withGuard(root, () => {
-    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_DB_TOTAL_DATA_WIPE_BLOCKED');
-  });
+  withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_DB_TOTAL_DATA_WIPE_BLOCKED'); });
   assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8')).swimmers[0].id, 'keep');
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -101,9 +115,7 @@ test('missing production database cannot be silently recreated from an ordinary 
   const destination = path.join(root, 'tenant', 'db.json');
   const source = path.join(root, 'tenant', 'db.json.tmp');
   writeJson(source, { swimmers: [] });
-  withGuard(root, () => {
-    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED');
-  }, { NODE_ENV: 'production', AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long' });
+  withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED'); }, { NODE_ENV: 'production', AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long' });
   assert.equal(fs.existsSync(destination), false);
   assert.equal(fs.existsSync(source), true);
   fs.rmSync(root, { recursive: true, force: true });
@@ -114,9 +126,7 @@ test('forged client provisioning metadata cannot recreate a missing production d
   const destination = path.join(root, 'tenant', 'db.json');
   const source = path.join(root, 'tenant', 'db.json.tmp');
   writeJson(source, { __meta: { provisionedBy: 'auth-register', provisioningToken: 'client-controlled-token' }, swimmers: [] });
-  withGuard(root, () => {
-    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED');
-  }, { NODE_ENV: 'production', AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long' });
+  withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED'); }, { NODE_ENV: 'production', AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long' });
   assert.equal(fs.existsSync(destination), false);
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -128,9 +138,7 @@ test('server-bound tenant provisioning may create a new production database and 
   const source = path.join(storageRoot, 'tenants', 'club-a', 'db.json.tmp');
   const secret = 'test-auth-secret-at-least-32-characters-long';
   writeJson(source, { __meta: { tenantId: 'club-a', provisionedBy: 'auth-register', provisioningToken: provisioningToken(secret, destination) }, swimmers: [] });
-  withGuard(root, () => fs.renameSync(source, destination), {
-    NODE_ENV: 'production', AUTH_SECRET: secret, ATHLYRAX_STORAGE_ROOT: storageRoot,
-  });
+  withGuard(root, () => fs.renameSync(source, destination), { NODE_ENV: 'production', AUTH_SECRET: secret, ATHLYRAX_STORAGE_ROOT: storageRoot });
   const created = JSON.parse(fs.readFileSync(destination, 'utf8'));
   assert.equal(created.__meta.tenantId, 'club-a');
   assert.equal(created.__meta.provisionedBy, 'auth-register');
@@ -146,9 +154,7 @@ test('incoming cross-tenant database cannot replace another tenant database', { 
   const source = path.join(storageRoot, 'tenants', 'club-a', 'db.json.tmp');
   writeJson(destination, { __meta: { tenantId: 'club-a', storageRevision: 2 }, swimmers: [{ id: 'keep-a' }] });
   writeJson(source, { __meta: { tenantId: 'club-b', storageRevision: 2 }, swimmers: [{ id: 'wrong-b' }] });
-  withGuard(root, () => {
-    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_DB_TENANT_IDENTITY_CONFLICT');
-  }, { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long' });
+  withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_DB_TENANT_IDENTITY_CONFLICT'); }, { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long' });
   assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8')).swimmers[0].id, 'keep-a');
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -160,9 +166,7 @@ test('tenant write with missing identity is canonicalized to destination tenant'
   const source = path.join(storageRoot, 'tenants', 'club-a', 'db.json.tmp');
   writeJson(destination, { __meta: { tenantId: 'club-a', storageRevision: 1 }, swimmers: [{ id: 'old' }] });
   writeJson(source, { __meta: { storageRevision: 1 }, swimmers: [{ id: 'new' }] });
-  withGuard(root, () => fs.renameSync(source, destination), {
-    NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long',
-  });
+  withGuard(root, () => fs.renameSync(source, destination), { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long' });
   const updated = JSON.parse(fs.readFileSync(destination, 'utf8'));
   assert.equal(updated.__meta.tenantId, 'club-a');
   assert.equal(updated.__meta.storageRevision, 2);
@@ -193,9 +197,7 @@ test('invalid critical auth replacement is blocked before current store changes'
   const source = path.join(storageRoot, 'auth', 'auth-users.json.tmp');
   writeJson(destination, [{ username: 'keep-user', role: 'head-coach' }]);
   writeJson(source, []);
-  withGuard(root, () => {
-    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_CRITICAL_STORE_INCOMING_INVALID');
-  }, { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
+  withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_CRITICAL_STORE_INCOMING_INVALID'); }, { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
   assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8'))[0].username, 'keep-user');
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -207,9 +209,7 @@ test('non-empty snapshot history cannot be silently replaced by an empty critica
   const source = path.join(storageRoot, 'snapshot-submissions.json.tmp');
   writeJson(destination, [{ id: 'old' }]);
   writeJson(source, []);
-  withGuard(root, () => {
-    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED');
-  }, { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
+  withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED'); }, { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
   assert.deepEqual(JSON.parse(fs.readFileSync(destination, 'utf8')), [{ id: 'old' }]);
   fs.rmSync(root, { recursive: true, force: true });
 });
