@@ -111,15 +111,50 @@ function readReadyMarker(markerPath, fsModule = fs) {
   } catch { return null; }
 }
 
+function readJsonForValidation(filePath, fsModule = fs) {
+  try {
+    return { ok: true, value: JSON.parse(fsModule.readFileSync(filePath, 'utf8')) };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function validateDatabaseObject(filePath, label, fsModule = fs) {
+  if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
+  const parsed = readJsonForValidation(filePath, fsModule);
+  if (!parsed.ok) return [`${label} is not valid JSON: ${filePath}`];
+  if (!parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) {
+    return [`${label} must contain a JSON object: ${filePath}`];
+  }
+  return [];
+}
+
+function validateAuthStore(filePath, fsModule = fs) {
+  if (!fsModule.existsSync(filePath)) return [`Required storage file is missing: ${filePath}`];
+  const parsed = readJsonForValidation(filePath, fsModule);
+  if (!parsed.ok) return [`Authentication user store is not valid JSON: ${filePath}`];
+  const users = Array.isArray(parsed.value)
+    ? parsed.value
+    : (parsed.value && Array.isArray(parsed.value.users) ? parsed.value.users : null);
+  if (!users) return [`Authentication user store must contain a users array: ${filePath}`];
+  return [];
+}
+
 export function validateRequiredStorageFiles(configuration, env = process.env, fsModule = fs) {
   const failures = [];
-  const required = [configuration.globalDbPath, configuration.authUsersPath];
+  failures.push(...validateDatabaseObject(configuration.globalDbPath, 'Global database', fsModule));
+  failures.push(...validateAuthStore(configuration.authUsersPath, fsModule));
+
   const tenants = clean(env.ATHLYRAX_REQUIRED_TENANTS).split(',').map((value) => value.trim()).filter(Boolean);
   for (const tenantId of tenants) {
-    if (!/^[a-zA-Z0-9._-]+$/.test(tenantId)) { failures.push(`Invalid tenant key in ATHLYRAX_REQUIRED_TENANTS: ${tenantId}`); continue; }
-    required.push(path.join(configuration.tenantRootPath, tenantId, 'db.json'));
+    if (!/^[a-zA-Z0-9._-]+$/.test(tenantId)) {
+      failures.push(`Invalid tenant key in ATHLYRAX_REQUIRED_TENANTS: ${tenantId}`);
+      continue;
+    }
+    const tenantPath = path.join(configuration.tenantRootPath, tenantId, 'db.json');
+    failures.push(...validateDatabaseObject(tenantPath, `Tenant database ${tenantId}`, fsModule));
   }
-  for (const requiredPath of required) if (!fsModule.existsSync(requiredPath)) failures.push(`Required storage file is missing: ${requiredPath}`);
+
   if (configuration.production) {
     const marker = readReadyMarker(configuration.readyMarkerPath, fsModule);
     if (!marker || marker.version !== STORAGE_LAYOUT_VERSION || marker.approved !== true) failures.push(`Storage approval marker is missing or invalid: ${configuration.readyMarkerPath}`);
