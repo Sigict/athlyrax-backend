@@ -12,12 +12,22 @@ if (!source.includes(snapshotMarker)) {
   source = source.replace(unsafeSnapshotLoader, safeSnapshotLoader);
 }
 
+const snapshotRetentionMarker = `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`;
+if (!source.includes(snapshotRetentionMarker)) {
+  const destructiveCap = `\tsnapshotSubmissions.unshift(submission);\n\tif (snapshotSubmissions.length > 5000) {\n\t\tsnapshotSubmissions.length = 5000;\n\t}`;
+  const preserveAll = `\tsnapshotSubmissions.unshift(submission);\n\t${snapshotRetentionMarker}`;
+  if (!source.includes(destructiveCap)) throw new Error('Could not find destructive snapshot history cap.');
+  source = source.replace(destructiveCap, preserveAll);
+}
+if (source.includes('snapshotSubmissions.length = 5000;')) {
+  throw new Error('Destructive snapshot history truncation remains in backend source.');
+}
+
 const billingMarker = `// ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED`;
 if (!source.includes(billingMarker)) {
   const loaderStart = source.indexOf('function loadOrCreateBillingCatalog() {');
   const loaderEnd = source.indexOf('\nfunction persistBillingCatalog()', loaderStart);
   if (loaderStart < 0 || loaderEnd < 0) throw new Error('Could not locate billing catalog loader.');
-  const oldLoader = source.slice(loaderStart, loaderEnd);
   const safeLoader = `function isValidRawBillingCatalog(raw) {\n\treturn Boolean(raw)\n\t\t&& typeof raw === 'object'\n\t\t&& !Array.isArray(raw)\n\t\t&& Array.isArray(raw.plans)\n\t\t&& raw.plans.length > 0\n\t\t&& raw.plans.every((plan) => plan && typeof plan === 'object' && String(plan.key || '').trim());\n}\n\nfunction loadLatestBillingCatalogBackupStrict() {\n\tif (!fs.existsSync(BILLING_CATALOG_BACKUP_DIR)) return null;\n\tconst snapshots = fs.readdirSync(BILLING_CATALOG_BACKUP_DIR)\n\t\t.filter((name) => name.startsWith('billing-catalog-') && name.endsWith('.json'))\n\t\t.map((name) => ({\n\t\t\tfullPath: path.join(BILLING_CATALOG_BACKUP_DIR, name),\n\t\t\tmtime: fs.statSync(path.join(BILLING_CATALOG_BACKUP_DIR, name)).mtimeMs,\n\t\t}))\n\t\t.sort((a, b) => b.mtime - a.mtime);\n\tfor (const snapshot of snapshots) {\n\t\tconst parsed = readJsonFile(snapshot.fullPath);\n\t\tif (!isValidRawBillingCatalog(parsed)) continue;\n\t\treturn normalizeBillingCatalog(parsed);\n\t}\n\treturn null;\n}\n\nfunction loadOrCreateBillingCatalog() {\n${billingMarker}\n\tensureStorageLayout();\n\tconst exists = fs.existsSync(BILLING_CATALOG_PATH);\n\tconst existing = exists ? readJsonFile(BILLING_CATALOG_PATH) : null;\n\tif (isValidRawBillingCatalog(existing)) {\n\t\tconst normalized = normalizeBillingCatalog(existing);\n\t\twriteAtomicJsonFile(BILLING_CATALOG_PATH, normalized);\n\t\tbackupBillingCatalogSnapshot(normalized, 'bootstrap-current');\n\t\treturn normalized;\n\t}\n\n\tconst recovered = loadLatestBillingCatalogBackupStrict();\n\tif (recovered) {\n\t\tconsole.warn('[billing] billing-catalog.json missing/invalid; restored latest structurally valid backup snapshot.');\n\t\twriteAtomicJsonFile(BILLING_CATALOG_PATH, recovered);\n\t\treturn recovered;\n\t}\n\n\tif (IS_PRODUCTION || BILLING_STRICT_RECOVERY) {\n\t\tconst state = exists ? 'invalid' : 'missing';\n\t\tthrow new Error(\`[billing] billing-catalog.json is \${state} and no structurally valid backup is available. Refusing default bootstrap.\`);\n\t}\n\n\tconst normalized = normalizeBillingCatalog(null);\n\tconsole.warn('[billing] No billing catalog or valid backup found; bootstrapping defaults outside production.');\n\twriteAtomicJsonFile(BILLING_CATALOG_PATH, normalized);\n\tbackupBillingCatalogSnapshot(normalized, 'bootstrap-default');\n\treturn normalized;\n}\n`;
   source = source.slice(0, loaderStart) + safeLoader + source.slice(loaderEnd);
 }
@@ -32,6 +42,7 @@ if (!source.includes(passwordResetMarker)) {
 
 for (const token of [
   snapshotMarker,
+  snapshotRetentionMarker,
   billingMarker,
   passwordResetMarker,
   'Snapshot submissions store is unreadable or invalid. Refusing to replace it with an empty file.',
