@@ -31,14 +31,14 @@ if (approval === APPROVAL) {
   const interrupted = readActiveMigrationTransaction(configuration.backupRoot, fs);
   const completed = migrationAlreadyCompleted(paths.legacyMigrationMarker);
 
-  // An active crash-recovery journal takes precedence over the finalized marker.
-  // A process can die after finalization but before the journal is cleared; in
-  // that case the explicit migration command must run again so it can restore
-  // the pre-migration transaction snapshot and retry cleanly.
-  if (interrupted || !completed) {
-    console.log(interrupted
-      ? '[storage] Interrupted migration transaction detected. Running approved recovery before normal startup.'
-      : '[storage] Explicit one-time migration approval detected. Running canonical storage migration before normal startup.');
+  // ATHLYRAX_ONE_TIME_MIGRATION_APPROVAL_MUST_BE_REMOVED
+  // Crash recovery takes priority. Otherwise a completed migration plus the
+  // approval environment variable is an operator configuration error: refuse
+  // startup until the one-time approval is removed. This prevents a lost marker
+  // in a later incident from silently turning a stale environment variable into
+  // authorization to run migration again.
+  if (interrupted) {
+    console.log('[storage] Interrupted migration transaction detected. Running approved recovery before normal startup.');
     const result = spawnSync(
       process.execPath,
       [path.join(sourceRoot, 'scripts', 'migrate-storage-once.mjs'), '--approve', APPROVAL],
@@ -46,8 +46,17 @@ if (approval === APPROVAL) {
     );
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`Approved one-time storage migration/recovery failed with exit code ${result.status}.`);
+  } else if (completed) {
+    throw new Error('Canonical storage migration is already complete. Remove ATHLYRAX_STORAGE_MIGRATION_APPROVAL before normal production startup.');
   } else {
-    console.log('[storage] One-time storage migration is already finalized. No migration or recovery mutation will run.');
+    console.log('[storage] Explicit one-time migration approval detected. Running canonical storage migration before normal startup.');
+    const result = spawnSync(
+      process.execPath,
+      [path.join(sourceRoot, 'scripts', 'migrate-storage-once.mjs'), '--approve', APPROVAL],
+      { cwd: sourceRoot, env: process.env, stdio: 'inherit' },
+    );
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`Approved one-time storage migration/recovery failed with exit code ${result.status}.`);
   }
 }
 
