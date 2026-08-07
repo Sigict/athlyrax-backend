@@ -17,6 +17,13 @@ if (!source.includes(marker)) {
     source = source.replace(conflictOld, conflictNew);
   }
 
+  const capacityOld = `\t\tif (existingTargetIndex < 0) {\n\t\t\tconst { limits } = resolveTenantPlanLimits(actorTenantId);`;
+  const capacityNew = `\t\tconst acceptanceAddsActiveSwimmer = existingTargetIndex < 0 || currentTargetRows[existingTargetIndex]?.active === false;\n\t\tif (acceptanceAddsActiveSwimmer) {\n\t\t\tconst { limits } = resolveTenantPlanLimits(actorTenantId);`;
+  if (!source.includes('acceptanceAddsActiveSwimmer')) {
+    if (!source.includes(capacityOld)) throw new Error('Reconnect capacity anchor not found.');
+    source = source.replace(capacityOld, capacityNew);
+  }
+
   const approvedActiveOld = `\t\t\ttenantId: actorTenantId,\n\t\t\tpathway: 'club',\n\t\t\tcoachConnected: true,`;
   const approvedActiveNew = `\t\t\ttenantId: actorTenantId,\n\t\t\tactive: true,\n\t\t\tpathway: 'club',\n\t\t\tcoachConnected: true,`;
   if (!source.includes(approvedActiveNew)) {
@@ -44,6 +51,8 @@ if (!source.includes(marker)) {
 for (const required of [
   'ATHLYRAX_COACH_LINK_RECONNECT_V1',
   "existingTargetStatus !== 'approved' && existingTargetStatus !== 'disconnected'",
+  'acceptanceAddsActiveSwimmer',
+  "existingTargetIndex < 0 || currentTargetRows[existingTargetIndex]?.active === false",
   'tenantId: actorTenantId,\n\t\t\tactive: true',
   'tenantId: sourceTenantId,\n\t\t\tactive: true',
   "active: false,\n\t\t\t\tcoachConnected: false,\n\t\t\t\tcoachLinkStatus: 'disconnected'",
