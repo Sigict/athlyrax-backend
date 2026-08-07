@@ -95,3 +95,24 @@ test('meaningful legacy demo database is preferred and preserved before bundled 
   assert.ok(preserved.some((name) => name.includes('legacy-demo-source-preserved')));
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('corrupt canonical demo database fails closed instead of being overwritten', () => {
+  const root = tempDir('athlyrax-demo-corrupt-');
+  const sourceRoot = path.join(root, 'source');
+  const storageRoot = path.join(root, 'persistent');
+  const backupRoot = path.join(root, 'backup');
+  const bundled = path.join(sourceRoot, 'storage', 'tenants', 'demo-company', 'db.json');
+  const live = path.join(storageRoot, 'tenants', 'demo-company', 'db.json');
+  fs.mkdirSync(path.dirname(bundled), { recursive: true });
+  fs.mkdirSync(path.dirname(live), { recursive: true });
+  fs.writeFileSync(bundled, `${JSON.stringify(meaningfulPayload('bundle-'))}\n`, 'utf8');
+  const corrupt = '{ this is not valid json '.repeat(100);
+  fs.writeFileSync(live, corrupt, 'utf8');
+
+  assert.throws(
+    () => restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, backupRoot, logger: { info() {} } }),
+    /unreadable or invalid JSON/,
+  );
+  assert.equal(fs.readFileSync(live, 'utf8'), corrupt);
+  fs.rmSync(root, { recursive: true, force: true });
+});
