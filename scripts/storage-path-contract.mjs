@@ -30,13 +30,30 @@ function readJsonObject(filePath) {
   }
 }
 
+function hasMeaningfulDemoData(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  const collectionKeys = [
+    'swimmers',
+    'squads',
+    'trainingSessions',
+    'trainingSessionSets',
+    'tests',
+    'attendance',
+    'competitions',
+    'fixtures',
+    'groups',
+  ];
+  return collectionKeys.some((key) => Array.isArray(payload?.[key]) && payload[key].length > 0);
+}
+
 function isEffectivelyEmptyDatabase(filePath) {
   if (!fs.existsSync(filePath)) return true;
   const stat = fs.statSync(filePath);
   if (stat.size <= 16) return true;
   const parsed = readJsonObject(filePath);
   if (!parsed) return false;
-  return Object.keys(parsed).length === 0;
+  if (Object.keys(parsed).length === 0) return true;
+  return !hasMeaningfulDemoData(parsed);
 }
 
 export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, backupRoot, logger = console } = {}) {
@@ -50,8 +67,8 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
 
   const bundledStat = fs.statSync(bundledDemo);
   const bundledPayload = readJsonObject(bundledDemo);
-  if (!bundledPayload || bundledStat.size < 1024) {
-    throw new Error('Bundled demo-company database is invalid or unexpectedly small.');
+  if (!bundledPayload || bundledStat.size < 1024 || !hasMeaningfulDemoData(bundledPayload)) {
+    throw new Error('Bundled demo-company database is invalid, unexpectedly small, or contains no demo records.');
   }
 
   if (!isEffectivelyEmptyDatabase(liveDemo)) {
@@ -69,8 +86,9 @@ export function restoreBundledDemoTenantIfNeeded({ sourceRoot, storageRoot, back
 
   fs.copyFileSync(bundledDemo, liveDemo);
   const restoredStat = fs.statSync(liveDemo);
-  if (restoredStat.size !== bundledStat.size) {
-    throw new Error('Demo-company restore verification failed: byte count mismatch.');
+  const restoredPayload = readJsonObject(liveDemo);
+  if (restoredStat.size !== bundledStat.size || !hasMeaningfulDemoData(restoredPayload)) {
+    throw new Error('Demo-company restore verification failed.');
   }
 
   logger.info(`[storage-path] Restored demo-company database from bundled source (${restoredStat.size} bytes).`);
