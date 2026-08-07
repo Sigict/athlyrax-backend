@@ -43,6 +43,7 @@ const transforms = [
   'scripts/patch-billing-catalog-integrity.mjs',
   'scripts/patch-account-lifecycle-integrity.mjs',
   'scripts/patch-swimmer-coach-authority.mjs',
+  'scripts/patch-parent-notification-semantics.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
 ];
 
