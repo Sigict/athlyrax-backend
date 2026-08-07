@@ -14,8 +14,11 @@ try {
   if (args['--approve'] !== 'CREATE_READY_MARKER') {
     throw new Error('Explicit approval is required: --approve CREATE_READY_MARKER');
   }
-  const storageRoot = path.resolve(String(args['--storage-root'] || ''));
-  if (!storageRoot || storageRoot === path.parse(storageRoot).root) throw new Error('A valid --storage-root is required.');
+
+  const rawStorageRoot = String(args['--storage-root'] || '').trim();
+  if (!rawStorageRoot) throw new Error('A valid --storage-root is required.');
+  const storageRoot = path.resolve(rawStorageRoot);
+  if (storageRoot === path.parse(storageRoot).root) throw new Error('A filesystem root cannot be used as --storage-root.');
 
   const paths = canonicalStoragePaths({ sourceRoot: process.cwd(), storageRoot });
   if (!fs.existsSync(paths.globalDb)) throw new Error(`Missing ${paths.globalDb}`);
