@@ -40,6 +40,7 @@ const transforms = [
   'scripts/patch-runtime-identity-event-safety.mjs',
   'scripts/patch-ownership-integrity.mjs',
   'scripts/patch-orphan-tenant-safety.mjs',
+  'scripts/patch-billing-catalog-integrity.mjs',
 ];
 
 for (const relative of transforms) {
