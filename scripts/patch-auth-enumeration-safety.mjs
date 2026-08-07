@@ -5,6 +5,7 @@ const indexPath = path.resolve('index.js');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const marker = '// ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE';
+const productionDefaultsMarker = '// ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED';
 
 function routeBounds(routeStartText) {
   const start = source.indexOf(routeStartText);
@@ -19,6 +20,13 @@ function replaceRoute(routeStartText, transform) {
   const after = transform(before);
   if (after === before) throw new Error(`Auth identity hardening made no change for route: ${routeStartText}`);
   source = source.slice(0, start) + after + source.slice(end);
+}
+
+if (!source.includes(productionDefaultsMarker)) {
+  const seedAnchor = `const DEFAULT_AUTH_USERS = [`;
+  const safeSeedAnchor = `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [\n\t${productionDefaultsMarker}`;
+  if (!source.includes(seedAnchor)) throw new Error('Default authentication-user seed anchor missing.');
+  source = source.replace(seedAnchor, safeSeedAnchor);
 }
 
 if (!source.includes(marker)) {
@@ -93,6 +101,8 @@ for (const required of [
   'ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS',
+  'ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED',
+  'const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
 ]) if (!source.includes(required)) throw new Error(`Auth identity/enumeration hardening missing: ${required}`);
 
 for (const routeStartText of [
