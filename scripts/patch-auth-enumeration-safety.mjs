@@ -6,6 +6,7 @@ let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const marker = '// ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE';
 const productionDefaultsMarker = '// ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED';
+const legacyResolverRemovedMarker = '// ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED';
 
 function routeBounds(routeStartText) {
   const start = source.indexOf(routeStartText);
@@ -37,10 +38,7 @@ if (!source.includes(marker)) {
     next = next.replace(resolver, `\t// ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE\n\tconst { user } = resolveLoginUserByIdentifier(identifier);`);
     const failure = "res.status(500).json({ error: 'Could not issue reset code. Please contact your administrator.' });";
     if (!next.includes(failure)) throw new Error('Primary password-reset request delivery-failure response anchor missing.');
-    return next.replace(
-      failure,
-      "// ATHLYRAX_PASSWORD_RESET_REQUEST_GENERIC_FAILURE_RESPONSE\n\t\tres.status(200).json({ ok: true, message: 'If an account exists, a reset code has been issued.' });",
-    );
+    return next.replace(failure, "// ATHLYRAX_PASSWORD_RESET_REQUEST_GENERIC_FAILURE_RESPONSE\n\t\tres.status(200).json({ ok: true, message: 'If an account exists, a reset code has been issued.' });");
   });
 
   replaceRoute("app.post('/snapshot/account/password-reset/request'", (route) => {
@@ -60,10 +58,7 @@ if (!source.includes(marker)) {
     return route.replace(resolver, `\t// ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE\n\tconst { user } = resolveLoginUserByIdentifier(identifier);`);
   });
 
-  for (const routeStartText of [
-    "app.post('/auth/password-reset/confirm'",
-    "app.post('/snapshot/account/password-reset/confirm'",
-  ]) {
+  for (const routeStartText of ["app.post('/auth/password-reset/confirm'", "app.post('/snapshot/account/password-reset/confirm'"]) {
     replaceRoute(routeStartText, (route) => {
       let next = route;
       if (routeStartText.includes('/snapshot/account/')) {
@@ -72,16 +67,19 @@ if (!source.includes(marker)) {
         next = next.replace(resolver, `\t// ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE\n\tconst { user } = resolveLoginUserByIdentifier(identifier);`);
       }
       const unknown = "res.status(404).json({ error: 'User not found.' });";
-      const count = next.split(unknown).length - 1;
-      if (count < 1) throw new Error(`Password-reset confirm user-enumeration anchor missing: ${routeStartText}`);
-      return next.replaceAll(
-        unknown,
-        "// ATHLYRAX_PASSWORD_RESET_CONFIRM_GENERIC_UNKNOWN_ACCOUNT\n\t\tres.status(400).json({ error: 'Reset code is invalid or expired.' });",
-      );
+      if (!next.includes(unknown)) throw new Error(`Password-reset confirm user-enumeration anchor missing: ${routeStartText}`);
+      return next.replaceAll(unknown, "// ATHLYRAX_PASSWORD_RESET_CONFIRM_GENERIC_UNKNOWN_ACCOUNT\n\t\tres.status(400).json({ error: 'Reset code is invalid or expired.' });");
     });
   }
 
   source = `${marker}\n${source}`;
+}
+
+if (!source.includes(legacyResolverRemovedMarker)) {
+  const legacyStart = source.indexOf('function findAuthUserByIdentifier(identifier) {');
+  const legacyEnd = source.indexOf('\nfunction resolveLoginUserByIdentifier(', legacyStart);
+  if (legacyStart < 0 || legacyEnd < 0) throw new Error('Legacy first-match identifier helper bounds missing.');
+  source = `${source.slice(0, legacyStart)}${legacyResolverRemovedMarker}\n${source.slice(legacyEnd + 1)}`;
 }
 
 for (const required of [
@@ -95,49 +93,24 @@ for (const required of [
   'ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED',
   'const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
+  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED',
 ]) if (!source.includes(required)) throw new Error(`Auth identity/enumeration hardening missing: ${required}`);
 
-if (!source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUE')) {
-  throw new Error('Onboarding email uniqueness must be installed by the earlier runtime-retention transform.');
-}
-if (source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) {
-  throw new Error('Duplicate onboarding email-uniqueness guard remains.');
-}
-
-for (const routeStartText of [
-  "app.post('/auth/password-reset/confirm'",
-  "app.post('/snapshot/account/password-reset/confirm'",
-]) {
-  const { start, end } = routeBounds(routeStartText);
-  const route = source.slice(start, end);
-  if (route.includes("res.status(404).json({ error: 'User not found.' });")) {
-    throw new Error(`Password-reset confirm still reveals unknown accounts: ${routeStartText}`);
-  }
+if (!source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUE')) throw new Error('Onboarding email uniqueness must be installed by the earlier runtime-retention transform.');
+if (source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) throw new Error('Duplicate onboarding email-uniqueness guard remains.');
+if (source.includes('function findAuthUserByIdentifier(') || source.includes('findAuthUserByIdentifier(identifier)')) {
+  throw new Error('Legacy first-match identifier helper or call remains in transformed backend.');
 }
 
-for (const routeStartText of [
-  "app.post('/auth/password-reset/request'",
-  "app.post('/snapshot/account/password-reset/request'",
-]) {
+for (const routeStartText of ["app.post('/auth/password-reset/confirm'", "app.post('/snapshot/account/password-reset/confirm'"]) {
   const { start, end } = routeBounds(routeStartText);
   const route = source.slice(start, end);
-  if (route.includes('Could not issue reset code. Please contact your administrator.') || route.includes('Could not issue reset code. Please try again.')) {
-    throw new Error(`Password-reset request still exposes delivery outcome: ${routeStartText}`);
-  }
-  if (route.includes('findAuthUserByIdentifier(identifier)')) {
-    throw new Error(`Password-reset request still uses first-match identifier resolution: ${routeStartText}`);
-  }
+  if (route.includes("res.status(404).json({ error: 'User not found.' });")) throw new Error(`Password-reset confirm still reveals unknown accounts: ${routeStartText}`);
 }
-
-for (const routeStartText of [
-  "app.post('/snapshot/account/auth'",
-  "app.post('/snapshot/account/password-reset/confirm'",
-]) {
+for (const routeStartText of ["app.post('/auth/password-reset/request'", "app.post('/snapshot/account/password-reset/request'", "app.post('/snapshot/account/auth'", "app.post('/snapshot/account/password-reset/confirm'"]) {
   const { start, end } = routeBounds(routeStartText);
   const route = source.slice(start, end);
-  if (route.includes('findAuthUserByIdentifier(identifier)')) {
-    throw new Error(`Snapshot auth route still uses first-match identifier resolution: ${routeStartText}`);
-  }
+  if (route.includes('findAuthUserByIdentifier(identifier)')) throw new Error(`Auth route still uses first-match identifier resolution: ${routeStartText}`);
 }
 
 fs.writeFileSync(indexPath, source, 'utf8');
