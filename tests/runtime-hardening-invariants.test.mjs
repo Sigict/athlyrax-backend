@@ -22,6 +22,12 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_SERVER_AUTHORITATIVE_OWNERSHIP_METADATA',
     'ATHLYRAX_ORPHAN_TENANT_CLAIM_BLOCKED',
     'ATHLYRAX_LAST_TENANT_ACCOUNT_DELETE_BLOCKED',
+    'ATHLYRAX_SWIMMER_CANNOT_SELF_APPROVE_COACH_LINK',
+    'ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED',
+    'ATHLYRAX_OWNERSHIP_SUMMARY_STRICT_DB_READ',
+    'ATHLYRAX_NO_PRODUCTION_STARTUP_AUTOHEAL',
+    'ATHLYRAX_PRODUCTION_LOGIN_READ_ONLY',
+    'ATHLYRAX_PRODUCTION_DB_GET_READ_ONLY',
   ]) assert.ok(source.includes(token), `missing runtime hardening token ${token}`);
 
   assert.equal(source.includes("const isBillingEnforced = isBillingEnabled && BILLING_ENFORCED;"), false);
@@ -29,10 +35,13 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes("return { planKey: 'tier-1', priceId: linePriceId };"), false);
   assert.equal(source.includes('Math.floor(Math.random() * alphabet.length)'), false);
   assert.equal(source.includes('buildExistingDbRowIdIndex('), false);
+  assert.equal(source.includes("responsePayload = JSON.stringify({ swimmers: [] });"), false);
   assert.ok(source.includes("app.post('/db/ownership-backfill', requireAuth, requireAdminRole, requireBillingWriteAccess"));
   assert.ok(source.includes('Team storage already exists without an active membership. Automatic claiming is blocked'));
   assert.ok(source.includes('Each configured Stripe price ID may belong to only one billing plan.'));
   assert.ok(source.includes('Cannot delete the last account for a tenant while its database still exists.'));
+  assert.ok(source.includes('Coach connections become approved only through coach-side acceptance.'));
+  assert.ok(source.includes('No empty result was substituted.'));
 });
 
 test('invite semantic validator rejects duplicates invalid tenant and impossible use count', () => {
@@ -42,10 +51,10 @@ test('invite semantic validator rejects duplicates invalid tenant and impossible
     { code: 'ABCD-EFGH-JKLM', role: 'assistant-coach', tenantId: 'club-one', expiresAt: '2030-01-01T00:00:00.000Z', maxUses: 1, usedCount: 0, disabled: false },
     { code: 'abcd-efgh-jklm', role: 'assistant-coach', tenantId: 'global-owner', expiresAt: '2030-01-01T00:00:00.000Z', maxUses: 1, usedCount: 2, disabled: false },
   ]));
-  const failures = validateInviteStoreSemanticIntegrity({ authInvitesPath: filePath }, process.env, fs);
-  assert.ok(failures.some((item) => item.includes('duplicated')));
-  assert.ok(failures.some((item) => item.includes('invalid tenantId')));
-  assert.ok(failures.some((item) => item.includes('invalid usedCount')));
+  const failures = validateInviteStoreSemanticIntegrity({ authInvitesPath: filePath }, process.env, fs).join('\n');
+  assert.match(failures, /duplicated/);
+  assert.match(failures, /invalid tenantId/);
+  assert.match(failures, /invalid usedCount/);
 });
 
 test('invite semantic validator accepts valid empty history and valid retained rows', () => {
