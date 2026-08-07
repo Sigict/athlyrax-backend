@@ -33,6 +33,7 @@ requireAll('index.js', [
   `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
   `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
+  `// ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
 ]);
 forbidAll('index.js', [
@@ -63,6 +64,7 @@ requireAll('scripts/patch-persistence-integrity.mjs', [
   `ATHLYRAX_PRODUCTION_STORAGE_LAYOUT_READ_ONLY`,
   `if (IS_PRODUCTION) return;`,
   `ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`,
+  `ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
   `Snapshot submissions store is missing. Refusing startup-time creation.`,
   `ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
   `ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED`,
@@ -73,12 +75,26 @@ requireAll('scripts/patch-persistence-integrity.mjs', [
 requireAll('scripts/safe-start.mjs', [
   `validateRequiredStorageFiles(`,
   `applyCanonicalAuthPaths(`,
+  `assertNoSymlinkStorageLayout(`,
+  `assertNoActiveMigrationTransaction(`,
   `globalThis[Symbol.for('athlyrax.safeStartEnforced')] = true`,
 ]);
 forbidAll('scripts/safe-start.mjs', [
   'runStorageSafetyCheck(', 'migrateLegacyStorageIfNeeded(', 'restoreBundledDemoTenantIfNeeded(',
   'finalizeLegacyStorageMigration(', 'writeStorageReadyMarker(', 'writeFileSync(', 'copyFileSync(',
   'mkdirSync(', 'renameSync(', 'unlinkSync(',
+]);
+
+requireAll('scripts/storage-path-integrity.mjs', [
+  `ATHLYRAX_STORAGE_SYMLINK_BLOCKED`,
+  `lstatSync`,
+  `isSymbolicLink()`,
+  `assertNoSymlinkStorageLayout`,
+]);
+requireAll('scripts/migration-transaction-state.mjs', [
+  `ACTIVE_MIGRATION_TRANSACTION_FILE`,
+  `ATHLYRAX_MIGRATION_TRANSACTION_INCOMPLETE`,
+  `ATHLYRAX_MIGRATION_TRANSACTION_JOURNAL_INVALID`,
 ]);
 
 requireAll('scripts/storage-safety-lib.mjs', [
@@ -101,10 +117,13 @@ requireAll('scripts/approve-storage-layout.mjs', [
 
 requireAll('scripts/production-start.mjs', [
   `ATHLYRAX_STORAGE_MIGRATION_APPROVAL`, `MIGRATE_CANONICAL_STORAGE_ONCE`,
-  `migrationAlreadyCompleted`, `migrate-storage-once.mjs`, `safe-start.mjs`,
+  `migrationAlreadyCompleted`, `readActiveMigrationTransaction`,
+  `interrupted || !completed`, `migrate-storage-once.mjs`, `safe-start.mjs`,
 ]);
 requireAll('scripts/migrate-storage-once.mjs', [
   `MIGRATE_CANONICAL_STORAGE_ONCE`, `beginTransaction(`, `rollbackTransaction(`,
+  `recoverInterruptedTransaction(`, `activeMigrationTransactionPath(`,
+  `assertNoSymlinkStorageLayout(`, `transaction-manifest.json`,
   `migrateLegacyStorageIfNeeded({`, `restoreBundledDemoTenantIfNeeded({`,
   `sanitizeDemoTenantDatabase({`, `writeStorageReadyMarker(`, `runStorageSafetyCheck({`,
   `finalizeLegacyStorageMigration({`, `Migration failed; original storage was restored`,
@@ -119,7 +138,8 @@ forbidAll('scripts/storage-path-contract.mjs', [`kind: 'auth-users-backup-baseli
 
 requireAll('scripts/data-safety-preload.mjs', [
   `ATHLYRAX_MISSING_DB_CREATE_BLOCKED`, `ATHLYRAX_CURRENT_DB_INVALID`, `ATHLYRAX_INCOMING_DB_INVALID`,
-  `ATHLYRAX_DB_TENANT_IDENTITY_CONFLICT`, `expectedTenantIdForDbPath`,
+  `ATHLYRAX_DB_TENANT_IDENTITY_CONFLICT`, `ATHLYRAX_DB_TOTAL_DATA_WIPE_BLOCKED`,
+  `ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`, `expectedTenantIdForDbPath`,
   `hasValidProvisioningProof`, `timingSafeEqual`, `provisioningToken: _discardedProvisioningToken`,
   `fsModule.fsyncSync(handle)`,
 ]);
@@ -156,8 +176,8 @@ if (start.includes('migrate-storage-once.mjs')) failures.push('package.json: nor
 for (const required of [
   'test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:storage-routing-safety',
   'test:storage-migration-identity', 'test:storage-extra-invariants', 'test:startup-mutation-safety',
-  'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore',
-  'test:closed-pilot-security', 'audit:storage-paths',
+  'test:storage-path-integrity', 'test:storage-path-contract', 'test:signup-legal-acceptance',
+  'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths',
 ]) if (!storageAll.includes(required)) failures.push(`package.json: test:storage-all missing ${required}`);
 
 if (failures.length) {
