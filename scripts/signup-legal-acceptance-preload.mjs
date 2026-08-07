@@ -119,9 +119,17 @@ export function appendSignupLegalAcceptanceRecord(record) {
   const targetPath = resolveAcceptancePath();
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   const line = `${JSON.stringify(record)}\n`;
-  fs.appendFileSync(targetPath, line, { encoding: 'utf8', mode: 0o600 });
+  const beforeSize = fs.existsSync(targetPath) ? fs.statSync(targetPath).size : 0;
+  let fileHandle = null;
+  try {
+    fileHandle = fs.openSync(targetPath, 'a', 0o600);
+    fs.writeSync(fileHandle, line, null, 'utf8');
+    fs.fsyncSync(fileHandle);
+  } finally {
+    if (fileHandle !== null) fs.closeSync(fileHandle);
+  }
   const stat = fs.statSync(targetPath);
-  if (!Number.isFinite(stat.size) || stat.size < Buffer.byteLength(line)) {
+  if (!Number.isFinite(stat.size) || stat.size < beforeSize + Buffer.byteLength(line)) {
     throw new Error('Legal acceptance append verification failed.');
   }
   try {
