@@ -54,9 +54,10 @@ for (const required of [
   `// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD`,
   `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
   `resolveStorageConfiguration(process.env, __dirname)`,
-  `migrateLegacyStorageIfNeeded({`,
-  `runStorageSafetyCheck({`,
+  `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
+  `runStorageSafetyCheck({`,
+  `finalizeLegacyStorageMigration({`,
 ]) {
   if (!indexSource.includes(required)) failures.push(`index.js: missing canonical token: ${required}`);
 }
@@ -65,27 +66,35 @@ const safeStartSource = fs.readFileSync(path.join(root, 'scripts', 'safe-start.m
 for (const required of [
   'resolveStorageConfiguration(process.env, repoRoot)',
   'initialStorageConfiguration.failures.length > 0',
-  'migrateLegacyStorageIfNeeded({',
+  'legacyMigration = migrateLegacyStorageIfNeeded({',
   'restoreBundledDemoTenantIfNeeded({',
   'runStorageSafetyCheck({',
+  'finalizeLegacyStorageMigration({',
 ]) {
   if (!safeStartSource.includes(required)) failures.push(`scripts/safe-start.mjs: missing prevalidated storage token: ${required}`);
 }
 const resolveIndex = safeStartSource.indexOf('resolveStorageConfiguration(process.env, repoRoot)');
-const migrateIndex = safeStartSource.indexOf('migrateLegacyStorageIfNeeded({');
+const migrateIndex = safeStartSource.indexOf('legacyMigration = migrateLegacyStorageIfNeeded({');
 const restoreIndex = safeStartSource.indexOf('restoreBundledDemoTenantIfNeeded({');
 const checkIndex = safeStartSource.indexOf('runStorageSafetyCheck({');
-if (resolveIndex < 0 || migrateIndex < 0 || restoreIndex < 0 || checkIndex < 0 || !(resolveIndex < migrateIndex && migrateIndex < restoreIndex && restoreIndex < checkIndex)) {
-  failures.push('scripts/safe-start.mjs: storage order must be validate -> migrate legacy -> demo recovery -> full safety check.');
+const finalizeIndex = safeStartSource.indexOf('finalizeLegacyStorageMigration({');
+if ([resolveIndex, migrateIndex, restoreIndex, checkIndex, finalizeIndex].some((value) => value < 0)
+  || !(resolveIndex < migrateIndex && migrateIndex < restoreIndex && restoreIndex < checkIndex && checkIndex < finalizeIndex)) {
+  failures.push('scripts/safe-start.mjs: storage order must be validate -> migrate legacy -> demo recovery -> full safety check -> finalize migration.');
 }
 
 const contractSource = fs.readFileSync(path.join(root, 'scripts', 'storage-path-contract.mjs'), 'utf8');
 for (const required of [
   'export function migrateLegacyStorageIfNeeded',
+  'export function finalizeLegacyStorageMigration',
+  `const LEGACY_MIGRATION_MARKER = '.athlyrax-legacy-storage-migration-v1.json'`,
   `path.join(paths.storageRoot, 'auth-users.json')`,
   `path.join(paths.storageRoot, 'tenants', 'clubs')`,
+  'listFilesRecursive(',
+  `file.relative === 'db.json'`,
   'copyExact(',
   'Legacy tenant database is unreadable, invalid or empty',
+  'legacy-migration-already-finalized',
 ]) {
   if (!contractSource.includes(required)) failures.push(`scripts/storage-path-contract.mjs: missing migration safety token: ${required}`);
 }
@@ -96,8 +105,18 @@ for (const required of [
   'validateAuthStore(',
   'Global database',
   'Authentication user store is not valid JSON',
+  'Authentication user backup',
 ]) {
   if (!safetySource.includes(required)) failures.push(`scripts/storage-safety-lib.mjs: missing JSON validation token: ${required}`);
+}
+
+const approvalSource = fs.readFileSync(path.join(root, 'scripts', 'approve-storage-layout.mjs'), 'utf8');
+for (const required of [
+  `assertAuthStore(paths.authUsers, 'Authentication user store')`,
+  `assertAuthStore(paths.authUsersBackup, 'Authentication user backup')`,
+  `assertDbObject(paths.globalDb, 'Global database')`,
+]) {
+  if (!approvalSource.includes(required)) failures.push(`scripts/approve-storage-layout.mjs: missing approval validation token: ${required}`);
 }
 
 const legalSource = fs.readFileSync(path.join(root, 'scripts', 'signup-legal-acceptance-preload.mjs'), 'utf8');
