@@ -12,6 +12,7 @@ function run(label, args) {
 }
 
 const transforms = [
+  'scripts/patch-data-safety-coverage.mjs',
   'scripts/patch-index-signup-legal.mjs',
   'scripts/patch-logout-csrf.mjs',
   'scripts/patch-canonical-storage-contract.mjs',
@@ -25,6 +26,7 @@ for (const relative of transforms) {
   run(relative, [relative]);
 }
 
+run('data-safety preload syntax check', ['--check', 'scripts/data-safety-preload.mjs']);
 run('index.js syntax check', ['--check', 'index.js']);
 run('storage/path audit', ['scripts/audit-storage-paths.mjs']);
 
