@@ -62,13 +62,15 @@ test('storage migration is explicit, ordered and sanitizes demo data before acti
   assert.ok(migrateIndex < restoreIndex && restoreIndex < sanitizeIndex && sanitizeIndex < markerIndex && markerIndex < checkIndex && checkIndex < finalizeIndex);
 });
 
-test('demo sanitizer preserves a safety copy and rejects remaining contact data', () => {
+test('demo sanitizer preserves a safety copy and rejects remaining personal data', () => {
   const source = read('scripts/demo-data-sanitizer.mjs');
   assert.match(source, /demo-pre-sanitization/);
   assert.match(source, /demoDataSynthetic/);
   assert.match(source, /tenantId: 'demo-company'/);
-  assert.match(source, /containsObviousContactData/);
+  assert.match(source, /containsObviousPersonalData/);
   assert.match(source, /example\.invalid/);
+  assert.match(source, /filedataurl/);
+  assert.match(source, /syntheticUsername/);
   assert.match(source, /Demo sanitization verification failed/);
 });
 
