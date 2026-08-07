@@ -12,13 +12,9 @@ if (!source.includes(layoutMarker)) {
   source = source.replace(layoutStart, safeLayoutStart);
 }
 
-const authTransactionMarker = `// ATHLYRAX_AUTH_STORE_PAIR_TRANSACTION`;
-if (!source.includes(authTransactionMarker)) {
-  const legacyPersist = `function persistAuthUsers() {\n\tconst payload = normalizeAuthUserRows(authUsers);\n\twriteAtomicJsonFile(AUTH_USERS_PATH, payload);\n\twriteAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);\n}`;
-  const transactionalPersist = `function persistAuthUsers() {\n${authTransactionMarker}\n\tconst payload = normalizeAuthUserRows(authUsers);\n\tconst previousPrimary = fs.existsSync(AUTH_USERS_PATH) ? readJsonFile(AUTH_USERS_PATH) : null;\n\tconst previousBackup = fs.existsSync(AUTH_USERS_BACKUP_PATH) ? readJsonFile(AUTH_USERS_BACKUP_PATH) : null;\n\tlet primaryWritten = false;\n\ttry {\n\t\twriteAtomicJsonFile(AUTH_USERS_PATH, payload);\n\t\tprimaryWritten = true;\n\t\twriteAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);\n\t} catch (error) {\n\t\tconst rollbackErrors = [];\n\t\tif (primaryWritten && previousPrimary !== null) {\n\t\t\ttry { writeAtomicJsonFile(AUTH_USERS_PATH, previousPrimary); } catch (rollbackError) { rollbackErrors.push(rollbackError); }\n\t\t}\n\t\tif (previousBackup !== null) {\n\t\t\ttry { writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, previousBackup); } catch (rollbackError) { rollbackErrors.push(rollbackError); }\n\t\t}\n\t\tif (rollbackErrors.length > 0) {\n\t\t\tconst transactionError = new Error(\`Authentication store transaction failed and rollback was incomplete: \${rollbackErrors.map((item) => item instanceof Error ? item.message : String(item)).join('; ')}\`);\n\t\t\ttransactionError.cause = error;\n\t\t\ttransactionError.code = 'ATHLYRAX_AUTH_STORE_TRANSACTION_ROLLBACK_FAILED';\n\t\t\tthrow transactionError;\n\t\t}\n\t\tthrow error;\n\t}\n}`;
-  if (!source.includes(legacyPersist)) throw new Error('Could not find authentication persistence pair anchor.');
-  source = source.replace(legacyPersist, transactionalPersist);
-}
+// Authentication primary/backup persistence has one source of truth:
+// patch-auth-persistence-transaction.mjs. Do not rewrite persistAuthUsers here.
+// ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER
 
 const snapshotMarker = `// ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`;
 const snapshotWipeMarker = `// ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`;
@@ -58,8 +54,7 @@ if (!source.includes(passwordResetMarker)) {
 
 for (const token of [
   layoutMarker,
-  authTransactionMarker,
-  `ATHLYRAX_AUTH_STORE_TRANSACTION_ROLLBACK_FAILED`,
+  'ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER',
   snapshotMarker,
   snapshotWipeMarker,
   `ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
