@@ -64,6 +64,23 @@ if (!source.includes(putMarker)) {
   source = source.slice(0, existingIndex) + writeGuard + source.slice(existingIndex);
 }
 
+const registrationMarker = `// ATHLYRAX_NEW_TENANT_DB_PROVISION`;
+if (!source.includes(registrationMarker)) {
+  const roleAnchor = `\tif (role === 'head-coach') {`;
+  const registerStart = source.indexOf(`app.post('/auth/register', requireLoginRateLimit, (req, res) => {`);
+  if (registerStart < 0) throw new Error('Could not find registration route for tenant provisioning guard.');
+  const roleIndex = source.indexOf(roleAnchor, registerStart);
+  if (roleIndex < 0) throw new Error('Could not find registration role anchor for tenant provisioning guard.');
+
+  const provisionBlock = `${registrationMarker}\n\tconst registrationTenantStorage = resolveStoragePathsForTenantKey(tenantId);\n\tconst registrationTenantProvisioningToken = crypto.randomUUID();\n\tlet registrationTenantDbCreated = false;\n\tif (registrationTenantStorage.dbPath !== DB_PATH && !fs.existsSync(registrationTenantStorage.dbPath)) {\n\t\tif (usableInvite) {\n\t\t\tappendAuthAuditEvent({\n\t\t\t\taction: 'register_blocked',\n\t\t\t\treq,\n\t\t\t\tstatus: 'blocked',\n\t\t\t\ttarget: username,\n\t\t\t\treason: 'invited_tenant_database_missing',\n\t\t\t\tdetails: { tenantId },\n\t\t\t});\n\t\t\tres.status(503).json({ error: 'Team data is temporarily unavailable. Registration was not completed.' });\n\t\t\treturn;\n\t\t}\n\t\tensureStorageLayout(registrationTenantStorage);\n\t\tconst now = new Date().toISOString();\n\t\twriteAtomicJsonFile(registrationTenantStorage.dbPath, {\n\t\t\t__meta: { tenantId, createdAt: now, updatedAt: now, provisionedBy: 'auth-register', provisioningToken: registrationTenantProvisioningToken },\n\t\t\tswimmers: [], squads: [], trainingSessions: [], trainingSessionSets: [], tests: [], attendance: [], fixtures: [], trainingPlannerWeeks: [],\n\t\t});\n\t\tregistrationTenantDbCreated = true;\n\t}\n\n`;
+  source = source.slice(0, roleIndex) + provisionBlock + source.slice(roleIndex);
+
+  const catchAnchor = `\t} catch (error) {\n\t\tauthUsers.pop();\n\t\tif (usableInvite) {\n\t\t\tusableInvite.usedCount = Math.max(0, Number(usableInvite.usedCount || 0) - 1);\n\t\t}\n\t\tres.status(500).json({\n\t\t\terror: 'Could not create account.',`;
+  const safeCatch = `\t} catch (error) {\n\t\tauthUsers.pop();\n\t\tif (usableInvite) {\n\t\t\tusableInvite.usedCount = Math.max(0, Number(usableInvite.usedCount || 0) - 1);\n\t\t}\n\t\ttry { persistAuthUsers(); } catch {}\n\t\tif (usableInvite) { try { persistAuthInvites(); } catch {} }\n\t\tif (registrationTenantDbCreated && registrationTenantStorage.dbPath !== DB_PATH && fs.existsSync(registrationTenantStorage.dbPath)) {\n\t\t\ttry {\n\t\t\t\tconst provisioned = readJsonFile(registrationTenantStorage.dbPath);\n\t\t\t\tif (String(provisioned?.__meta?.provisioningToken || '') === registrationTenantProvisioningToken) {\n\t\t\t\t\tfs.unlinkSync(registrationTenantStorage.dbPath);\n\t\t\t\t}\n\t\t\t} catch {}\n\t\t}\n\t\tres.status(500).json({\n\t\t\terror: 'Could not create account.',`;
+  if (!source.includes(catchAnchor)) throw new Error('Could not find registration rollback anchor.');
+  source = source.replace(catchAnchor, safeCatch);
+}
+
 const forbidden = [
   `path.join(STORAGE_ROOT, 'tenants', 'clubs')`,
   `path.join(STORAGE_ROOT, 'auth-users.json')`,
@@ -79,6 +96,7 @@ for (const token of [
   storageContractImport,
   runtimeGuardMarker,
   putMarker,
+  registrationMarker,
   `resolveStorageConfiguration(process.env, __dirname)`,
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `restoreBundledDemoTenantIfNeeded({`,
@@ -88,6 +106,10 @@ for (const token of [
   `path.join(STORAGE_ROOT, 'auth', 'auth-users.json')`,
   `action: 'tenant_database_missing'`,
   `The server refused to create an empty replacement database.`,
+  `registrationTenantStorage = resolveStoragePathsForTenantKey(tenantId)`,
+  `invited_tenant_database_missing`,
+  `provisioningToken: registrationTenantProvisioningToken`,
+  `try { persistAuthUsers(); } catch {}`,
 ]) {
   if (!source.includes(token)) throw new Error(`Canonical storage verification failed: ${token}`);
 }
