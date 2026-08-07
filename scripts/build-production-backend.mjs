@@ -19,6 +19,7 @@ const transforms = [
   'scripts/patch-persistence-integrity.mjs',
   'scripts/patch-durable-storage-writes.mjs',
   'scripts/patch-operational-integrity.mjs',
+  'scripts/patch-runtime-data-retention.mjs',
 ];
 
 for (const relative of transforms) {
