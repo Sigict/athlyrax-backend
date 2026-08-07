@@ -101,10 +101,7 @@ test('server-bound tenant provisioning may create a new production database and 
   const destination = path.join(storageRoot, 'tenants', 'club-a', 'db.json');
   const source = path.join(storageRoot, 'tenants', 'club-a', 'db.json.tmp');
   const secret = 'test-auth-secret-at-least-32-characters-long';
-  writeJson(source, {
-    __meta: { tenantId: 'club-a', provisionedBy: 'auth-register', provisioningToken: provisioningToken(secret, destination) },
-    swimmers: [],
-  });
+  writeJson(source, { __meta: { tenantId: 'club-a', provisionedBy: 'auth-register', provisioningToken: provisioningToken(secret, destination) }, swimmers: [] });
   withGuard(root, () => fs.renameSync(source, destination), {
     NODE_ENV: 'production', AUTH_SECRET: secret, ATHLYRAX_STORAGE_ROOT: storageRoot,
   });
@@ -143,5 +140,49 @@ test('tenant write with missing identity is canonicalized to destination tenant'
   const updated = JSON.parse(fs.readFileSync(destination, 'utf8'));
   assert.equal(updated.__meta.tenantId, 'club-a');
   assert.equal(updated.__meta.storageRevision, 2);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('critical auth store replacement preserves independent pre-write backup', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-critical-auth-backup-');
+  const storageRoot = path.join(root, 'storage');
+  const destination = path.join(storageRoot, 'auth', 'auth-users.json');
+  const source = path.join(storageRoot, 'auth', 'auth-users.json.tmp');
+  writeJson(destination, [{ username: 'old-user', role: 'head-coach' }]);
+  writeJson(source, [{ username: 'new-user', role: 'head-coach' }]);
+  withGuard(root, () => fs.renameSync(source, destination), { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
+  assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8'))[0].username, 'new-user');
+  const backupRoot = path.join(root, 'safety', 'pre-write-auth-users');
+  assert.equal(fs.existsSync(backupRoot), true);
+  const scope = fs.readdirSync(backupRoot)[0];
+  const backup = path.join(backupRoot, scope, fs.readdirSync(path.join(backupRoot, scope))[0]);
+  assert.equal(JSON.parse(fs.readFileSync(backup, 'utf8'))[0].username, 'old-user');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('invalid critical auth replacement is blocked before current store changes', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-critical-auth-invalid-');
+  const storageRoot = path.join(root, 'storage');
+  const destination = path.join(storageRoot, 'auth', 'auth-users.json');
+  const source = path.join(storageRoot, 'auth', 'auth-users.json.tmp');
+  writeJson(destination, [{ username: 'keep-user', role: 'head-coach' }]);
+  writeJson(source, []);
+  withGuard(root, () => {
+    assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_CRITICAL_STORE_INCOMING_INVALID');
+  }, { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
+  assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8'))[0].username, 'keep-user');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('empty snapshot history remains a valid critical store and is backed up on replacement', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-critical-snapshot-');
+  const storageRoot = path.join(root, 'storage');
+  const destination = path.join(storageRoot, 'snapshot-submissions.json');
+  const source = path.join(storageRoot, 'snapshot-submissions.json.tmp');
+  writeJson(destination, [{ id: 'old' }]);
+  writeJson(source, []);
+  withGuard(root, () => fs.renameSync(source, destination), { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot });
+  assert.deepEqual(JSON.parse(fs.readFileSync(destination, 'utf8')), []);
+  assert.equal(fs.existsSync(path.join(root, 'safety', 'pre-write-snapshot-submissions')), true);
   fs.rmSync(root, { recursive: true, force: true });
 });
