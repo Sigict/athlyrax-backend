@@ -6,6 +6,10 @@ import crypto from 'node:crypto';
 const INSTALL_MARK = Symbol.for('athlyrax.dataSafetyGuardsInstalled');
 const EXPRESS_INSTALL_MARK = Symbol.for('athlyrax.dbRevisionResponseGuardInstalled');
 const readContext = new AsyncLocalStorage();
+const CORE_DB_COLLECTIONS = Object.freeze([
+  'swimmers', 'squads', 'trainingSessions', 'trainingSessionSets', 'tests', 'attendance',
+  'competitions', 'fixtures', 'groups', 'trainingPlannerWeeks',
+]);
 
 function resolveFilePath(value) {
   if (Buffer.isBuffer(value)) return path.resolve(value.toString());
@@ -36,6 +40,19 @@ function getRevisionTime(payload) {
     if (Number.isFinite(parsed)) return parsed;
   }
   return Number.NaN;
+}
+function coreRecordCount(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 0;
+  return CORE_DB_COLLECTIONS.reduce((sum, key) => sum + (Array.isArray(payload[key]) ? payload[key].length : 0), 0);
+}
+function assertNoTotalDataWipe(current, incoming) {
+  const currentCount = coreRecordCount(current);
+  const incomingCount = coreRecordCount(incoming);
+  if (currentCount > 0 && incomingCount === 0) {
+    const error = new Error(`Refusing database replacement that would remove all ${currentCount} existing core records. Use an explicit controlled recovery/reset procedure instead.`);
+    error.code = 'ATHLYRAX_DB_TOTAL_DATA_WIPE_BLOCKED';
+    throw error;
+  }
 }
 function normalizeTenantId(value) {
   const raw = String(value || '').trim();
@@ -239,7 +256,10 @@ export function installDataSafetyGuards(options = {}) {
     }
 
     const expectedTenantId = assertTenantIdentity(incoming, destination, env, 'Incoming database');
-    if (current) assertTenantIdentity(current, destination, env, 'Current database');
+    if (current) {
+      assertTenantIdentity(current, destination, env, 'Current database');
+      assertNoTotalDataWipe(current, incoming);
+    }
     if (!destinationExists && isProduction && !hasValidProvisioningProof(incoming, destination, env)) {
       const error = new Error(`Refusing to create a missing production database outside explicit server-bound tenant provisioning: ${destination}`);
       error.code = 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED';
@@ -249,11 +269,16 @@ export function installDataSafetyGuards(options = {}) {
     const currentRevisionValue = getStorageRevision(current);
     const currentRevision = currentRevisionValue ?? 0;
     const incomingRevision = getStorageRevision(incoming);
-    if (current && incomingRevision !== currentRevision) {
-      const received = incomingRevision === null ? 'missing' : String(incomingRevision);
-      const error = new Error(`Refusing database replacement. Expected storage revision ${currentRevision}, received ${received}.`);
-      error.code = 'ATHLYRAX_DB_REVISION_CONFLICT';
-      throw error;
+    if (current) {
+      const legacyRevisionAdoption = currentRevisionValue === null && (incomingRevision === null || incomingRevision === 0);
+      const exactRevisionMatch = currentRevisionValue !== null && incomingRevision === currentRevisionValue;
+      if (!legacyRevisionAdoption && !exactRevisionMatch) {
+        const received = incomingRevision === null ? 'missing' : String(incomingRevision);
+        const expected = currentRevisionValue === null ? 'legacy baseline 0 or missing' : String(currentRevisionValue);
+        const error = new Error(`Refusing database replacement. Expected storage revision ${expected}, received ${received}.`);
+        error.code = 'ATHLYRAX_DB_REVISION_CONFLICT';
+        throw error;
+      }
     }
     const currentTime = getRevisionTime(current);
     const incomingTime = getRevisionTime(incoming);
@@ -324,4 +349,5 @@ export function installExpressDbRevisionResponseGuard(expressModule, options = {
 export const dataSafetyInternals = Object.freeze({
   getRevisionTime, getStorageRevision, isDatabasePath, hasValidProvisioningProof,
   expectedTenantIdForDbPath, criticalJsonStoreKind, validateCriticalJsonPayload,
+  coreRecordCount, assertNoTotalDataWipe,
 });
