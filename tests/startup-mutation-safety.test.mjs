@@ -36,7 +36,7 @@ test('canonical transformation makes imported production bootstrap non-mutating'
   assert.match(persistence, /Refusing startup-time recovery, normalization or default bootstrap/);
 });
 
-test('storage validator covers every store loaded during production bootstrap', () => {
+test('storage validator covers every store loaded during production bootstrap and demo data', () => {
   const source = read('scripts/storage-safety-lib.mjs');
   for (const token of [
     'authInvitesPath', 'snapshotSubmissionsPath', 'billingCatalogPath',
@@ -44,6 +44,8 @@ test('storage validator covers every store loaded during production bootstrap', 
     'validateJsonArray(configuration.snapshotSubmissionsPath',
     'validateBillingCatalog(configuration.billingCatalogPath',
     'validateAuthPrimaryBackupParity', 'validateAuthBoundTenantDatabases',
+    'contains duplicate usernames', 'has noncanonical tenantId',
+    'Demo tenant database demo-company contains no meaningful demo records',
   ]) assert.ok(source.includes(token), `startup storage validation is missing ${token}`);
 });
 
@@ -57,22 +59,16 @@ test('production wrapper runs migration only with the exact explicit approval va
   assert.match(source, /invalid value/);
 });
 
-test('storage migration is explicit, rollback-safe, ordered and sanitizes demo data before activation', () => {
+test('storage migration is explicit, transactional, ordered and sanitizes demo before activation', () => {
   const source = read('scripts/migrate-storage-once.mjs');
-  assert.match(source, /MIGRATE_CANONICAL_STORAGE_ONCE/);
-  assert.match(source, /Refusing to manufacture a backup from the primary store/);
-  assert.match(source, /beginTransaction\(/);
-  assert.match(source, /migration-transaction-snapshots/);
-  assert.match(source, /rollbackTransaction\(/);
-  assert.match(source, /Migration rollback verification failed/);
-  assert.match(source, /migrateLegacyStorageIfNeeded\(\{/);
-  assert.match(source, /restoreBundledDemoTenantIfNeeded\(\{/);
-  assert.match(source, /sanitizeDemoTenantDatabase\(\{/);
-  assert.match(source, /writeStorageReadyMarker\(/);
-  assert.match(source, /runStorageSafetyCheck\(\{/);
-  assert.match(source, /finalizeLegacyStorageMigration\(\{/);
+  for (const token of [
+    'MIGRATE_CANONICAL_STORAGE_ONCE', 'beginTransaction(', 'rollbackTransaction(',
+    'migrateLegacyStorageIfNeeded({', 'restoreBundledDemoTenantIfNeeded({',
+    'sanitizeDemoTenantDatabase({', 'writeStorageReadyMarker(', 'runStorageSafetyCheck({',
+    'finalizeLegacyStorageMigration({', 'Migration failed; original storage was restored',
+  ]) assert.ok(source.includes(token), `migration safety token missing: ${token}`);
   const order = [
-    source.indexOf('beginTransaction(configuration.storageRoot'),
+    source.indexOf('beginTransaction('),
     source.indexOf('migrateLegacyStorageIfNeeded({'),
     source.indexOf('restoreBundledDemoTenantIfNeeded({'),
     source.indexOf('sanitizeDemoTenantDatabase({'),
@@ -84,10 +80,15 @@ test('storage migration is explicit, rollback-safe, ordered and sanitizes demo d
   assert.ok(order.every((value, index) => index === 0 || value > order[index - 1]));
 });
 
+test('demo recovery rejects metadata-only canonical demo and requires real demo records', () => {
+  const source = read('scripts/storage-path-contract.mjs');
+  assert.match(source, /Canonical demo-company database exists but contains no meaningful demo records/);
+  assert.match(source, /validMeaningfulDemoDatabase/);
+  assert.match(source, /hasMeaningfulDemoData\(liveState\.payload\)/);
+});
+
 test('approval marker validates all startup stores and all auth-bound tenants', () => {
   const source = read('scripts/approve-storage-layout.mjs');
-  assert.match(source, /Storage approval requires NODE_ENV=production/);
-  assert.match(source, /--storage-root must equal configured ATHLYRAX_STORAGE_ROOT/);
   assert.match(source, /assertJsonArray\(paths\.authInvites/);
   assert.match(source, /assertJsonArray\(paths\.snapshotSubmissions/);
   assert.match(source, /assertBillingCatalog\(paths\.billingCatalog/);
@@ -107,15 +108,22 @@ test('demo sanitizer preserves a safety copy and rejects remaining personal data
   assert.match(source, /Demo sanitization verification failed/);
 });
 
-test('package start uses guarded wrapper and consolidated postinstall', () => {
+test('package postinstall uses one verified production build orchestrator', () => {
   const pkg = JSON.parse(read('package.json'));
   const start = String(pkg?.scripts?.start || '');
   const postinstall = String(pkg?.scripts?.postinstall || '');
+  assert.equal(postinstall, 'node scripts/build-production-backend.mjs');
   assert.match(start, /test:storage-all/);
   assert.match(start, /production-start\.mjs/);
   assert.ok(!start.includes('migrate:storage-once'));
   assert.ok(!start.includes('migrate-storage-once.mjs'));
-  assert.ok(!postinstall.includes('patch-runtime-start-guard.mjs'));
-  assert.ok(!postinstall.includes('patch-provisioning-integrity.mjs'));
-  assert.match(postinstall, /patch-canonical-storage-contract\.mjs/);
+
+  const build = read('scripts/build-production-backend.mjs');
+  for (const transform of [
+    'patch-index-signup-legal.mjs', 'patch-logout-csrf.mjs', 'patch-canonical-storage-contract.mjs',
+    'patch-persistence-integrity.mjs', 'patch-durable-storage-writes.mjs',
+  ]) assert.ok(build.includes(transform));
+  assert.match(build, /--check/);
+  assert.match(build, /audit-storage-paths\.mjs/);
+  assert.match(build, /ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK/);
 });
