@@ -46,6 +46,8 @@ const expectedTransforms = [
 ];
 
 for (const relative of expectedTransforms) read(relative);
+read('tests/auth-persistence-transaction.test.mjs');
+read('tests/coach-link-transaction.test.mjs');
 
 const build = read('scripts/build-production-backend.mjs');
 const transformArrayMatch = build.match(/const transforms = \[([\s\S]*?)\n\];/);
@@ -79,6 +81,7 @@ for (const marker of [
   'ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1',
   'ATHLYRAX_COACH_LINK_RECONNECT_V1',
   'ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1',
+  'ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET',
   'ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB',
   'ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
@@ -96,6 +99,7 @@ for (const token of [
 
 const coachTransactionPatch = read('scripts/patch-coach-link-transaction-integrity.mjs');
 for (const token of [
+  'ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET',
   'ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST',
   'ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET',
   'ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST',
@@ -108,11 +112,15 @@ const start = String(pkg?.scripts?.start || '');
 const storageAudit = String(pkg?.scripts?.['audit:storage-paths'] || '');
 const storageAll = String(pkg?.scripts?.['test:storage-all'] || '');
 const securityVerify = String(pkg?.scripts?.['verify:closed-pilot-security'] || '');
+const coachLinkTestCommand = String(pkg?.scripts?.['test:coach-link-workflow'] || '');
 
 if (postinstall !== 'node scripts/build-production-backend.mjs') failures.push('package.json: postinstall is not the verified production build orchestrator.');
 if (!start.includes('test:storage-all') || !start.includes('production-start.mjs')) failures.push('package.json: production start is not gated by the full test suite.');
 if (!storageAudit.includes('audit-storage-paths.mjs') || !storageAudit.includes('audit-production-transform-chain.mjs')) {
   failures.push('package.json: audit:storage-paths must run both storage and transform-chain audits.');
+}
+if (!coachLinkTestCommand.includes('tests/coach-link-workflow.test.mjs') || !coachLinkTestCommand.includes('tests/coach-link-transaction.test.mjs')) {
+  failures.push('package.json: test:coach-link-workflow must run both workflow and transaction regressions.');
 }
 for (const requiredTest of [
   'test:storage-safety',
