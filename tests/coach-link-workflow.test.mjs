@@ -8,15 +8,33 @@ const source = fs.readFileSync(path.resolve('index.js'), 'utf8');
 test('coach link workflow exists and is coach-authoritative', () => {
   for (const token of [
     'ATHLYRAX_COACH_LINK_WORKFLOW_V1',
+    'ATHLYRAX_COACH_LINK_LIFECYCLE_V1',
     "app.post('/swimmer/coach/request'",
     "app.get('/coach/swimmer-links'",
     "app.post('/coach/swimmer-links/:requestId/accept'",
     "app.post('/coach/swimmer-links/:requestId/reject'",
-    "role === 'head-coach' || role === 'assistant-coach'",
     'A valid registered coach email is required for AthlyraX coach connection.',
-    'Coach account required for swimmer connection decisions.',
     'coachLinkSourceTenantId',
+    'ATHLYRAX_COACH_LINK_PARENT_CONTACTS_PRIVATE',
   ]) assert.ok(source.includes(token), `missing coach-link workflow token ${token}`);
+});
+
+test('assistant coaches can view requests but only session coordinator can accept or reject', () => {
+  assert.ok(source.includes("app.get('/coach/swimmer-links', requireStrictAuth, requireCoachLinkManagerRole"));
+  assert.ok(source.includes("app.post('/coach/swimmer-links/:requestId/accept', requireStrictAuth, requireCoachLinkDecisionRole"));
+  assert.ok(source.includes("app.post('/coach/swimmer-links/:requestId/reject', requireStrictAuth, requireCoachLinkDecisionRole"));
+  assert.ok(source.includes("if (role === 'head-coach')"));
+  assert.ok(source.includes('Session Coordinator approval is required for swimmer membership decisions.'));
+});
+
+test('coach request list does not expose parent notification contacts', () => {
+  const listStart = source.indexOf("app.get('/coach/swimmer-links'");
+  const acceptStart = source.indexOf("app.post('/coach/swimmer-links/:requestId/accept'", listStart);
+  assert.ok(listStart >= 0 && acceptStart > listStart, 'coach list route bounds missing');
+  const listSource = source.slice(listStart, acceptStart);
+  assert.equal(listSource.includes('parent1:'), false);
+  assert.equal(listSource.includes('parent2:'), false);
+  assert.ok(listSource.includes('requests: publicRequests'));
 });
 
 test('acceptance copies target data before changing swimmer tenant and never deletes source profile', () => {
@@ -43,4 +61,20 @@ test('rejection updates source swimmer state without changing auth tenant', () =
   const rejectSource = source.slice(rejectStart, disconnectStart);
   assert.ok(rejectSource.includes("coachLinkStatus: 'none'"));
   assert.equal(rejectSource.includes('tenantId: actorTenantId'), false, 'rejection must not move swimmer tenant');
+});
+
+test('approved disconnect copies latest swimmer data back before restoring auth routing', () => {
+  const disconnectStart = source.indexOf("app.post('/swimmer/coach/disconnect'");
+  const dbStart = source.indexOf('// Serve db.json at /db', disconnectStart);
+  assert.ok(disconnectStart >= 0 && dbStart > disconnectStart, 'disconnect route bounds missing');
+  const disconnectSource = source.slice(disconnectStart, dbStart);
+  const sourceWrite = disconnectSource.indexOf('writeAtomicJsonFile(sourcePaths.dbPath, nextSourceDb);');
+  const authMove = disconnectSource.indexOf('authUsers[authUserIndex] = { ...previousAuthUser, tenantId: sourceTenantId };');
+  const authPersist = disconnectSource.indexOf('persistAuthUsers();');
+  assert.ok(sourceWrite >= 0, 'copy-back write missing');
+  assert.ok(authMove > sourceWrite, 'auth routing restored before safe copy-back');
+  assert.ok(authPersist > authMove, 'restored auth routing not persisted after copy-back');
+  assert.ok(disconnectSource.includes('writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);'), 'source rollback missing if auth persist fails');
+  assert.ok(disconnectSource.includes("coachLinkStatus: 'disconnected'"), 'coach-tenant archive state missing');
+  assert.equal(disconnectSource.includes('fs.unlinkSync('), false, 'disconnect must not delete either tenant database');
 });
