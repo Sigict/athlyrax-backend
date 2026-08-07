@@ -213,10 +213,12 @@ function validateAuthPrimaryBackupParity(configuration, fsModule = fs) {
 function resolveTenantIdFromStoredUser(user, env = process.env) {
   const role = clean(user?.role).toLowerCase();
   const username = clean(user?.username).toLowerCase();
+  const createdVia = clean(user?.createdVia).toLowerCase();
+  const explicit = normalizeTenantId(user?.tenantId);
   const primaryOwnerUsername = clean(env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').toLowerCase();
   if (username === 'demo.coach') return 'demo-company';
   if (role === 'software-owner' && username === primaryOwnerUsername) return '';
-  const explicit = normalizeTenantId(user?.tenantId);
+  if (role === 'swimmer' && explicit === 'snapshot-public' && createdVia === 'snapshot-self-signup') return '';
   if (explicit) return explicit;
   const swimClub = clean(user?.swimClub);
   const teamName = clean(user?.teamName);
