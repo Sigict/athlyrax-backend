@@ -54,6 +54,7 @@ for (const required of [
   `// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD`,
   `// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE`,
   `resolveStorageConfiguration(process.env, __dirname)`,
+  `migrateLegacyStorageIfNeeded({`,
   `runStorageSafetyCheck({`,
   `restoreBundledDemoTenantIfNeeded({`,
 ]) {
@@ -64,15 +65,39 @@ const safeStartSource = fs.readFileSync(path.join(root, 'scripts', 'safe-start.m
 for (const required of [
   'resolveStorageConfiguration(process.env, repoRoot)',
   'initialStorageConfiguration.failures.length > 0',
+  'migrateLegacyStorageIfNeeded({',
   'restoreBundledDemoTenantIfNeeded({',
   'runStorageSafetyCheck({',
 ]) {
   if (!safeStartSource.includes(required)) failures.push(`scripts/safe-start.mjs: missing prevalidated storage token: ${required}`);
 }
 const resolveIndex = safeStartSource.indexOf('resolveStorageConfiguration(process.env, repoRoot)');
+const migrateIndex = safeStartSource.indexOf('migrateLegacyStorageIfNeeded({');
 const restoreIndex = safeStartSource.indexOf('restoreBundledDemoTenantIfNeeded({');
-if (resolveIndex < 0 || restoreIndex < 0 || resolveIndex > restoreIndex) {
-  failures.push('scripts/safe-start.mjs: storage configuration must be validated before demo recovery can write.');
+const checkIndex = safeStartSource.indexOf('runStorageSafetyCheck({');
+if (resolveIndex < 0 || migrateIndex < 0 || restoreIndex < 0 || checkIndex < 0 || !(resolveIndex < migrateIndex && migrateIndex < restoreIndex && restoreIndex < checkIndex)) {
+  failures.push('scripts/safe-start.mjs: storage order must be validate -> migrate legacy -> demo recovery -> full safety check.');
+}
+
+const contractSource = fs.readFileSync(path.join(root, 'scripts', 'storage-path-contract.mjs'), 'utf8');
+for (const required of [
+  'export function migrateLegacyStorageIfNeeded',
+  `path.join(paths.storageRoot, 'auth-users.json')`,
+  `path.join(paths.storageRoot, 'tenants', 'clubs')`,
+  'copyExact(',
+  'Legacy tenant database is unreadable, invalid or empty',
+]) {
+  if (!contractSource.includes(required)) failures.push(`scripts/storage-path-contract.mjs: missing migration safety token: ${required}`);
+}
+
+const safetySource = fs.readFileSync(path.join(root, 'scripts', 'storage-safety-lib.mjs'), 'utf8');
+for (const required of [
+  'validateDatabaseObject(',
+  'validateAuthStore(',
+  'Global database',
+  'Authentication user store is not valid JSON',
+]) {
+  if (!safetySource.includes(required)) failures.push(`scripts/storage-safety-lib.mjs: missing JSON validation token: ${required}`);
 }
 
 const legalSource = fs.readFileSync(path.join(root, 'scripts', 'signup-legal-acceptance-preload.mjs'), 'utf8');
