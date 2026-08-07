@@ -34,6 +34,7 @@ requireAll('index.js', [
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
   `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
   `// ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
+  `// ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
 ]);
 forbidAll('index.js', [
@@ -43,6 +44,7 @@ forbidAll('index.js', [
   `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
   `process.env.ATHLYRAX_SAFE_START_ENFORCED`,
   `const registrationTenantProvisioningToken = crypto.randomUUID();`,
+  `// ATHLYRAX_AUTH_STORE_PAIR_TRANSACTION`,
 ]);
 
 requireAll('scripts/patch-canonical-storage-contract.mjs', [
@@ -62,6 +64,7 @@ forbidAll('scripts/patch-canonical-storage-contract.mjs', [
 
 requireAll('scripts/patch-persistence-integrity.mjs', [
   `ATHLYRAX_PRODUCTION_STORAGE_LAYOUT_READ_ONLY`,
+  `ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER`,
   `if (IS_PRODUCTION) return;`,
   `ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`,
   `ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
@@ -70,6 +73,16 @@ requireAll('scripts/patch-persistence-integrity.mjs', [
   `ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED`,
   `Refusing startup-time recovery, normalization or default bootstrap.`,
   `ATHLYRAX_PRODUCTION_PASSWORD_RESET_NO_CONSOLE`,
+]);
+forbidAll('scripts/patch-persistence-integrity.mjs', [
+  `ATHLYRAX_AUTH_STORE_PAIR_TRANSACTION`,
+  `function persistAuthUsers() {\n// ATHLYRAX_AUTH_STORE_PAIR_TRANSACTION`,
+]);
+requireAll('scripts/patch-auth-persistence-transaction.mjs', [
+  `ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION`,
+  `Authentication primary/backup verification failed after persistence.`,
+  `restorePrevious(AUTH_USERS_PATH`,
+  `restorePrevious(AUTH_USERS_BACKUP_PATH`,
 ]);
 
 requireAll('scripts/safe-start.mjs', [
@@ -125,8 +138,12 @@ requireAll('scripts/check-storage-safety.mjs', [
 requireAll('scripts/production-start.mjs', [
   `ATHLYRAX_STORAGE_MIGRATION_APPROVAL`, `MIGRATE_CANONICAL_STORAGE_ONCE`,
   `migrationAlreadyCompleted`, `readActiveMigrationTransaction`,
-  `interrupted || !completed`, `migrate-storage-once.mjs`, `safe-start.mjs`,
+  `ATHLYRAX_ONE_TIME_MIGRATION_APPROVAL_MUST_BE_REMOVED`,
+  `if (interrupted)`, `else if (completed)`,
+  `Remove ATHLYRAX_STORAGE_MIGRATION_APPROVAL before normal production startup`,
+  `migrate-storage-once.mjs`, `safe-start.mjs`,
 ]);
+forbidAll('scripts/production-start.mjs', [`interrupted || !completed`]);
 requireAll('scripts/migrate-storage-once.mjs', [
   `MIGRATE_CANONICAL_STORAGE_ONCE`, `beginTransaction(`, `rollbackTransaction(`,
   `recoverInterruptedTransaction(`, `activeMigrationTransactionPath(`,
@@ -160,8 +177,8 @@ requireAll('scripts/patch-durable-storage-writes.mjs', [
 
 const build = requireAll('scripts/build-production-backend.mjs', [
   `patch-index-signup-legal.mjs`, `patch-logout-csrf.mjs`, `patch-canonical-storage-contract.mjs`,
-  `patch-persistence-integrity.mjs`, `patch-durable-storage-writes.mjs`,
-  `--check`, `audit-storage-paths.mjs`, `ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK`,
+  `patch-persistence-integrity.mjs`, `patch-auth-persistence-transaction.mjs`, `patch-durable-storage-writes.mjs`,
+  `patch-coach-link-suite.mjs`, `--check`, `audit-storage-paths.mjs`, `ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK`,
 ]);
 if (build.includes('patch-runtime-start-guard.mjs') && !build.includes('Obsolete production patch')) {
   failures.push('scripts/build-production-backend.mjs: obsolete patch is referenced as an active transform.');
@@ -181,8 +198,8 @@ for (const obsolete of ['patch-runtime-start-guard.mjs', 'patch-provisioning-int
 if (!start.includes('test:storage-all') || !start.includes('production-start.mjs')) failures.push('package.json: guarded production start is not enforced.');
 if (start.includes('migrate-storage-once.mjs')) failures.push('package.json: normal start must not invoke migration directly.');
 for (const required of [
-  'test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:storage-routing-safety',
-  'test:storage-migration-identity', 'test:storage-extra-invariants', 'test:startup-mutation-safety',
+  'test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:auth-persistence-transaction',
+  'test:storage-routing-safety', 'test:storage-migration-identity', 'test:storage-extra-invariants', 'test:startup-mutation-safety',
   'test:storage-path-integrity', 'test:storage-path-contract', 'test:signup-legal-acceptance',
   'test:closed-pilot-backup-restore', 'test:closed-pilot-security', 'audit:storage-paths',
 ]) if (!storageAll.includes(required)) failures.push(`package.json: test:storage-all missing ${required}`);
