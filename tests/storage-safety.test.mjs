@@ -23,14 +23,14 @@ function prepareValidStorage(storageRoot, tenantId = 'demo-company', usersOverri
   fs.mkdirSync(path.join(storageRoot, 'auth'), { recursive: true });
   fs.mkdirSync(path.join(storageRoot, 'tenants', tenantId), { recursive: true });
   fs.writeFileSync(path.join(storageRoot, 'db.json'), '{"__meta":{"tenantId":"global-owner"}}\n');
-  const users = usersOverride || [{ username: 'owner', role: 'software-owner', passwordHash: 'test-hash' }];
+  const users = usersOverride || [{ username: 'softwareowner', role: 'software-owner', passwordHash: 'test-hash' }];
   const serializedUsers = `${JSON.stringify(users)}\n`;
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), serializedUsers);
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), serializedUsers);
   fs.writeFileSync(path.join(storageRoot, 'auth-invites.json'), '[]\n');
   fs.writeFileSync(path.join(storageRoot, 'snapshot-submissions.json'), '[]\n');
   fs.writeFileSync(path.join(storageRoot, 'billing-catalog.json'), '{"plans":[{"key":"tier-1"}]}\n');
-  fs.writeFileSync(path.join(storageRoot, 'tenants', tenantId, 'db.json'), '{"__meta":{"tenantId":"demo-company"},"swimmers":[]}\n');
+  fs.writeFileSync(path.join(storageRoot, 'tenants', tenantId, 'db.json'), `${JSON.stringify({ __meta: { tenantId }, swimmers: [] })}\n`);
   writeStorageReadyMarker(storageRoot, { requiredTenants: [tenantId] });
 }
 
@@ -145,7 +145,7 @@ test('every auth-bound tenant must have a non-empty canonical tenant database', 
   const storageRoot = tempDir('athlyrax-storage-');
   const backupRoot = tempDir('athlyrax-backup-');
   const users = [
-    { username: 'owner', role: 'software-owner', passwordHash: 'owner-hash' },
+    { username: 'softwareowner', role: 'software-owner', passwordHash: 'owner-hash' },
     { username: 'coach-a', role: 'head-coach', passwordHash: 'coach-hash', tenantId: 'club-a' },
   ];
   prepareValidStorage(storageRoot, 'demo-company', users);
@@ -157,7 +157,7 @@ test('auth-bound tenant derivation from swim club and team is checked', () => {
   const storageRoot = tempDir('athlyrax-storage-');
   const backupRoot = tempDir('athlyrax-backup-');
   const users = [
-    { username: 'owner', role: 'software-owner', passwordHash: 'owner-hash' },
+    { username: 'softwareowner', role: 'software-owner', passwordHash: 'owner-hash' },
     { username: 'coach-b', role: 'head-coach', passwordHash: 'coach-hash', swimClub: 'North Club', teamName: 'Senior Team' },
   ];
   prepareValidStorage(storageRoot, 'demo-company', users);
@@ -173,7 +173,7 @@ test('missing required tenant DB fails closed', () => {
   const backupRoot = tempDir('athlyrax-backup-');
   fs.mkdirSync(path.join(storageRoot, 'auth'), { recursive: true });
   fs.writeFileSync(path.join(storageRoot, 'db.json'), '{"__meta":{"tenantId":"global-owner"}}\n');
-  const users = '[{"username":"owner","role":"software-owner","passwordHash":"test-hash"}]\n';
+  const users = '[{"username":"softwareowner","role":"software-owner","passwordHash":"test-hash"}]\n';
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), users);
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), users);
   writeStorageReadyMarker(storageRoot);
