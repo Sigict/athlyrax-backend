@@ -131,7 +131,7 @@ for (const token of ['ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUC
 if (authEnumerationPatch.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) failures.push('scripts/patch-auth-enumeration-safety.mjs: duplicate onboarding email guard logic returned.');
 
 const passwordPolicyPatch = read('scripts/patch-password-policy.mjs');
-for (const token of ['ATHLYRAX_PASSWORD_MINIMUM_10','if (password.length < 10) {','if (nextPassword.length < 10) {','Password must be at least 10 characters.','Legacy weak password policy remains']) {
+for (const token of ['ATHLYRAX_PASSWORD_MINIMUM_10','if (password.length < 10) {','if (nextPassword.length < 10) {','Password must be at least 10 characters.','Legacy password policy remains']) {
   if (!passwordPolicyPatch.includes(token)) failures.push(`scripts/patch-password-policy.mjs: missing ${token}`);
 }
 
@@ -142,7 +142,7 @@ for (const token of ['ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',"if (!signatur
 if (transformedIndex.includes('if (BILLING_STRIPE_WEBHOOK_SECRET && signature) {')) failures.push('index.js: unsigned Stripe webhook fallback remains.');
 
 const snapshotCookiePatch = read('scripts/patch-snapshot-cookie-session.mjs');
-for (const token of ['ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1','ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN','setAuthCookies(res, { token: session.token, csrfToken: session.csrf });','csrfToken: session.csrf','Snapshot auth still exposes bearer token']) {
+for (const token of ['ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1','ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN','setAuthCookies(res, { token: session.token, csrfToken: session.csrf });','csrfToken: session.csrf','Snapshot auth response still exposes a bearer session token.']) {
   if (!snapshotCookiePatch.includes(token)) failures.push(`scripts/patch-snapshot-cookie-session.mjs: missing ${token}`);
 }
 if (!transformedIndex.includes('ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1')) failures.push('index.js: snapshot cookie session hardening marker missing.');
