@@ -97,7 +97,8 @@ for (const required of [
 ]) if (!source.includes(required)) throw new Error(`Auth identity/enumeration hardening missing: ${required}`);
 
 if (!source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUE')) throw new Error('Onboarding email uniqueness must be installed by the earlier runtime-retention transform.');
-if (source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) throw new Error('Duplicate onboarding email-uniqueness guard remains.');
+const obsoleteOnboardingEmailMarker = 'ATHLYRAX_ONBOARDING_EMAIL_' + 'UNIQUENESS';
+if (source.includes(obsoleteOnboardingEmailMarker)) throw new Error('Duplicate onboarding email-uniqueness guard remains.');
 if (source.includes('function findAuthUserByIdentifier(') || source.includes('findAuthUserByIdentifier(identifier)')) {
   throw new Error('Legacy first-match identifier helper or call remains in transformed backend.');
 }
