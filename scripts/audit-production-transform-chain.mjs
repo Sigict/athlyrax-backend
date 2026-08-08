@@ -36,6 +36,7 @@ const expectedTransforms = [
   'scripts/patch-auth-enumeration-safety.mjs',
   'scripts/patch-password-policy.mjs',
   'scripts/patch-snapshot-cookie-session.mjs',
+  'scripts/patch-production-auth-token-redaction.mjs',
   'scripts/patch-coach-link-suite.mjs',
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
@@ -63,6 +64,7 @@ for (const relative of expectedCoachLinkSteps) read(relative);
 read('tests/auth-persistence-transaction.test.mjs');
 read('tests/auth-enumeration-safety.test.mjs');
 read('tests/snapshot-cookie-session.test.mjs');
+read('tests/production-auth-token-redaction.test.mjs');
 read('tests/coach-link-transaction.test.mjs');
 
 const build = read('scripts/build-production-backend.mjs');
@@ -98,7 +100,7 @@ const transformedIndex = read('index.js');
 for (const marker of [
   'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED','const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
   'ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
-  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN','ATHLYRAX_PASSWORD_MINIMUM_10','ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1','ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',
+  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN','ATHLYRAX_PASSWORD_MINIMUM_10','ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1','ATHLYRAX_PRODUCTION_AUTH_TOKEN_RESPONSE_REDACTED','ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',
   'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','ATHLYRAX_LAYERED_AUTH_RATE_LIMIT','ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_COACH_LINK_WORKFLOW_V1','ATHLYRAX_COACH_LINK_LIFECYCLE_V1','ATHLYRAX_COACH_LINK_REJECTION_STALE_GUARD','ATHLYRAX_COACH_LINK_INTEGRITY_V1','ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1','ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1','ATHLYRAX_COACH_LINK_RECONNECT_V1','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB','ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
@@ -131,7 +133,7 @@ for (const token of ['ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUC
 if (authEnumerationPatch.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) failures.push('scripts/patch-auth-enumeration-safety.mjs: duplicate onboarding email guard logic returned.');
 
 const passwordPolicyPatch = read('scripts/patch-password-policy.mjs');
-for (const token of ['ATHLYRAX_PASSWORD_MINIMUM_10','if (password.length < 10) {','if (nextPassword.length < 10) {','Password must be at least 10 characters.','Legacy weak password policy remains']) {
+for (const token of ['ATHLYRAX_PASSWORD_MINIMUM_10','if (password.length < 10) {','if (nextPassword.length < 10) {','Password must be at least 10 characters.','Legacy password policy remains']) {
   if (!passwordPolicyPatch.includes(token)) failures.push(`scripts/patch-password-policy.mjs: missing ${token}`);
 }
 
@@ -142,10 +144,16 @@ for (const token of ['ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',"if (!signatur
 if (transformedIndex.includes('if (BILLING_STRIPE_WEBHOOK_SECRET && signature) {')) failures.push('index.js: unsigned Stripe webhook fallback remains.');
 
 const snapshotCookiePatch = read('scripts/patch-snapshot-cookie-session.mjs');
-for (const token of ['ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1','ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN','setAuthCookies(res, { token: session.token, csrfToken: session.csrf });','csrfToken: session.csrf','Snapshot auth still exposes bearer token']) {
+for (const token of ['ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1','ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN','setAuthCookies(res, { token: session.token, csrfToken: session.csrf });','csrfToken: session.csrf','Snapshot auth response still exposes a bearer session token.']) {
   if (!snapshotCookiePatch.includes(token)) failures.push(`scripts/patch-snapshot-cookie-session.mjs: missing ${token}`);
 }
 if (!transformedIndex.includes('ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1')) failures.push('index.js: snapshot cookie session hardening marker missing.');
+
+const authTokenPatch = read('scripts/patch-production-auth-token-redaction.mjs');
+for (const token of ['ATHLYRAX_PRODUCTION_AUTH_TOKEN_RESPONSE_REDACTED','...(IS_PRODUCTION ? {} : { token: session.token })','csrfToken: session.csrf','Unconditional bearer token remains in production auth route']) {
+  if (!authTokenPatch.includes(token)) failures.push(`scripts/patch-production-auth-token-redaction.mjs: missing ${token}`);
+}
+if (!transformedIndex.includes('ATHLYRAX_PRODUCTION_AUTH_TOKEN_RESPONSE_REDACTED')) failures.push('index.js: production auth token response redaction marker missing.');
 
 const clientIpPatch = read('scripts/patch-client-ip-integrity.mjs');
 for (const token of ['ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','return chain[chain.length - 1];','Spoofable leftmost X-Forwarded-For selection remains.']) {
@@ -185,7 +193,7 @@ if (postinstall !== 'node scripts/build-production-backend.mjs') failures.push('
 if (!start.includes('test:storage-all') || !start.includes('production-start.mjs')) failures.push('package.json: production start is not gated by the full test suite.');
 if (!storageAudit.includes('audit-storage-paths.mjs') || !storageAudit.includes('audit-production-transform-chain.mjs')) failures.push('package.json: audit:storage-paths must run both storage and transform-chain audits.');
 if (!coachLinkTestCommand.includes('tests/coach-link-workflow.test.mjs') || !coachLinkTestCommand.includes('tests/coach-link-transaction.test.mjs')) failures.push('package.json: test:coach-link-workflow must run both workflow and transaction regressions.');
-for (const requiredTest of ['test:storage-safety','test:data-safety','test:persistence-integrity','test:auth-persistence-transaction','test:auth-enumeration-safety','test:snapshot-cookie-session','test:storage-routing-safety','test:storage-migration-identity','test:storage-extra-invariants','test:startup-mutation-safety','test:storage-path-integrity','test:storage-path-contract','test:signup-legal-acceptance','test:runtime-hardening','test:billing-catalog-integrity','test:coach-link-workflow','test:closed-pilot-backup-restore','test:closed-pilot-security','audit:storage-paths']) {
+for (const requiredTest of ['test:storage-safety','test:data-safety','test:persistence-integrity','test:auth-persistence-transaction','test:auth-enumeration-safety','test:snapshot-cookie-session','test:production-auth-token-redaction','test:storage-routing-safety','test:storage-migration-identity','test:storage-extra-invariants','test:startup-mutation-safety','test:storage-path-integrity','test:storage-path-contract','test:signup-legal-acceptance','test:runtime-hardening','test:billing-catalog-integrity','test:coach-link-workflow','test:closed-pilot-backup-restore','test:closed-pilot-security','audit:storage-paths']) {
   if (!storageAll.includes(requiredTest)) failures.push(`package.json: test:storage-all missing ${requiredTest}`);
 }
 for (const requiredTest of ['test:signup-legal-acceptance','test:storage-path-contract','test:data-safety','test:persistence-integrity','test:auth-persistence-transaction','test:auth-enumeration-safety','test:storage-routing-safety','test:storage-migration-identity','test:storage-extra-invariants','test:startup-mutation-safety','test:storage-path-integrity','test:runtime-hardening','test:billing-catalog-integrity','test:coach-link-workflow','audit:storage-paths']) {
