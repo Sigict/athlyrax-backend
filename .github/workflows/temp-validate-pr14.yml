@@ -1,0 +1,20 @@
+name: Temporary validate PR14 snapshot hardening
+
+on:
+  push:
+    branches:
+      - hardening/snapshot-cookie-session
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hardening/snapshot-cookie-session
+      - name: Build production backend
+        run: npm ci
+      - name: Run complete safety suite
+        run: npm run test:storage-all
+      - name: Verify zero dependency vulnerabilities
+        run: npm audit --audit-level=low
