@@ -96,7 +96,7 @@ const transformedIndex = read('index.js');
 for (const marker of [
   'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED','const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
   'ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
-  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN','ATHLYRAX_PASSWORD_MINIMUM_12','ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',
+  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN','ATHLYRAX_PASSWORD_MINIMUM_10','ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',
   'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','ATHLYRAX_LAYERED_AUTH_RATE_LIMIT','ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_COACH_LINK_WORKFLOW_V1','ATHLYRAX_COACH_LINK_LIFECYCLE_V1','ATHLYRAX_COACH_LINK_REJECTION_STALE_GUARD','ATHLYRAX_COACH_LINK_INTEGRITY_V1','ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1','ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1','ATHLYRAX_COACH_LINK_RECONNECT_V1','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB','ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
@@ -105,7 +105,7 @@ for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAu
 }
 if (!transformedIndex.includes(': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)')) failures.push('index.js: production CORS still lacks production-only default-origin separation.');
 if (!transformedIndex.includes('`identity:${identifier}`')) failures.push('index.js: identity authentication rate limit is not global across source IPs.');
-if (!transformedIndex.includes('if (password.length < 12) {') || !transformedIndex.includes('if (nextPassword.length < 12) {') || !transformedIndex.includes('Password must be at least 12 characters.')) failures.push('index.js: production password minimum is not consistently 12 characters.');
+if (!transformedIndex.includes('if (password.length < 10) {') || !transformedIndex.includes('if (nextPassword.length < 10) {') || !transformedIndex.includes('Password must be at least 10 characters.')) failures.push('index.js: production password minimum is not consistently 10 characters.');
 
 const operationalPatch = read('scripts/patch-operational-integrity.mjs');
 for (const token of ['ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN']) if (!operationalPatch.includes(token)) failures.push(`scripts/patch-operational-integrity.mjs: missing final tenant contract ${token}`);
@@ -129,7 +129,7 @@ for (const token of ['ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUC
 if (authEnumerationPatch.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) failures.push('scripts/patch-auth-enumeration-safety.mjs: duplicate onboarding email guard logic returned.');
 
 const passwordPolicyPatch = read('scripts/patch-password-policy.mjs');
-for (const token of ['ATHLYRAX_PASSWORD_MINIMUM_12','if (password.length < 12) {','if (nextPassword.length < 12) {','Password must be at least 12 characters.','Legacy weak password policy remains']) {
+for (const token of ['ATHLYRAX_PASSWORD_MINIMUM_10','if (password.length < 10) {','if (nextPassword.length < 10) {','Password must be at least 10 characters.','Legacy weak password policy remains']) {
   if (!passwordPolicyPatch.includes(token)) failures.push(`scripts/patch-password-policy.mjs: missing ${token}`);
 }
 
