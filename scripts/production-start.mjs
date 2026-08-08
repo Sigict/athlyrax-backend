@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveStorageConfiguration } from './storage-safety-lib.mjs';
-import { canonicalStoragePaths } from './storage-path-contract.mjs';
+import { canonicalStoragePaths, restoreBundledDemoTenantIfNeeded } from './storage-path-contract.mjs';
 import { readActiveMigrationTransaction } from './migration-transaction-state.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
@@ -58,6 +58,23 @@ if (approval === APPROVAL) {
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`Approved one-time storage migration/recovery failed with exit code ${result.status}.`);
   }
+}
+
+// The demo-company tenant is synthetic product-demo data, not customer data.
+// Recover it from the verified bundled seed when its persistent database is
+// missing or contains no meaningful demo records. The recovery helper preserves
+// the existing live file in the independent safety backup root before replacing
+// it. Ordinary customer tenants remain fail-closed and are never auto-seeded.
+const runtimeConfiguration = resolveStorageConfiguration(process.env, sourceRoot);
+if (runtimeConfiguration.failures.length > 0) throw new Error(runtimeConfiguration.failures.join('\n'));
+const demoRecovery = restoreBundledDemoTenantIfNeeded({
+  sourceRoot,
+  storageRoot: runtimeConfiguration.storageRoot,
+  backupRoot: runtimeConfiguration.backupRoot,
+  logger: console,
+});
+if (demoRecovery.restored) {
+  console.log(`[storage] Verified synthetic demo tenant recovery completed (${demoRecovery.bytes} bytes).`);
 }
 
 await import(pathToFileURL(path.join(sourceRoot, 'scripts', 'safe-start.mjs')).href);
