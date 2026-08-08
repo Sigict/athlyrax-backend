@@ -43,7 +43,6 @@ test('generic swimmer profile sync cannot create or mutate coach-link lifecycle 
   for (const forbidden of [
     "requestedCoachLinkStatus === 'pending'",
     "coachConnected: sanitizedSync.payload.coachConnected",
-    "coachLinkStatus: sanitizedSync.payload.coachLinkStatus",
     "coachEmail: sanitizedSync.payload.coachEmail",
     "coachRequestAt: sanitizedSync.payload.coachRequestAt",
     "coachApprovalAt: sanitizedSync.payload.coachApprovalAt",

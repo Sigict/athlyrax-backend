@@ -151,7 +151,7 @@ test('invalid legacy auth data fails closed instead of being copied', () => {
   const storageRoot = path.join(root, 'persistent');
   fs.mkdirSync(storageRoot, { recursive: true });
   fs.writeFileSync(path.join(storageRoot, 'auth-users.json'), '{invalid', 'utf8');
-  assert.throws(() => migrateLegacyStorageIfNeeded({ sourceRoot: root, storageRoot, backupRoot: path.join(root, 'backup'), logger: { info() {} } }), /Legacy auth users store is unreadable or invalid/);
+  assert.throws(() => migrateLegacyStorageIfNeeded({ sourceRoot: root, storageRoot, backupRoot: path.join(root, 'backup'), logger: { info() {} } }), /Legacy auth users store is unreadable, invalid or empty/);
   assert.equal(fs.existsSync(path.join(storageRoot, 'auth', 'auth-users.json')), false);
   fs.rmSync(root, { recursive: true, force: true });
 });

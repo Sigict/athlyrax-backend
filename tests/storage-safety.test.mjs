@@ -149,6 +149,9 @@ test('every auth-bound tenant must have a non-empty canonical tenant database', 
     { username: 'coach-a', role: 'head-coach', passwordHash: 'coach-hash', tenantId: 'club-a' },
   ];
   prepareValidStorage(storageRoot, 'demo-company', users);
+  const clubAPath = path.join(storageRoot, 'tenants', 'club-a', 'db.json');
+  fs.mkdirSync(path.dirname(clubAPath), { recursive: true });
+  fs.writeFileSync(clubAPath, '{}\n');
   assert.throws(() => runStorageSafetyCheck({ env: productionEnv(storageRoot, backupRoot), repoRoot, logger: { info() {}, warn() {} } }), /Auth-bound tenant database club-a/);
 });
 

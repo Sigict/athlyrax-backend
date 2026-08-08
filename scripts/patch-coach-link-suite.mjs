@@ -7,13 +7,14 @@ const node = process.execPath;
 
 // ATHLYRAX_COACH_LINK_SUITE_V1
 // Keep the individual transformations as focused implementation modules, but
-// expose exactly one production-build transform. This removes nine independent
+// expose exactly one production-build transform. This removes independent
 // production-chain entries while preserving their verified dependency order.
 const steps = [
   'scripts/patch-swimmer-coach-authority.mjs',
   'scripts/patch-parent-notification-semantics.mjs',
   'scripts/patch-coach-link-workflow.mjs',
   'scripts/patch-coach-link-lifecycle.mjs',
+  'scripts/patch-coach-link-rejection-stale-guard.mjs',
   'scripts/patch-coach-link-integrity.mjs',
   'scripts/patch-coach-link-ownership.mjs',
   'scripts/patch-coach-link-routing.mjs',
@@ -36,6 +37,7 @@ for (const marker of [
   'ATHLYRAX_PARENT_NOTIFICATION_ONLY',
   'ATHLYRAX_COACH_LINK_WORKFLOW_V1',
   'ATHLYRAX_COACH_LINK_LIFECYCLE_V1',
+  'ATHLYRAX_COACH_LINK_REJECTION_STALE_GUARD',
   'ATHLYRAX_COACH_LINK_INTEGRITY_V1',
   'ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1',
   'ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1',

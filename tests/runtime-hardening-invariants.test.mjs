@@ -19,11 +19,14 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_INVITE_CODE_CRYPTO_RNG',
     'ATHLYRAX_INVITE_CODE_UNIQUENESS_FAIL_CLOSED',
     'ATHLYRAX_STRIPE_EVENT_ORDER_GUARD',
+    'ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',
     'ATHLYRAX_SERVER_AUTHORITATIVE_OWNERSHIP_METADATA',
     'ATHLYRAX_ORPHAN_TENANT_CLAIM_BLOCKED',
     'ATHLYRAX_LAST_TENANT_ACCOUNT_DELETE_BLOCKED',
-    'ATHLYRAX_SWIMMER_CANNOT_SELF_APPROVE_COACH_LINK',
+    'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE',
+    'ATHLYRAX_COACH_LINK_WORKFLOW_V1',
     'ATHLYRAX_PARENT_NOTIFICATION_ONLY',
+    'ATHLYRAX_PASSWORD_MINIMUM_10',
     'ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
     'ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED',
     'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP',
@@ -42,6 +45,7 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes("const isBillingEnforced = isBillingEnabled && BILLING_ENFORCED;"), false);
   assert.equal(source.includes("if (!BILLING_ENFORCED || !stripeClient) return next();"), false);
   assert.equal(source.includes("return { planKey: 'tier-1', priceId: linePriceId };"), false);
+  assert.equal(source.includes('if (BILLING_STRIPE_WEBHOOK_SECRET && signature) {'), false);
   assert.equal(source.includes('Math.floor(Math.random() * alphabet.length)'), false);
   assert.equal(source.includes('buildExistingDbRowIdIndex('), false);
   assert.equal(source.includes("responsePayload = JSON.stringify({ swimmers: [] });"), false);
@@ -49,14 +53,31 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes('Under-18 approvals require parent 1 consent.'), false);
   assert.equal(source.includes('Parent 2 consent is required when parent email 2 is provided.'), false);
   assert.equal(source.includes('function findAuthUserByIdentifier('), false);
-  assert.equal(source.includes("details: error instanceof Error ? error.message : 'Unknown error'"), false);
+  const rawErrorDetails = "details: error instanceof Error ? error.message : 'Unknown error'";
+  const devOnlyErrorDetails = "...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' })";
+  assert.equal(source.split(rawErrorDetails).length - 1, source.split(devOnlyErrorDetails).length - 1, 'unguarded exception detail response remains');
   assert.equal(source.includes("return forwarded.split(',')[0].trim();"), false);
   assert.equal(source.includes("app.use(express.json({ limit: '25mb' }));"), false);
-  assert.ok(source.includes("...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' })"));
+  assert.equal(source.includes('`identity:${clientKey}:${identifier}`'), false);
+  assert.equal(source.includes('ATHLYRAX_PASSWORD_MINIMUM_12'), false);
+  assert.equal(source.includes('if (password.length < 8) {'), false);
+  assert.equal(source.includes('if (nextPassword.length < 8) {'), false);
+  assert.equal(source.includes('Password must be at least 8 characters.'), false);
+  assert.equal(source.includes('if (password.length < 12) {'), false);
+  assert.equal(source.includes('if (nextPassword.length < 12) {'), false);
+  assert.equal(source.includes('Password must be at least 12 characters.'), false);
+  assert.ok(source.includes('if (BILLING_STRIPE_WEBHOOK_SECRET) {'));
+  assert.ok(source.includes("if (!signature) {"));
+  assert.ok(source.includes('Stripe webhook signature is required.'));
+  assert.ok(source.includes('Stripe webhook verification is not configured.'));
+  assert.ok(source.includes('if (password.length < 10) {'));
+  assert.ok(source.includes('if (nextPassword.length < 10) {'));
+  assert.ok(source.includes('Password must be at least 10 characters.'));
+  assert.ok(source.includes(devOnlyErrorDetails));
   assert.ok(source.includes('return chain[chain.length - 1];'));
   assert.ok(source.includes('AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS'));
   assert.ok(source.includes('`ip:${clientKey}`'));
-  assert.ok(source.includes('`identity:${clientKey}:${identifier}`'));
+  assert.ok(source.includes('`identity:${identifier}`'));
   assert.ok(source.includes("app.use('/db', express.json({ limit: '25mb' }));"));
   assert.ok(source.includes("app.use('/swimmer/profile/sync', express.json({ limit: '25mb' }));"));
   assert.ok(source.includes("app.use(express.json({ limit: '5mb' }));"));
@@ -68,7 +89,9 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.ok(source.includes('Team storage already exists without an active membership. Automatic claiming is blocked'));
   assert.ok(source.includes('Each configured Stripe price ID may belong to only one billing plan.'));
   assert.ok(source.includes('Cannot delete the last account for a tenant while its database still exists.'));
-  assert.ok(source.includes('Coach connections become approved only through coach-side acceptance.'));
+  assert.ok(source.includes("app.post('/swimmer/coach/request', requireStrictAuth, requireSwimmerRole"));
+  assert.ok(source.includes("app.post('/coach/swimmer-links/:requestId/accept', requireStrictAuth, requireCoachLinkDecisionRole, requireBillingWriteAccess"));
+  assert.ok(source.includes("coachLinkStatus: 'approved'"));
   assert.ok(source.includes('Parent email 1 is invalid.'));
   assert.ok(source.includes('Parent email 2 is invalid.'));
   assert.ok(source.includes('No empty result was substituted.'));
