@@ -24,14 +24,16 @@ jobs:
           grep -F "installSignupLegalAcceptanceGuard(express);" index.js
           grep -F "ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD" index.js
           grep -F "ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE" index.js
+          grep -F "ATHLYRAX_DEMO_RECOVERY_RELEASE_2026_08_08_V1" index.js
           node --test tests/demo-coach-routing-regression.test.mjs
           npm run test:signup-legal-acceptance
           npm run test:storage-all
 
-      - name: Wait for backend deployment and verify rejection
+      - name: Wait for exact backend release and verify rejection
         if: github.event_name != 'pull_request'
         env:
           BACKEND_URL: https://athlyrax-backend.onrender.com
+          EXPECTED_RELEASE_MARKER: ATHLYRAX_DEMO_RECOVERY_RELEASE_2026_08_08_V1
         run: |
           set -euo pipefail
           expected_sha="${GITHUB_SHA}"
@@ -46,28 +48,40 @@ jobs:
               --output "${config_file}" --write-out '%{http_code}' \
               "${BACKEND_URL}/auth/config" || true)"
 
-            register_code="$(curl --silent --show-error --location \
-              --connect-timeout 15 --max-time 30 \
-              --header 'Content-Type: application/json' \
-              --data '{"username":"athlyrax-legal-deployment-probe","password":"NoAccountIsCreated123!"}' \
-              --output "${body_file}" --write-out '%{http_code}' \
-              "${BACKEND_URL}/auth/register" || true)"
+            release_match="$(node --input-type=module - "${config_file}" "${EXPECTED_RELEASE_MARKER}" <<'NODE'
+            import fs from 'node:fs';
+            const [filePath, expected] = process.argv.slice(2);
+            try {
+              const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+              process.stdout.write(String(payload?.releaseMarker || '') === expected ? 'yes' : 'no');
+            } catch {
+              process.stdout.write('no');
+            }
+            NODE
+            )"
 
-            if [[ "${config_code}" == "200" \
-              && "${register_code}" == "400" \
-              && $(grep -ciE 'Swim club and team name are required|Data Processing Agreement' "${body_file}" || true) -gt 0 ]]; then
-              echo "Production signup legal enforcement verified for ${expected_sha}."
-              cat "${config_file}"
-              cat "${body_file}"
-              exit 0
+            if [[ "${config_code}" == "200" && "${release_match}" == "yes" ]]; then
+              register_code="$(curl --silent --show-error --location \
+                --connect-timeout 15 --max-time 30 \
+                --header 'Content-Type: application/json' \
+                --data '{"username":"athlyrax-legal-deployment-probe","password":"NoAccountIsCreated123!"}' \
+                --output "${body_file}" --write-out '%{http_code}' \
+                "${BACKEND_URL}/auth/register" || true)"
+              if [[ "${register_code}" == "400" \
+                && $(grep -ciE 'Swim club and team name are required|Data Processing Agreement' "${body_file}" || true) -gt 0 ]]; then
+                echo "Exact production backend release and signup legal enforcement verified for ${expected_sha}."
+                cat "${config_file}"
+                cat "${body_file}"
+                exit 0
+              fi
             fi
 
-            echo "Attempt ${attempt}/36: config=${config_code}, register=${register_code}; response=$(cat "${body_file}")"
+            echo "Attempt ${attempt}/36: config=${config_code}, exactRelease=${release_match}; configResponse=$(cat "${config_file}")"
             rm -f "${config_file}" "${body_file}"
             sleep 15
           done
 
-          echo "Production did not expose the required signup legal guard within the verification window." >&2
+          echo "Production never exposed the expected backend release marker ${EXPECTED_RELEASE_MARKER}." >&2
           exit 1
 
       - name: Verify live demo coach receives meaningful tenant data
