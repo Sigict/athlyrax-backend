@@ -28,11 +28,13 @@ function writeBase(storageRoot, users) {
   writeStorageReadyMarker(storageRoot);
 }
 
-test('tenantDb rejects dotted, uppercase and otherwise noncanonical tenant IDs', () => {
+test('tenantDb rejects dotted, uppercase and path-changing tenant IDs while tolerating outer whitespace', () => {
   const temp = root('athlyrax-canonical-id-');
   const paths = canonicalStoragePaths({ sourceRoot: temp, storageRoot: path.join(temp, 'storage') });
-  assert.equal(paths.tenantDb('club-a'), path.join(temp, 'storage', 'tenants', 'club-a', 'db.json'));
-  for (const invalid of ['Club-A', 'club.a', ' club-a ', 'club a']) {
+  const canonical = path.join(temp, 'storage', 'tenants', 'club-a', 'db.json');
+  assert.equal(paths.tenantDb('club-a'), canonical);
+  assert.equal(paths.tenantDb(' club-a '), canonical);
+  for (const invalid of ['Club-A', 'club.a', 'club a']) {
     assert.throws(() => paths.tenantDb(invalid), /noncanonical|Unsafe/i);
   }
   fs.rmSync(temp, { recursive: true, force: true });
@@ -88,6 +90,9 @@ test('ordinary swimmer assigned to snapshot-public is not exempt without snapsho
     { username: 'softwareowner', role: 'software-owner', passwordHash: 'owner' },
     { username: 'swimmer-x', role: 'swimmer', tenantId: 'snapshot-public', createdVia: 'admin', passwordHash: 'swimmer' },
   ]);
+  const snapshotPublicPath = path.join(storage, 'tenants', 'snapshot-public', 'db.json');
+  fs.mkdirSync(path.dirname(snapshotPublicPath), { recursive: true });
+  fs.writeFileSync(snapshotPublicPath, '{}\n');
   assert.throws(
     () => runStorageSafetyCheck({ env: productionEnv(storage, backup), repoRoot: temp, logger: { info() {}, warn() {} } }),
     /Auth-bound tenant database snapshot-public/,
