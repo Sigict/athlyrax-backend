@@ -32,12 +32,21 @@ if (!source.includes(ownershipMarker)) {
   source = source.replace(anchor, replacement);
 }
 
+const releaseMarker = 'ATHLYRAX_DEMO_RECOVERY_RELEASE_2026_08_08_V1';
+if (!source.includes(releaseMarker)) {
+  const configAnchor = `\t\tassetId: BACKEND_ASSET_ID,\n\t});`;
+  const configReplacement = `\t\tassetId: BACKEND_ASSET_ID,\n\t\treleaseMarker: '${releaseMarker}',\n\t});`;
+  if (!source.includes(configAnchor)) throw new Error('Auth config release-marker anchor was not found.');
+  source = source.replace(configAnchor, configReplacement);
+}
+
 for (const token of [
   'ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED',
   'database_invalid_json',
   'No empty replacement was created.',
   'No empty result was substituted.',
   'ATHLYRAX_OWNERSHIP_SUMMARY_STRICT_DB_READ',
+  'ATHLYRAX_DEMO_RECOVERY_RELEASE_2026_08_08_V1',
 ]) if (!source.includes(token)) throw new Error(`Runtime database read hardening missing: ${token}`);
 
 fs.writeFileSync(indexPath, source, 'utf8');
