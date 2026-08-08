@@ -69,3 +69,60 @@ jobs:
 
           echo "Production did not expose the required signup legal guard within the verification window." >&2
           exit 1
+
+      - name: Verify live demo coach receives meaningful tenant data
+        if: github.event_name != 'pull_request'
+        env:
+          BACKEND_URL: https://athlyrax-backend.onrender.com
+          DEMO_USERNAME: demo.coach
+          DEMO_PASSWORD: DemoCoach123!
+        run: |
+          set -euo pipefail
+          cookie_jar="$(mktemp)"
+          login_body="$(mktemp)"
+          me_body="$(mktemp)"
+          db_body="$(mktemp)"
+          trap 'rm -f "${cookie_jar}" "${login_body}" "${me_body}" "${db_body}"' EXIT
+
+          login_code="$(curl --silent --show-error --location \
+            --connect-timeout 15 --max-time 30 \
+            --cookie-jar "${cookie_jar}" \
+            --header 'Content-Type: application/json' \
+            --data "{\"username\":\"${DEMO_USERNAME}\",\"password\":\"${DEMO_PASSWORD}\"}" \
+            --output "${login_body}" --write-out '%{http_code}' \
+            "${BACKEND_URL}/auth/login" || true)"
+          if [[ "${login_code}" != "200" ]]; then
+            echo "Live demo login failed with HTTP ${login_code}." >&2
+            exit 1
+          fi
+
+          me_code="$(curl --silent --show-error --location \
+            --connect-timeout 15 --max-time 30 \
+            --cookie "${cookie_jar}" \
+            --output "${me_body}" --write-out '%{http_code}' \
+            "${BACKEND_URL}/auth/me" || true)"
+          db_code="$(curl --silent --show-error --location \
+            --connect-timeout 15 --max-time 30 \
+            --cookie "${cookie_jar}" \
+            --output "${db_body}" --write-out '%{http_code}' \
+            "${BACKEND_URL}/db" || true)"
+          if [[ "${me_code}" != "200" || "${db_code}" != "200" ]]; then
+            echo "Live demo fetch failed: auth/me=${me_code}, db=${db_code}." >&2
+            exit 1
+          fi
+
+          node --input-type=module - "${me_body}" "${db_body}" <<'NODE'
+          import fs from 'node:fs';
+          const [mePath, dbPath] = process.argv.slice(2);
+          const me = JSON.parse(fs.readFileSync(mePath, 'utf8'));
+          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+          const username = String(me?.user?.username || '');
+          const tenantId = String(me?.user?.tenantId || '');
+          if (username !== 'demo.coach') throw new Error(`Unexpected live demo username: ${username}`);
+          if (tenantId !== 'demo-company') throw new Error(`Live demo tenant mismatch: ${tenantId}`);
+          const keys = ['swimmers','squads','trainingSessions','trainingSessionSets','tests','attendance','competitions','fixtures','groups','timetables','timetableSlots'];
+          const counts = Object.fromEntries(keys.map((key) => [key, Array.isArray(db?.[key]) ? db[key].length : 0]));
+          const meaningful = Object.values(counts).some((count) => count > 0);
+          console.log(JSON.stringify({ username, tenantId, dbBytes: fs.statSync(dbPath).size, counts }));
+          if (!meaningful) throw new Error('Live demo coach database contains no meaningful records.');
+          NODE
