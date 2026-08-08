@@ -1,0 +1,49 @@
+name: Temporary inspect transformed snapshot route
+
+on:
+  push:
+    branches:
+      - hardening/production-auth-token-redaction
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hardening/production-auth-token-redaction
+      - run: npm ci --ignore-scripts
+      - name: Apply transforms before snapshot patch and print route
+        run: |
+          node scripts/patch-data-safety-coverage.mjs
+          node scripts/patch-storage-recovery-semantics.mjs
+          node scripts/patch-index-signup-legal.mjs
+          node scripts/patch-logout-csrf.mjs
+          node scripts/patch-canonical-storage-contract.mjs
+          node scripts/patch-auth-persistence-transaction.mjs
+          node scripts/patch-persistence-integrity.mjs
+          node scripts/patch-durable-storage-writes.mjs
+          node scripts/patch-operational-integrity.mjs
+          node scripts/patch-runtime-data-retention.mjs
+          node scripts/patch-revision-integrity.mjs
+          node scripts/patch-auth-tenant-integrity.mjs
+          node scripts/patch-migration-validation.mjs
+          node scripts/patch-runtime-auth-billing-safety.mjs
+          node scripts/patch-stripe-webhook-signature.mjs
+          node scripts/patch-runtime-identity-event-safety.mjs
+          node scripts/patch-ownership-integrity.mjs
+          node scripts/patch-orphan-tenant-safety.mjs
+          node scripts/patch-billing-catalog-integrity.mjs
+          node scripts/patch-account-lifecycle-integrity.mjs
+          node scripts/patch-auth-enumeration-safety.mjs
+          node scripts/patch-password-policy.mjs
+          node <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('index.js','utf8').replace(/\r\n/g,'\n');
+          const start = s.indexOf("app.post('/snapshot/account/auth'");
+          const end = s.indexOf('\napp.', start + 1);
+          if (start < 0 || end < 0) throw new Error('snapshot route not found');
+          console.log('SNAPSHOT_ROUTE_BEGIN');
+          console.log(s.slice(start,end));
+          console.log('SNAPSHOT_ROUTE_END');
+          NODE
