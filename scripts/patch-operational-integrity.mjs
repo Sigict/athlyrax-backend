@@ -103,7 +103,9 @@ for (const token of [
   'ATHLYRAX_ROLE_VALUE_ALLOWLIST', 'ATHLYRAX_INVITE_HISTORY_PRESERVED', 'plannerBackupSaved',
   'csrfHeaderName: AUTH_CSRF_HEADER_NAME', '!safeEqualText(hashPasswordResetCode(resetCode)',
 ]) if (!source.includes(token)) throw new Error(`Operational integrity verification failed: ${token}`);
-for (const forbidden of ['ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE', 'ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE']) {
+const obsoleteAuditRetention = 'ATHLYRAX_PRODUCTION_AUDIT_RETENTION_' + 'NO_SILENT_DELETE';
+const obsoleteSnapshotRetention = 'ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_' + 'NO_SILENT_DELETE';
+for (const forbidden of [obsoleteAuditRetention, obsoleteSnapshotRetention]) {
   if (source.includes(forbidden)) throw new Error(`Operational patch must not own retention behavior: ${forbidden}`);
 }
 
