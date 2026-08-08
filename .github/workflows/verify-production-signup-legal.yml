@@ -24,6 +24,7 @@ jobs:
           grep -F "installSignupLegalAcceptanceGuard(express);" index.js
           grep -F "ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD" index.js
           grep -F "ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE" index.js
+          node --test tests/demo-coach-routing-regression.test.mjs
           npm run test:signup-legal-acceptance
           npm run test:storage-all
 
