@@ -39,6 +39,7 @@ requireAll('index.js', [
   `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [`,
   `// ATHLYRAX_ONBOARDING_EMAIL_UNIQUE`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
+  `// ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED`,
 ]);
 forbidAll('index.js', [
   `path.join(STORAGE_ROOT, 'tenants', 'clubs')`,
@@ -49,6 +50,7 @@ forbidAll('index.js', [
   `const registrationTenantProvisioningToken = crypto.randomUUID();`,
   `// ATHLYRAX_AUTH_STORE_PAIR_TRANSACTION`,
   `// ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS`,
+  `function findAuthUserByIdentifier(`,
 ]);
 
 requireAll('scripts/patch-canonical-storage-contract.mjs', [
@@ -93,8 +95,13 @@ requireAll('scripts/patch-auth-enumeration-safety.mjs', [
   `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [`,
   `ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE`,
   `ATHLYRAX_ONBOARDING_EMAIL_UNIQUE`,
+  `ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED`,
 ]);
 forbidAll('scripts/patch-auth-enumeration-safety.mjs', [`ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS`]);
+requireAll('scripts/patch-production-error-redaction.mjs', [
+  `ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED`,
+  `IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }`,
+]);
 
 requireAll('scripts/safe-start.mjs', [
   `validateRequiredStorageFiles(`,
@@ -135,11 +142,20 @@ requireAll('scripts/approve-storage-layout.mjs', [
   `assertJsonArray(paths.authInvites`, `assertJsonArray(paths.snapshotSubmissions`,
   `assertBillingCatalog(paths.billingCatalog`, `contains duplicate plan keys`, `contains duplicate username`,
   `authBoundTenants`, `requiredTenants = [...new Set`, `writeStorageReadyMarker`,
+  `verifiedFile(paths.authInvites)`, `verifiedFile(paths.snapshotSubmissions)`, `verifiedFile(paths.billingCatalog)`,
 ]);
 requireAll('scripts/stage-storage-restore.mjs', [
   `assertRegularNonSymlinkFile`, `assertSafeDestination`, `requireCanonicalTenantId`,
-  `isSymbolicLink()`, `fs.fsyncSync(handle)`, `Staged copy verification failed`,
-  `Production activation: NOT PERFORMED`,
+  `ATHLYRAX_STAGE_RESTORE_VALIDATE_ALL_BEFORE_WRITE`, `ATHLYRAX_STAGE_RESTORE_ATOMIC_DIRECTORY_COMMIT`,
+  `validatedSource(args.globalDb, 'Global database', 'global-owner')`,
+  `fs.renameSync(workDirectory, destination)`, `fs.fsyncSync(handle)`, `Staged copy verification failed`,
+  `Production activation: NOT PERFORMED`, `Storage approval marker: NOT CREATED`,
+]);
+requireAll('scripts/signup-legal-acceptance-preload.mjs', [
+  `ATHLYRAX_LEGAL_ACCEPTANCE_DUAL_DURABLE_JOURNAL`,
+  `ATHLYRAX_SAFETY_BACKUP_ROOT is required to persist production legal acceptance evidence`,
+  `legal-acceptances', 'legal-acceptances.jsonl`,
+  `appendDurableLine(targetPath`, `appendDurableLine(safetyPath`,
 ]);
 requireAll('scripts/check-storage-safety.mjs', [
   `if (!production)`, `assertNoSymlinkStorageLayout(`, `assertNoActiveMigrationTransaction(`,
@@ -162,6 +178,10 @@ requireAll('scripts/migrate-storage-once.mjs', [
   `migrateLegacyStorageIfNeeded({`, `restoreBundledDemoTenantIfNeeded({`,
   `sanitizeDemoTenantDatabase({`, `writeStorageReadyMarker(`, `runStorageSafetyCheck({`,
   `finalizeLegacyStorageMigration({`, `Migration failed; original storage was restored`,
+  `ATHLYRAX_MIGRATION_MARKER_ALL_STARTUP_STORES_VERIFIED`,
+  `{ path: paths.authInvites, sha256: sha256File(paths.authInvites), bytes: fs.statSync(paths.authInvites).size }`,
+  `{ path: paths.snapshotSubmissions, sha256: sha256File(paths.snapshotSubmissions), bytes: fs.statSync(paths.snapshotSubmissions).size }`,
+  `{ path: paths.billingCatalog, sha256: sha256File(paths.billingCatalog), bytes: fs.statSync(paths.billingCatalog).size }`,
 ]);
 requireAll('scripts/storage-path-contract.mjs', [
   `legacy-migration-already-finalized`, `Refusing cross-tenant migration or recovery`,
@@ -189,7 +209,8 @@ requireAll('scripts/patch-durable-storage-writes.mjs', [
 const build = requireAll('scripts/build-production-backend.mjs', [
   `patch-index-signup-legal.mjs`, `patch-logout-csrf.mjs`, `patch-canonical-storage-contract.mjs`,
   `patch-persistence-integrity.mjs`, `patch-auth-persistence-transaction.mjs`, `patch-durable-storage-writes.mjs`,
-  `patch-coach-link-suite.mjs`, `--check`, `audit-storage-paths.mjs`, `ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK`,
+  `patch-coach-link-suite.mjs`, `patch-production-error-redaction.mjs`,
+  `--check`, `audit-storage-paths.mjs`, `audit-production-transform-chain.mjs`, `ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK`,
 ]);
 if (build.includes('patch-runtime-start-guard.mjs') && !build.includes('Obsolete production patch')) {
   failures.push('scripts/build-production-backend.mjs: obsolete patch is referenced as an active transform.');
