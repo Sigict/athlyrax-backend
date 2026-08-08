@@ -44,6 +44,16 @@ function resolveAcceptancePath() {
   return canonicalPath;
 }
 
+function resolveSafetyAcceptancePath() {
+  const production = cleanText(process.env.NODE_ENV, 40).toLowerCase() === 'production';
+  const safetyRoot = cleanText(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT, 1000);
+  if (!safetyRoot) {
+    if (production) throw new Error('ATHLYRAX_SAFETY_BACKUP_ROOT is required to persist production legal acceptance evidence.');
+    return '';
+  }
+  return path.join(path.resolve(safetyRoot), 'legal-acceptances', 'legal-acceptances.jsonl');
+}
+
 function versionMatches(actual, expected) {
   return cleanText(actual, 40) === expected;
 }
@@ -115,10 +125,8 @@ export function buildSignupLegalAcceptanceRecord({ req, responsePayload, accepte
   };
 }
 
-export function appendSignupLegalAcceptanceRecord(record) {
-  const targetPath = resolveAcceptancePath();
+function appendDurableLine(targetPath, line, label) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  const line = `${JSON.stringify(record)}\n`;
   const beforeSize = fs.existsSync(targetPath) ? fs.statSync(targetPath).size : 0;
   let fileHandle = null;
   try {
@@ -130,13 +138,26 @@ export function appendSignupLegalAcceptanceRecord(record) {
   }
   const stat = fs.statSync(targetPath);
   if (!Number.isFinite(stat.size) || stat.size < beforeSize + Buffer.byteLength(line)) {
-    throw new Error('Legal acceptance append verification failed.');
+    throw new Error(`${label} append verification failed.`);
   }
+  try { fs.chmodSync(targetPath, 0o600); } catch {}
   try {
-    fs.chmodSync(targetPath, 0o600);
-  } catch {
-    // Some hosted filesystems do not support chmod. The append remains valid.
-  }
+    const directoryHandle = fs.openSync(path.dirname(targetPath), 'r');
+    try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
+  } catch {}
+}
+
+export function appendSignupLegalAcceptanceRecord(record) {
+  const targetPath = resolveAcceptancePath();
+  const safetyPath = resolveSafetyAcceptancePath();
+  const line = `${JSON.stringify(record)}\n`;
+
+  // ATHLYRAX_LEGAL_ACCEPTANCE_DUAL_DURABLE_JOURNAL
+  // Production signup evidence must survive loss of either the primary journal
+  // or its independent safety copy. A pre-registration write fails closed if
+  // either durable append cannot be verified.
+  appendDurableLine(targetPath, line, 'Legal acceptance primary journal');
+  if (safetyPath) appendDurableLine(safetyPath, line, 'Legal acceptance safety journal');
   return targetPath;
 }
 
@@ -147,8 +168,6 @@ function signupLegalAcceptanceMiddleware(req, res, next) {
     return;
   }
 
-  // Persist the user's acceptance before the account handler can create any account data.
-  // A completed record is appended only after a successful registration response.
   try {
     appendSignupLegalAcceptanceRecord(buildSignupLegalAcceptanceRecord({ req, stage: 'pre-registration' }));
   } catch (error) {
