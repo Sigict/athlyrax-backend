@@ -61,7 +61,7 @@ test('guarded stage restore preserves tenant separation and never activates prod
   }
 });
 
-test('guarded stage restore rejects cross-tenant mapping before staging a tenant database', () => {
+test('guarded stage restore rejects cross-tenant mapping before creating any staged output', () => {
   const temp = tempDir('athlyrax-stage-cross-tenant-');
   try {
     const globalDb = path.join(temp, 'global.json');
@@ -79,8 +79,28 @@ test('guarded stage restore rejects cross-tenant mapping before staging a tenant
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /declares tenant tenant-b but restore mapping is tenant-a/);
-    assert.equal(fs.existsSync(path.join(stageDir, 'tenants', 'tenant-a', 'db.json')), false);
-    assert.equal(fs.existsSync(path.join(stageDir, '.athlyrax-storage-ready.json')), false);
+    assert.equal(fs.existsSync(stageDir), false, 'validation failure must not leave a partial destination');
+    const leftovers = fs.readdirSync(temp).filter((name) => name.includes('.stage.athlyrax-stage-'));
+    assert.deepEqual(leftovers, [], 'validation failure must not leave a temporary staging tree');
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test('guarded stage restore rejects a global export declaring a tenant identity', () => {
+  const temp = tempDir('athlyrax-stage-global-identity-');
+  try {
+    const globalDb = path.join(temp, 'global.json');
+    const stageDir = path.join(temp, 'stage');
+    writeJson(globalDb, { __meta: { tenantId: 'tenant-a' }, settings: { version: 1 } });
+    const result = runStage([
+      '--destination', stageDir,
+      '--global-db', globalDb,
+      '--approve', 'STAGE_ONLY',
+    ]);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /declares tenant tenant-a but restore mapping is global-owner/);
+    assert.equal(fs.existsSync(stageDir), false);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
