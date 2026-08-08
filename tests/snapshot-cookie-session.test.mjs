@@ -12,18 +12,19 @@ function route(startText) {
   return source.slice(start, next >= 0 ? next : source.length);
 }
 
-test('snapshot login uses cookie session and CSRF instead of bearer token response', () => {
+test('snapshot login uses cookie session and CSRF without exposing bearer token response', () => {
   const body = route("app.post('/snapshot/account/auth'");
   assert.ok(body.includes('ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1'));
   assert.ok(body.includes('setAuthCookies(res, { token: session.token, csrfToken: session.csrf });'));
   assert.ok(body.includes('csrfToken: session.csrf'));
   assert.ok(body.includes('csrfHeaderName: AUTH_CSRF_HEADER_NAME'));
-  assert.equal(body.includes('res.status(200).json({ token: session.token'), false);
+  assert.equal(/res\.status\(200\)\.json\(\{[^}]*token:\s*session\.token/s.test(body), false);
 });
 
-test('snapshot signup does not expose an authentication token', () => {
+test('snapshot signup keeps cookie session but does not expose bearer token', () => {
   const body = route("app.post('/snapshot/account/auth'");
   assert.ok(body.includes('ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN'));
-  assert.equal(body.includes("issueAuthToken({ username, role: 'swimmer' })"), false);
-  assert.equal(body.includes('\ttoken: session.token,'), false);
+  assert.ok(body.includes("const session = issueAuthToken({ username, role: 'swimmer' });"));
+  assert.ok(body.includes('setAuthCookies(res, { token: session.token, csrfToken: session.csrf });'));
+  assert.equal(/res\.status\(201\)\.json\(\{[^}]*token:\s*session\.token/s.test(body), false);
 });
