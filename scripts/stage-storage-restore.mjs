@@ -70,10 +70,10 @@ function assertSafeDestination(destination) {
   }
   return resolved;
 }
-function readValidatedJsonObject(filePath, label, expectedTenantId = '') {
-  const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${label} must contain a JSON object: ${filePath}`);
-  if (Object.keys(parsed).length === 0) throw new Error(`${label} must not be empty: ${filePath}`);
+function parseValidatedJsonBytes(bytes, label, sourcePath, expectedTenantId = '') {
+  const parsed = JSON.parse(bytes.toString('utf8'));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${label} must contain a JSON object: ${sourcePath}`);
+  if (Object.keys(parsed).length === 0) throw new Error(`${label} must not be empty: ${sourcePath}`);
   if (expectedTenantId) {
     const expected = requireCanonicalTenantId(expectedTenantId, 'restore tenant ID');
     const declaredRaw = String(parsed?.__meta?.tenantId || '').trim();
@@ -84,17 +84,19 @@ function readValidatedJsonObject(filePath, label, expectedTenantId = '') {
   }
   return parsed;
 }
-
-function copyValidatedJson(source, destination, label, expectedTenantId = '') {
-  const resolvedSource = assertRegularNonSymlinkFile(source, label);
-  readValidatedJsonObject(resolvedSource, label, expectedTenantId);
+function validatedSource(filePath, label, expectedTenantId = '') {
+  const source = assertRegularNonSymlinkFile(filePath, label);
+  const bytes = fs.readFileSync(source);
+  parseValidatedJsonBytes(bytes, label, source, expectedTenantId);
+  return { source, bytes, label, expectedTenantId };
+}
+function writeValidatedBytes(plan, destination) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  const bytes = fs.readFileSync(resolvedSource);
   const temp = `${destination}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
   let handle = null;
   try {
     handle = fs.openSync(temp, 'wx', 0o600);
-    fs.writeFileSync(handle, bytes);
+    fs.writeFileSync(handle, plan.bytes);
     fs.fsyncSync(handle);
   } finally {
     if (handle !== null) fs.closeSync(handle);
@@ -102,40 +104,59 @@ function copyValidatedJson(source, destination, label, expectedTenantId = '') {
   try { fs.renameSync(temp, destination); }
   catch (error) { try { fs.unlinkSync(temp); } catch {} throw error; }
   const copied = fs.readFileSync(destination);
-  if (!bytes.equals(copied)) throw new Error(`Staged copy verification failed: ${resolvedSource}`);
+  if (!plan.bytes.equals(copied)) throw new Error(`Staged copy verification failed: ${plan.source}`);
   try {
     const directoryHandle = fs.openSync(path.dirname(destination), 'r');
     try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
   } catch {}
-  return { source: resolvedSource, destination, bytes: copied.length, sha256: sha256File(destination) };
+  return { source: plan.source, destination, bytes: copied.length, sha256: sha256File(destination) };
+}
+function fsyncDirectory(directory) {
+  try {
+    const handle = fs.openSync(directory, 'r');
+    try { fs.fsyncSync(handle); } finally { fs.closeSync(handle); }
+  } catch {}
 }
 
+let workDirectory = '';
+let originalDestinationExisted = false;
+let destination = '';
 try {
   const args = parseArgs(process.argv.slice(2));
   if (args.approve !== 'STAGE_ONLY') throw new Error('Explicit approval is required: --approve STAGE_ONLY');
   if (!args.destination || !args.globalDb) { usage(); process.exit(2); }
 
-  const destination = assertSafeDestination(args.destination);
-  fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
-  if (fs.lstatSync(destination).isSymbolicLink()) throw new Error(`Destination became a symbolic link: ${destination}`);
+  destination = assertSafeDestination(args.destination);
+  originalDestinationExisted = fs.existsSync(destination);
 
-  const paths = canonicalStoragePaths({ sourceRoot: process.cwd(), storageRoot: destination });
-  const files = [copyValidatedJson(args.globalDb, paths.globalDb, 'Global database')];
+  // ATHLYRAX_STAGE_RESTORE_VALIDATE_ALL_BEFORE_WRITE
+  // Freeze validated source bytes before creating any staging output so a bad
+  // tenant mapping cannot leave a partially staged restore behind.
+  const globalPlan = validatedSource(args.globalDb, 'Global database', 'global-owner');
+  const tenantPlans = [];
   const tenantIds = [];
   const seenTenantIds = new Set();
-
   for (const tenantSpec of args.tenants) {
     const separator = String(tenantSpec || '').indexOf('=');
     if (separator <= 0) throw new Error(`Invalid --tenant mapping: ${tenantSpec}`);
     const tenantId = requireCanonicalTenantId(tenantSpec.slice(0, separator).trim(), 'tenant mapping ID');
     const source = tenantSpec.slice(separator + 1).trim();
     if (!source) throw new Error(`Missing tenant source file for ${tenantId}.`);
-    const dbPath = paths.tenantDb(tenantId);
     if (seenTenantIds.has(tenantId)) throw new Error(`Duplicate --tenant mapping: ${tenantId}`);
     seenTenantIds.add(tenantId);
     tenantIds.push(tenantId);
-    files.push(copyValidatedJson(source, dbPath, `Tenant database ${tenantId}`, tenantId));
+    tenantPlans.push({ tenantId, ...validatedSource(source, `Tenant database ${tenantId}`, tenantId) });
   }
+
+  const parent = path.dirname(destination);
+  fs.mkdirSync(parent, { recursive: true });
+  workDirectory = path.join(parent, `.${path.basename(destination)}.athlyrax-stage-${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`);
+  fs.mkdirSync(workDirectory, { recursive: false, mode: 0o700 });
+  if (fs.lstatSync(workDirectory).isSymbolicLink()) throw new Error(`Work directory became a symbolic link: ${workDirectory}`);
+
+  const paths = canonicalStoragePaths({ sourceRoot: process.cwd(), storageRoot: workDirectory });
+  const files = [writeValidatedBytes(globalPlan, paths.globalDb)];
+  for (const plan of tenantPlans) files.push(writeValidatedBytes(plan, paths.tenantDb(plan.tenantId)));
 
   const manifest = {
     stagedAt: new Date().toISOString(),
@@ -153,18 +174,26 @@ try {
       'billing-catalog backups',
     ],
   };
-  const manifestPath = path.join(destination, 'staged-restore-manifest.json');
+  const manifestPath = path.join(workDirectory, 'staged-restore-manifest.json');
   const manifestHandle = fs.openSync(manifestPath, 'wx', 0o600);
   try {
     fs.writeFileSync(manifestHandle, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
     fs.fsyncSync(manifestHandle);
-  } finally {
-    fs.closeSync(manifestHandle);
-  }
+  } finally { fs.closeSync(manifestHandle); }
+  fsyncDirectory(workDirectory);
+
+  // ATHLYRAX_STAGE_RESTORE_ATOMIC_DIRECTORY_COMMIT
+  // The destination is either absent or confirmed empty. Commit the completed
+  // staging tree in one directory rename so callers never observe a partial set.
+  if (originalDestinationExisted) fs.rmdirSync(destination);
   try {
-    const directoryHandle = fs.openSync(destination, 'r');
-    try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
-  } catch {}
+    fs.renameSync(workDirectory, destination);
+    workDirectory = '';
+  } catch (error) {
+    if (originalDestinationExisted && !fs.existsSync(destination)) fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
+    throw error;
+  }
+  fsyncDirectory(parent);
 
   console.log('ATHLYRAX_STORAGE_RESTORE_STAGED');
   console.log(`Destination: ${destination}`);
@@ -172,6 +201,9 @@ try {
   console.log('Production activation: NOT PERFORMED');
   console.log('Storage approval marker: NOT CREATED');
 } catch (error) {
+  if (workDirectory && fs.existsSync(workDirectory)) {
+    try { fs.rmSync(workDirectory, { recursive: true, force: true }); } catch {}
+  }
   console.error('ATHLYRAX_STORAGE_RESTORE_STAGE_FAILED');
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
