@@ -23,11 +23,13 @@ function normalizeTenantPart(value, fallback) {
 }
 
 function resolveRequestIp(req) {
-  const forwarded = cleanText(req?.headers?.['x-forwarded-for'], 300)
+  // ATHLYRAX_LEGAL_PROXY_OBSERVED_CLIENT_IP
+  const chain = cleanText(req?.headers?.['x-forwarded-for'], 300)
     .split(',')
     .map((value) => value.trim())
-    .find(Boolean);
-  return forwarded || cleanText(req?.ip || req?.socket?.remoteAddress, 120);
+    .filter(Boolean);
+  return (chain.length > 0 ? chain[chain.length - 1] : '')
+    || cleanText(req?.ip || req?.socket?.remoteAddress, 120);
 }
 
 function resolveStorageRoot() {
