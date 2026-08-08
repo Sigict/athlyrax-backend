@@ -258,10 +258,14 @@ try {
     assertMeaningfulDb(paths.tenantDb(tenantId), `Tenant database ${tenantId}`, tenantId);
   }
 
+  // ATHLYRAX_MIGRATION_MARKER_ALL_STARTUP_STORES_VERIFIED
   const verifiedFiles = [
     { path: paths.globalDb, sha256: sha256File(paths.globalDb), bytes: fs.statSync(paths.globalDb).size },
     { path: paths.authUsers, sha256: sha256File(paths.authUsers), bytes: fs.statSync(paths.authUsers).size },
     { path: paths.authUsersBackup, sha256: sha256File(paths.authUsersBackup), bytes: fs.statSync(paths.authUsersBackup).size },
+    { path: paths.authInvites, sha256: sha256File(paths.authInvites), bytes: fs.statSync(paths.authInvites).size },
+    { path: paths.snapshotSubmissions, sha256: sha256File(paths.snapshotSubmissions), bytes: fs.statSync(paths.snapshotSubmissions).size },
+    { path: paths.billingCatalog, sha256: sha256File(paths.billingCatalog), bytes: fs.statSync(paths.billingCatalog).size },
     ...requiredTenants.map((tenantId) => { const filePath = paths.tenantDb(tenantId); return { path: filePath, sha256: sha256File(filePath), bytes: fs.statSync(filePath).size, tenantId }; }),
   ];
 
