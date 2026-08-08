@@ -1,0 +1,20 @@
+name: Temporary validate Stripe processing availability
+
+on:
+  push:
+    branches:
+      - hardening/stripe-webhook-processing-availability
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hardening/stripe-webhook-processing-availability
+      - name: Build production backend
+        run: npm ci
+      - name: Run complete backend safety suite
+        run: npm run test:storage-all
+      - name: Verify zero dependency vulnerabilities
+        run: npm audit --audit-level=low
