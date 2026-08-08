@@ -34,11 +34,14 @@ requireAll('index.js', [
   `// ATHLYRAX_NEW_TENANT_DB_PROVISION`,
   `// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION`,
   `// ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
+  `// ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER`,
   `// ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION`,
   `// ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED`,
+  `// ATHLYRAX_PASSWORD_RESET_ACCOUNT_ATTEMPT_LIMIT`,
   `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [`,
   `// ATHLYRAX_ONBOARDING_EMAIL_UNIQUE`,
   `// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`,
+  `// ATHLYRAX_COACH_LINK_REVISION_SAFE_ROLLBACK`,
 ]);
 forbidAll('index.js', [
   `path.join(STORAGE_ROOT, 'tenants', 'clubs')`,
@@ -69,6 +72,7 @@ forbidAll('scripts/patch-canonical-storage-contract.mjs', [
 requireAll('scripts/patch-persistence-integrity.mjs', [
   `ATHLYRAX_PRODUCTION_STORAGE_LAYOUT_READ_ONLY`,
   `ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER`,
+  `authPersistenceOwnerMarker`,
   `if (IS_PRODUCTION) return;`,
   `ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`,
   `ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
@@ -92,6 +96,8 @@ requireAll('scripts/patch-auth-enumeration-safety.mjs', [
   `ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED`,
   `const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [`,
   `ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE`,
+  `ATHLYRAX_PASSWORD_RESET_ACCOUNT_ATTEMPT_LIMIT`,
+  `resetEntry.failedAttempts >= 5`,
   `ATHLYRAX_ONBOARDING_EMAIL_UNIQUE`,
 ]);
 forbidAll('scripts/patch-auth-enumeration-safety.mjs', [`ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS`]);
@@ -106,8 +112,9 @@ requireAll('scripts/safe-start.mjs', [
 forbidAll('scripts/safe-start.mjs', [
   'runStorageSafetyCheck(', 'migrateLegacyStorageIfNeeded(', 'restoreBundledDemoTenantIfNeeded(',
   'finalizeLegacyStorageMigration(', 'writeStorageReadyMarker(', 'writeFileSync(', 'copyFileSync(',
-  'mkdirSync(', 'renameSync(', 'unlinkSync(',
+  'mkdirSync(', 'renameSync(', 'unlinkSync(', 'installSignupLegalAcceptanceGuard',
 ]);
+requireAll('scripts/patch-index-signup-legal.mjs', [`installSignupLegalAcceptanceGuard(express);`]);
 
 requireAll('scripts/storage-path-integrity.mjs', [
   `ATHLYRAX_STORAGE_SYMLINK_BLOCKED`, `realpathSync`, `lstatSync`, `isSymbolicLink()`, `assertNoSymlinkStorageLayout`,
@@ -137,6 +144,7 @@ requireAll('scripts/approve-storage-layout.mjs', [
   `authBoundTenants`, `requiredTenants = [...new Set`, `writeStorageReadyMarker`,
 ]);
 requireAll('scripts/stage-storage-restore.mjs', [
+  `ATHLYRAX_RESTORE_PREFLIGHT_BEFORE_WRITE`, `validateSource(args.globalDb`,
   `assertRegularNonSymlinkFile`, `assertSafeDestination`, `requireCanonicalTenantId`,
   `isSymbolicLink()`, `fs.fsyncSync(handle)`, `Staged copy verification failed`,
   `Production activation: NOT PERFORMED`,
@@ -170,13 +178,20 @@ requireAll('scripts/storage-path-contract.mjs', [
   `validMeaningfulDemoDatabase`,
 ]);
 forbidAll('scripts/storage-path-contract.mjs', [`kind: 'auth-users-backup-baseline'`]);
+requireAll('scripts/patch-storage-recovery-semantics.mjs', [
+  `ATHLYRAX_AUTH_RECOVERY_BACKUP_PREFLIGHT`, `Refusing to mutate canonical auth state`,
+]);
 
 requireAll('scripts/data-safety-preload.mjs', [
   `ATHLYRAX_MISSING_DB_CREATE_BLOCKED`, `ATHLYRAX_CURRENT_DB_INVALID`, `ATHLYRAX_INCOMING_DB_INVALID`,
   `ATHLYRAX_DB_TENANT_IDENTITY_CONFLICT`, `ATHLYRAX_DB_TOTAL_DATA_WIPE_BLOCKED`,
   `ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`, `expectedTenantIdForDbPath`,
   `hasValidProvisioningProof`, `timingSafeEqual`, `provisioningToken: _discardedProvisioningToken`,
-  `fsModule.fsyncSync(handle)`,
+  `fsModule.fsyncSync(handle)`, `runWithDatabaseRollbackAuthorization`, `rollbackContext`,
+  `ATHLYRAX_DB_ROLLBACK_AUTHORIZATION_MISMATCH`, `pre-authorized-rollback`,
+]);
+requireAll('scripts/patch-data-safety-coverage.mjs', [
+  `if (!rollbackAuthorized) {`, `assertNoCatastrophicDataShrink(current, incoming);`,
 ]);
 requireAll('scripts/demo-data-sanitizer.mjs', [
   `demoDataSynthetic`, `tenantId: 'demo-company'`, `containsObviousPersonalData`, `Demo sanitization verification failed`,
@@ -185,33 +200,37 @@ requireAll('scripts/patch-durable-storage-writes.mjs', [
   `ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES`, `fs.openSync(tmpPath, 'wx', 0o600)`,
   `fs.fsyncSync(fileHandle)`, `fs.renameSync(tmpPath, filePath)`,
 ]);
+requireAll('scripts/patch-coach-link-rollback-safety.mjs', [
+  `ATHLYRAX_COACH_LINK_REVISION_SAFE_ROLLBACK`, `runWithDatabaseRollbackAuthorization`,
+  `writeCoachLinkRollbackDb(targetPaths, targetDb)`, `writeCoachLinkRollbackDb(sourcePaths, sourceDb)`,
+  `writeCoachLinkRollbackDb(currentPaths, currentDb)`, `writeCoachLinkRollbackDb(pendingTargetPaths, pendingTargetRollback)`,
+]);
 
 const build = requireAll('scripts/build-production-backend.mjs', [
   `patch-index-signup-legal.mjs`, `patch-logout-csrf.mjs`, `patch-canonical-storage-contract.mjs`,
   `patch-persistence-integrity.mjs`, `patch-auth-persistence-transaction.mjs`, `patch-durable-storage-writes.mjs`,
   `patch-coach-link-suite.mjs`, `--check`, `audit-storage-paths.mjs`, `ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK`,
 ]);
-if (build.includes('patch-runtime-start-guard.mjs') && !build.includes('Obsolete production patch')) {
-  failures.push('scripts/build-production-backend.mjs: obsolete patch is referenced as an active transform.');
-}
-for (const obsolete of ['scripts/patch-runtime-start-guard.mjs', 'scripts/patch-provisioning-integrity.mjs', 'scripts/patch-tenant-storage-path.mjs']) {
-  if (fs.existsSync(path.join(root, obsolete))) failures.push(`Obsolete patch file must be removed: ${obsolete}`);
-}
+if (build.includes('patch-runtime-start-guard.mjs') && !build.includes('Obsolete production patch')) failures.push('scripts/build-production-backend.mjs: obsolete patch is referenced as an active transform.');
+for (const obsolete of ['scripts/patch-runtime-start-guard.mjs', 'scripts/patch-provisioning-integrity.mjs', 'scripts/patch-tenant-storage-path.mjs']) if (fs.existsSync(path.join(root, obsolete))) failures.push(`Obsolete patch file must be removed: ${obsolete}`);
 
+for (const requiredFile of ['tests/data-safety-rollback.test.mjs','tests/storage-recovery-preflight.test.mjs','tests/stage-storage-restore.test.mjs']) read(requiredFile);
 const pkg = JSON.parse(read('package.json') || '{}');
 const postinstall = String(pkg?.scripts?.postinstall || '');
 const start = String(pkg?.scripts?.start || '');
 const storageAll = String(pkg?.scripts?.['test:storage-all'] || '');
+const dataSafetyTests = String(pkg?.scripts?.['test:data-safety'] || '');
+const backupRestoreTests = String(pkg?.scripts?.['test:closed-pilot-backup-restore'] || '');
 if (postinstall !== 'node scripts/build-production-backend.mjs') failures.push('package.json: postinstall must use only the verified production build orchestrator.');
-for (const obsolete of ['patch-runtime-start-guard.mjs', 'patch-provisioning-integrity.mjs', 'patch-tenant-storage-path.mjs']) {
-  if (postinstall.includes(obsolete)) failures.push(`package.json: obsolete postinstall patch remains: ${obsolete}`);
-}
+for (const obsolete of ['patch-runtime-start-guard.mjs', 'patch-provisioning-integrity.mjs', 'patch-tenant-storage-path.mjs']) if (postinstall.includes(obsolete)) failures.push(`package.json: obsolete postinstall patch remains: ${obsolete}`);
 if (!start.includes('test:storage-all') || !start.includes('production-start.mjs')) failures.push('package.json: guarded production start is not enforced.');
 if (start.includes('migrate-storage-once.mjs')) failures.push('package.json: normal start must not invoke migration directly.');
+if (!dataSafetyTests.includes('tests/data-safety-rollback.test.mjs')) failures.push('package.json: data-safety rollback regression is not executed.');
+if (!backupRestoreTests.includes('tests/stage-storage-restore.test.mjs')) failures.push('package.json: restore staging preflight regression is not executed.');
 for (const required of [
   'test:storage-safety', 'test:data-safety', 'test:persistence-integrity', 'test:auth-persistence-transaction',
   'test:auth-enumeration-safety', 'test:storage-routing-safety', 'test:storage-migration-identity',
-  'test:storage-extra-invariants', 'test:startup-mutation-safety', 'test:storage-path-integrity',
+  'test:storage-recovery-preflight', 'test:storage-extra-invariants', 'test:startup-mutation-safety', 'test:storage-path-integrity',
   'test:storage-path-contract', 'test:signup-legal-acceptance', 'test:closed-pilot-backup-restore',
   'test:closed-pilot-security', 'audit:storage-paths',
 ]) if (!storageAll.includes(required)) failures.push(`package.json: test:storage-all missing ${required}`);
