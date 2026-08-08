@@ -13,8 +13,14 @@ if (!source.includes(layoutMarker)) {
 }
 
 // Authentication primary/backup persistence has one source of truth:
-// patch-auth-persistence-transaction.mjs. Do not rewrite persistAuthUsers here.
-// ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER
+// patch-auth-persistence-transaction.mjs. Mark that ownership in generated index
+// without rewriting persistAuthUsers here.
+const authPersistenceOwnerMarker = `// ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER`;
+if (!source.includes(authPersistenceOwnerMarker)) {
+  const persistAnchor = `function persistAuthUsers() {`;
+  if (!source.includes(persistAnchor)) throw new Error('Authentication persistence ownership anchor was not found.');
+  source = source.replace(persistAnchor, `${authPersistenceOwnerMarker}\n${persistAnchor}`);
+}
 
 const snapshotMarker = `// ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED`;
 const snapshotWipeMarker = `// ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`;
@@ -54,7 +60,7 @@ if (!source.includes(passwordResetMarker)) {
 
 for (const token of [
   layoutMarker,
-  'ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER',
+  authPersistenceOwnerMarker,
   snapshotMarker,
   snapshotWipeMarker,
   `ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED`,
