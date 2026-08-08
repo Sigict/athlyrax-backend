@@ -52,11 +52,12 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes("details: error instanceof Error ? error.message : 'Unknown error'"), false);
   assert.equal(source.includes("return forwarded.split(',')[0].trim();"), false);
   assert.equal(source.includes("app.use(express.json({ limit: '25mb' }));"), false);
+  assert.equal(source.includes('`identity:${clientKey}:${identifier}`'), false);
   assert.ok(source.includes("...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' })"));
   assert.ok(source.includes('return chain[chain.length - 1];'));
   assert.ok(source.includes('AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS'));
   assert.ok(source.includes('`ip:${clientKey}`'));
-  assert.ok(source.includes('`identity:${clientKey}:${identifier}`'));
+  assert.ok(source.includes('`identity:${identifier}`'));
   assert.ok(source.includes("app.use('/db', express.json({ limit: '25mb' }));"));
   assert.ok(source.includes("app.use('/swimmer/profile/sync', express.json({ limit: '25mb' }));"));
   assert.ok(source.includes("app.use(express.json({ limit: '5mb' }));"));
