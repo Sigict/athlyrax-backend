@@ -107,6 +107,17 @@ test('storage migration is explicit, crash-recoverable, transactional, ordered a
   assert.ok(order.every((value, index) => index === 0 || value > order[index - 1]));
 });
 
+test('migration ready marker records all core startup stores plus tenants', () => {
+  const source = read('scripts/migrate-storage-once.mjs');
+  assert.match(source, /ATHLYRAX_MIGRATION_MARKER_ALL_STARTUP_STORES_VERIFIED/);
+  for (const pathToken of [
+    'paths.globalDb', 'paths.authUsers', 'paths.authUsersBackup',
+    'paths.authInvites', 'paths.snapshotSubmissions', 'paths.billingCatalog',
+  ]) assert.ok(source.includes(`{ path: ${pathToken}, sha256: sha256File(${pathToken}), bytes: fs.statSync(${pathToken}).size }`), `migration marker missing ${pathToken}`);
+  assert.match(source, /requiredTenants\.map\(\(tenantId\)/);
+  assert.match(source, /writeStorageReadyMarker\(configuration\.storageRoot, \{ migrationApproval: APPROVAL, requiredTenants, verifiedFiles \}\)/);
+});
+
 test('storage approval rejects ambiguous path state before marker creation', () => {
   const source = read('scripts/approve-storage-layout.mjs');
   assert.match(source, /assertNoSymlinkStorageLayout\(/);
@@ -139,6 +150,25 @@ test('approval marker validates all startup stores and all auth-bound tenants', 
   assert.match(source, /requiredTenants = \[\.\.\.new Set/);
 });
 
+test('staged restore validates all inputs before an atomic directory commit', () => {
+  const source = read('scripts/stage-storage-restore.mjs');
+  assert.match(source, /ATHLYRAX_STAGE_RESTORE_VALIDATE_ALL_BEFORE_WRITE/);
+  assert.match(source, /ATHLYRAX_STAGE_RESTORE_ATOMIC_DIRECTORY_COMMIT/);
+  assert.match(source, /validatedSource\(args\.globalDb, 'Global database', 'global-owner'\)/);
+  assert.match(source, /fs\.renameSync\(workDirectory, destination\)/);
+  assert.match(source, /Production activation: NOT PERFORMED/);
+  assert.match(source, /Storage approval marker: NOT CREATED/);
+});
+
+test('signup legal evidence is dual-journaled in production', () => {
+  const source = read('scripts/signup-legal-acceptance-preload.mjs');
+  assert.match(source, /ATHLYRAX_LEGAL_ACCEPTANCE_DUAL_DURABLE_JOURNAL/);
+  assert.match(source, /ATHLYRAX_SAFETY_BACKUP_ROOT is required to persist production legal acceptance evidence/);
+  assert.match(source, /legal-acceptances.*legal-acceptances\.jsonl/);
+  assert.match(source, /appendDurableLine\(targetPath/);
+  assert.match(source, /appendDurableLine\(safetyPath/);
+});
+
 test('demo sanitizer preserves a safety copy and rejects remaining personal data', () => {
   const source = read('scripts/demo-data-sanitizer.mjs');
   assert.match(source, /demo-pre-sanitization/);
@@ -165,6 +195,7 @@ test('package postinstall uses one verified production build orchestrator and on
   for (const transform of [
     'patch-index-signup-legal.mjs', 'patch-logout-csrf.mjs', 'patch-canonical-storage-contract.mjs',
     'patch-persistence-integrity.mjs', 'patch-durable-storage-writes.mjs', 'patch-coach-link-suite.mjs',
+    'patch-production-error-redaction.mjs',
   ]) assert.ok(build.includes(transform));
   for (const internalCoachStep of [
     'patch-swimmer-coach-authority.mjs', 'patch-parent-notification-semantics.mjs',
