@@ -30,11 +30,14 @@ if (!source.includes(`error.code = 'ATHLYRAX_DB_SHAPE_INVALID'`)) {
   source = source.replace(incomingInvalidAnchor, incomingShapeGuard);
 }
 
-const currentGuard = `      assertTenantIdentity(current, destination, env, 'Current database');\n      assertNoTotalDataWipe(current, incoming);`;
-const shrinkGuard = `${currentGuard}\n      assertNoCatastrophicDataShrink(current, incoming);`;
 if (!source.includes('assertNoCatastrophicDataShrink(current, incoming);')) {
-  if (!source.includes(currentGuard)) throw new Error('Database shrink guard insertion anchor was not found.');
-  source = source.replace(currentGuard, shrinkGuard);
+  const rollbackAwareGuard = `      assertTenantIdentity(current, destination, env, 'Current database');\n      if (!rollbackAuthorized) assertNoTotalDataWipe(current, incoming);`;
+  const rollbackAwareReplacement = `      assertTenantIdentity(current, destination, env, 'Current database');\n      if (!rollbackAuthorized) {\n        assertNoTotalDataWipe(current, incoming);\n        assertNoCatastrophicDataShrink(current, incoming);\n      }`;
+  const legacyGuard = `      assertTenantIdentity(current, destination, env, 'Current database');\n      assertNoTotalDataWipe(current, incoming);`;
+  const legacyReplacement = `${legacyGuard}\n      assertNoCatastrophicDataShrink(current, incoming);`;
+  if (source.includes(rollbackAwareGuard)) source = source.replace(rollbackAwareGuard, rollbackAwareReplacement);
+  else if (source.includes(legacyGuard)) source = source.replace(legacyGuard, legacyReplacement);
+  else throw new Error('Database shrink guard insertion anchor was not found.');
 }
 
 const criticalFunction = `function assertNoCriticalStoreWipe(current, incoming, kind) {\n  if (kind === 'snapshot-submissions' && Array.isArray(current) && current.length > 0 && Array.isArray(incoming) && incoming.length === 0) {\n    const error = new Error('Refusing to replace non-empty snapshot history with an empty history. Use an explicit controlled reset procedure.');\n    error.code = 'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED';\n    throw error;\n  }\n}`;
@@ -50,6 +53,9 @@ for (const required of [
   'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED', 'ATHLYRAX_SNAPSHOT_HISTORY_SHRINK_BLOCKED',
   'ATHLYRAX_AUTH_INVITE_HISTORY_SHRINK_BLOCKED', 'ATHLYRAX_AUTH_STORE_CATASTROPHIC_SHRINK_BLOCKED',
 ]) if (!source.includes(required)) throw new Error(`Data-safety guard is missing ${required}.`);
+if (source.includes('rollbackAuthorized') && !source.includes(`if (!rollbackAuthorized) {\n        assertNoTotalDataWipe(current, incoming);\n        assertNoCatastrophicDataShrink(current, incoming);`)) {
+  throw new Error('Authorized rollback must be the only path that bypasses total-wipe/catastrophic-shrink guards.');
+}
 
 fs.writeFileSync(filePath, source, 'utf8');
 console.log('DATA_SAFETY_COLLECTION_COVERAGE_OK');
