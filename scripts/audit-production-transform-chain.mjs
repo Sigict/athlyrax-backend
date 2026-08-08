@@ -27,6 +27,7 @@ const expectedTransforms = [
   'scripts/patch-auth-tenant-integrity.mjs',
   'scripts/patch-migration-validation.mjs',
   'scripts/patch-runtime-auth-billing-safety.mjs',
+  'scripts/patch-stripe-webhook-signature.mjs',
   'scripts/patch-runtime-identity-event-safety.mjs',
   'scripts/patch-ownership-integrity.mjs',
   'scripts/patch-orphan-tenant-safety.mjs',
@@ -95,7 +96,7 @@ const transformedIndex = read('index.js');
 for (const marker of [
   'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED','const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
   'ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
-  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN','ATHLYRAX_PASSWORD_MINIMUM_12',
+  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN','ATHLYRAX_PASSWORD_MINIMUM_12','ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',
   'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','ATHLYRAX_LAYERED_AUTH_RATE_LIMIT','ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_COACH_LINK_WORKFLOW_V1','ATHLYRAX_COACH_LINK_LIFECYCLE_V1','ATHLYRAX_COACH_LINK_REJECTION_STALE_GUARD','ATHLYRAX_COACH_LINK_INTEGRITY_V1','ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1','ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1','ATHLYRAX_COACH_LINK_RECONNECT_V1','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB','ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
@@ -131,6 +132,12 @@ const passwordPolicyPatch = read('scripts/patch-password-policy.mjs');
 for (const token of ['ATHLYRAX_PASSWORD_MINIMUM_12','if (password.length < 12) {','if (nextPassword.length < 12) {','Password must be at least 12 characters.','Legacy weak password policy remains']) {
   if (!passwordPolicyPatch.includes(token)) failures.push(`scripts/patch-password-policy.mjs: missing ${token}`);
 }
+
+const stripeWebhookPatch = read('scripts/patch-stripe-webhook-signature.mjs');
+for (const token of ['ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',"if (!signature) {",'Stripe webhook signature is required.','Stripe webhook verification is not configured.','Unsigned Stripe webhook fallback remains']) {
+  if (!stripeWebhookPatch.includes(token)) failures.push(`scripts/patch-stripe-webhook-signature.mjs: missing ${token}`);
+}
+if (transformedIndex.includes('if (BILLING_STRIPE_WEBHOOK_SECRET && signature) {')) failures.push('index.js: unsigned Stripe webhook fallback remains.');
 
 const clientIpPatch = read('scripts/patch-client-ip-integrity.mjs');
 for (const token of ['ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','return chain[chain.length - 1];','Spoofable leftmost X-Forwarded-For selection remains.']) {
