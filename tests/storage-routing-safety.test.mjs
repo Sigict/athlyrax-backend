@@ -54,6 +54,9 @@ test('only the configured primary software owner is exempt from tenant database 
     { username: 'softwareowner', role: 'software-owner', passwordHash: 'x' },
     { username: 'secondary-owner', role: 'software-owner', passwordHash: 'x', tenantId: 'secondary-club' },
   ]);
+  const secondaryPath = path.join(storage, 'tenants', 'secondary-club', 'db.json');
+  fs.mkdirSync(path.dirname(secondaryPath), { recursive: true });
+  fs.writeFileSync(secondaryPath, '{}\n');
   assert.throws(
     () => runStorageSafetyCheck({ env: env(storage, backup), repoRoot: root, logger: { info() {}, warn() {} } }),
     /Auth-bound tenant database secondary-club/,
