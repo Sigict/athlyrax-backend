@@ -6,7 +6,6 @@ let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const marker = '// ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1';
 const signupMarker = '// ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN';
-const loginBearerResponsePattern = /res\.status\(200\)\.json\(\{\s*token:\s*session\.token,\s*user:\s*buildAuthUserPayload\(user\)\s*\}\);/;
 
 function routeBounds(routeStartText) {
   const start = source.indexOf(routeStartText);
@@ -29,20 +28,20 @@ if (!source.includes(marker)) {
 
   let signupPart = route.slice(0, loginBoundary);
   let loginPart = route.slice(loginBoundary);
-  const signupSessionLine = `\t\t\tconst session = issueAuthToken({ username, role: 'swimmer' });\n`;
-  if (!signupPart.includes(signupSessionLine)) throw new Error('Snapshot signup session issuance anchor missing.');
-  signupPart = signupPart.replace(signupSessionLine, `\t\t\t${signupMarker}\n`);
 
+  // Signup already receives the secure cookie + CSRF session from an earlier production transform.
+  // Remove only the JavaScript-readable bearer token from its JSON response.
   const signupTokenLine = `\t\t\t\ttoken: session.token,\n`;
   if (!signupPart.includes(signupTokenLine)) throw new Error('Snapshot signup token response anchor missing.');
-  signupPart = signupPart.replace(signupTokenLine, '');
+  signupPart = signupPart.replace(signupTokenLine, `\t\t\t\t${signupMarker}\n`);
 
-  if (!loginPart.includes('const session = issueAuthToken(user);')) {
-    throw new Error('Snapshot login session issuance anchor missing.');
+  // Login also already has setAuthCookies installed. Preserve it and redact only the token field.
+  if (!loginPart.includes('setAuthCookies(res, { token: session.token, csrfToken: session.csrf });')) {
+    throw new Error('Snapshot login cookie-session anchor missing.');
   }
-  const loginResponseSafe = `// ${marker}\n\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });\n\tres.status(200).json({\n\t\tcsrfToken: session.csrf,\n\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,\n\t\tuser: buildAuthUserPayload(user),\n\t});`;
-  if (!loginBearerResponsePattern.test(loginPart)) throw new Error('Snapshot login bearer response anchor missing.');
-  loginPart = loginPart.replace(loginBearerResponsePattern, loginResponseSafe);
+  const loginTokenFieldPattern = /(\tres\.status\(200\)\.json\(\{\s*)token:\s*session\.token,\s*/;
+  if (!loginTokenFieldPattern.test(loginPart)) throw new Error('Snapshot login bearer token field anchor missing.');
+  loginPart = loginPart.replace(loginTokenFieldPattern, `\t${marker}\n$1`);
 
   route = signupPart + loginPart;
   source = `${source.slice(0, start)}${route}${source.slice(end)}`;
@@ -58,11 +57,9 @@ for (const required of [
   'csrfHeaderName: AUTH_CSRF_HEADER_NAME',
 ]) if (!route.includes(required)) throw new Error(`Snapshot cookie-session hardening missing: ${required}`);
 
-if (loginBearerResponsePattern.test(route)) throw new Error('Snapshot auth still exposes bearer token response.');
-for (const forbidden of [
-  `const session = issueAuthToken({ username, role: 'swimmer' });`,
-  '\ttoken: session.token,',
-]) if (route.includes(forbidden)) throw new Error(`Snapshot auth still exposes bearer token: ${forbidden}`);
+if (/res\.status\((?:200|201)\)\.json\(\{[^}]*token:\s*session\.token/s.test(route)) {
+  throw new Error('Snapshot auth response still exposes a bearer session token.');
+}
 
 fs.writeFileSync(indexPath, source, 'utf8');
 console.log('SNAPSHOT_COOKIE_SESSION_PATCH_OK');
