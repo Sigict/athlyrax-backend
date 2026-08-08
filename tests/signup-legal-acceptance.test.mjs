@@ -61,12 +61,14 @@ test('signup legal confirmation, club identity and current versions are mandator
   assert.equal(validateSignupLegalAcceptance(validBody()).ok, true);
 });
 
-test('acceptance record contains account, tenant, versions and request evidence', () => {
+test('acceptance record contains account, tenant, versions and proxy-observed request evidence', () => {
   const record = buildSignupLegalAcceptanceRecord({
     req: {
       body: validBody(),
       headers: {
-        'x-forwarded-for': '203.0.113.9, 10.0.0.1',
+        // The leftmost value is caller-controlled when a trusted proxy appends
+        // the address it observed. Legal evidence must use the rightmost value.
+        'x-forwarded-for': '198.51.100.99, 203.0.113.9',
         'user-agent': 'AthlyraX Test Browser',
       },
     },
@@ -85,6 +87,7 @@ test('acceptance record contains account, tenant, versions and request evidence'
   assert.equal(record.tenantId, 'example-club__performance-squad');
   assert.equal(record.stage, 'completed');
   assert.equal(record.ipAddress, '203.0.113.9');
+  assert.notEqual(record.ipAddress, '198.51.100.99');
   assert.equal(record.userAgent, 'AthlyraX Test Browser');
   assert.deepEqual(record.documentVersions, REQUIRED_SIGNUP_LEGAL_VERSIONS);
 });
