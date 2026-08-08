@@ -73,7 +73,7 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.ok(source.includes('Each configured Stripe price ID may belong to only one billing plan.'));
   assert.ok(source.includes('Cannot delete the last account for a tenant while its database still exists.'));
   assert.ok(source.includes("app.post('/swimmer/coach/request', requireStrictAuth, requireSwimmerRole"));
-  assert.ok(source.includes("app.post('/coach/swimmer-links/:requestId/accept', requireStrictAuth, requireCoachLinkManagerRole"));
+  assert.ok(source.includes("app.post('/coach/swimmer-links/:requestId/accept', requireStrictAuth, requireCoachLinkDecisionRole, requireBillingWriteAccess"));
   assert.ok(source.includes("coachLinkStatus: 'approved'"));
   assert.ok(source.includes('Parent email 1 is invalid.'));
   assert.ok(source.includes('Parent email 2 is invalid.'));
