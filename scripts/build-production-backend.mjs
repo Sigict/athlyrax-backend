@@ -4,23 +4,11 @@ import path from 'node:path';
 
 const root = path.resolve(process.cwd());
 const node = process.execPath;
-const indexPath = path.join(root, 'index.js');
 
 function run(label, args) {
   const result = spawnSync(node, args, { cwd: root, stdio: 'inherit', env: process.env });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${label} failed with exit code ${result.status}.`);
-}
-function operationalTransformAlreadyFinalized() {
-  if (!fs.existsSync(indexPath)) return false;
-  const source = fs.readFileSync(indexPath, 'utf8');
-  return [
-    'ATHLYRAX_PLANNER_BACKUP_NON_AUTHORITATIVE',
-    'ATHLYRAX_ADMIN_USER_REQUIRES_EXISTING_TENANT',
-    'ATHLYRAX_INVITE_HISTORY_PRESERVED',
-    'ATHLYRAX_PRODUCTION_AUDIT_ARCHIVE_BEFORE_DELETE',
-    'ATHLYRAX_BOUNDED_PRIMARY_DB_SNAPSHOT_RETENTION',
-  ].every((token) => source.includes(token));
 }
 
 const transforms = [
@@ -52,10 +40,6 @@ const transforms = [
 
 for (const relative of transforms) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required production transform is missing: ${relative}`);
-  if (relative === 'scripts/patch-operational-integrity.mjs' && operationalTransformAlreadyFinalized()) {
-    console.log('OPERATIONAL_INTEGRITY_PATCH_ALREADY_FINALIZED');
-    continue;
-  }
   run(relative, [relative]);
 }
 
@@ -65,6 +49,8 @@ for (const relative of [
   'scripts/storage-path-contract.mjs',
   'scripts/migrate-storage-once.mjs',
   'scripts/approve-storage-layout.mjs',
+  'scripts/signup-legal-acceptance-preload.mjs',
+  'scripts/stage-storage-restore.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
