@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/build-production-backend.mjs",
-    "start": "node scripts/production-start.mjs",
+    "start": "node scripts/production-start.mjs --ci-contract=test:storage-all",
     "migrate:storage-once": "node scripts/migrate-storage-once.mjs",
     "check:storage-safety": "node scripts/check-storage-safety.mjs",
     "audit:storage-paths": "node scripts/audit-storage-paths.mjs && node scripts/audit-production-transform-chain.mjs",
