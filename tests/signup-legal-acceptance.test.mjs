@@ -27,18 +27,26 @@ function validBody() {
 function withLegalEnv(values, run) {
   const keys = ['NODE_ENV', 'ATHLYRAX_STORAGE_ROOT', 'ATHLYRAX_SAFETY_BACKUP_ROOT', 'AUTH_LEGAL_ACCEPTANCE_PATH'];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
-  try {
-    for (const key of keys) delete process.env[key];
-    for (const [key, value] of Object.entries(values || {})) {
-      if (value !== undefined && value !== null) process.env[key] = String(value);
-    }
-    return run();
-  } finally {
+  const restore = () => {
     for (const key of keys) {
       if (previous[key] === undefined) delete process.env[key];
       else process.env[key] = previous[key];
     }
+  };
+  for (const key of keys) delete process.env[key];
+  for (const [key, value] of Object.entries(values || {})) {
+    if (value !== undefined && value !== null) process.env[key] = String(value);
   }
+  let result;
+  try {
+    result = run();
+  } catch (error) {
+    restore();
+    throw error;
+  }
+  if (result && typeof result.then === 'function') return result.finally(restore);
+  restore();
+  return result;
 }
 
 test('signup legal confirmation, club identity and current versions are mandatory', () => {
