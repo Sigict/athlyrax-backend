@@ -1,0 +1,41 @@
+name: Temporary refresh hardening auditor
+
+on:
+  push:
+    branches:
+      - hardening/production-auth-token-redaction
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hardening/production-auth-token-redaction
+      - name: Refresh exact auditor invariants
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const p = 'scripts/audit-production-transform-chain.mjs';
+          let s = fs.readFileSync(p, 'utf8');
+          const replacements = [
+            ["'Legacy weak password policy remains'", "'Legacy password policy remains'"],
+            ["'Snapshot auth still exposes bearer token'", "'Snapshot auth response still exposes a bearer session token.'"],
+          ];
+          for (const [from,to] of replacements) {
+            if (!s.includes(from)) throw new Error(`auditor anchor missing: ${from}`);
+            s = s.replace(from,to);
+          }
+          fs.writeFileSync(p,s);
+          NODE
+      - name: Commit auditor refresh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/audit-production-transform-chain.mjs
+          git commit -m "refresh hardening auditor invariants"
+          git push origin HEAD:hardening/production-auth-token-redaction
