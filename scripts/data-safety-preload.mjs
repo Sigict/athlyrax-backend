@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 const INSTALL_MARK = Symbol.for('athlyrax.dataSafetyGuardsInstalled');
 const EXPRESS_INSTALL_MARK = Symbol.for('athlyrax.dbRevisionResponseGuardInstalled');
 const readContext = new AsyncLocalStorage();
+const rollbackContext = new AsyncLocalStorage();
 const CORE_DB_COLLECTIONS = Object.freeze([
   'swimmers', 'squads', 'trainingSessions', 'trainingSessionSets', 'tests', 'attendance',
   'competitions', 'fixtures', 'groups', 'trainingPlannerWeeks',
@@ -40,6 +41,33 @@ function getRevisionTime(payload) {
     if (Number.isFinite(parsed)) return parsed;
   }
   return Number.NaN;
+}
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
+  }
+  return value;
+}
+function rollbackLogicalPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  const rawMeta = payload.__meta && typeof payload.__meta === 'object' && !Array.isArray(payload.__meta) ? payload.__meta : {};
+  const { storageRevision: _storageRevision, storageUpdatedAt: _storageUpdatedAt, ...logicalMeta } = rawMeta;
+  return canonicalValue({ ...payload, __meta: logicalMeta });
+}
+function rollbackLogicalHash(payload) {
+  return crypto.createHash('sha256').update(JSON.stringify(rollbackLogicalPayload(payload))).digest('hex');
+}
+export function runWithDatabaseRollbackAuthorization(destination, previousPayload, callback) {
+  const resolvedDestination = resolveFilePath(destination);
+  if (!isDatabasePath(resolvedDestination)) throw new Error(`Rollback authorization requires a db.json destination: ${resolvedDestination}`);
+  if (!previousPayload || typeof previousPayload !== 'object' || Array.isArray(previousPayload)) throw new Error('Rollback authorization requires the exact previous database object.');
+  if (typeof callback !== 'function') throw new Error('Rollback authorization requires a callback.');
+  const authorization = Object.freeze({
+    destination: resolvedDestination,
+    logicalHash: rollbackLogicalHash(previousPayload),
+  });
+  return rollbackContext.run(authorization, callback);
 }
 function coreRecordCount(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 0;
@@ -263,10 +291,22 @@ export function installDataSafetyGuards(options = {}) {
       throw error;
     }
 
+    const rollbackAuthorization = rollbackContext.getStore();
+    const rollbackAuthorized = Boolean(
+      rollbackAuthorization
+      && rollbackAuthorization.destination === destination
+      && rollbackAuthorization.logicalHash === rollbackLogicalHash(incoming)
+    );
+    if (rollbackAuthorization && !rollbackAuthorized) {
+      const error = new Error('Database rollback authorization does not match the exact destination and previous logical payload.');
+      error.code = 'ATHLYRAX_DB_ROLLBACK_AUTHORIZATION_MISMATCH';
+      throw error;
+    }
+
     const expectedTenantId = assertTenantIdentity(incoming, destination, env, 'Incoming database');
     if (current) {
       assertTenantIdentity(current, destination, env, 'Current database');
-      assertNoTotalDataWipe(current, incoming);
+      if (!rollbackAuthorized) assertNoTotalDataWipe(current, incoming);
     }
     if (!destinationExists && isProduction && !hasValidProvisioningProof(incoming, destination, env)) {
       const error = new Error(`Refusing to create a missing production database outside explicit server-bound tenant provisioning: ${destination}`);
@@ -277,7 +317,7 @@ export function installDataSafetyGuards(options = {}) {
     const currentRevisionValue = getStorageRevision(current);
     const currentRevision = currentRevisionValue ?? 0;
     const incomingRevision = getStorageRevision(incoming);
-    if (current) {
+    if (current && !rollbackAuthorized) {
       const legacyRevisionAdoption = currentRevisionValue === null && (incomingRevision === null || incomingRevision === 0);
       const exactRevisionMatch = currentRevisionValue !== null && incomingRevision === currentRevisionValue;
       if (!legacyRevisionAdoption && !exactRevisionMatch) {
@@ -290,14 +330,14 @@ export function installDataSafetyGuards(options = {}) {
     }
     const currentTime = getRevisionTime(current);
     const incomingTime = getRevisionTime(incoming);
-    if (Number.isFinite(currentTime) && Number.isFinite(incomingTime) && incomingTime + staleToleranceMs < currentTime) {
+    if (!rollbackAuthorized && Number.isFinite(currentTime) && Number.isFinite(incomingTime) && incomingTime + staleToleranceMs < currentTime) {
       const error = new Error('Refusing stale database replacement.');
       error.code = 'ATHLYRAX_STALE_DB_WRITE';
       throw error;
     }
 
     writeRevisionToIncoming(source, incoming, currentRevision + 1, expectedTenantId, fsModule);
-    const backup = backupFile(destination, 'pre-write', env, maxFiles, fsModule);
+    const backup = backupFile(destination, rollbackAuthorized ? 'pre-authorized-rollback' : 'pre-write', env, maxFiles, fsModule);
     try { return originalRenameSync(source, destination); }
     catch (error) {
       logger.error(`[data-safety] Database replacement failed for ${destination}${backup ? `; previous version preserved at ${backup}` : ''}`);
@@ -358,4 +398,5 @@ export const dataSafetyInternals = Object.freeze({
   getRevisionTime, getStorageRevision, isDatabasePath, hasValidProvisioningProof,
   expectedTenantIdForDbPath, criticalJsonStoreKind, validateCriticalJsonPayload,
   coreRecordCount, assertNoTotalDataWipe, assertNoCriticalStoreWipe,
+  rollbackLogicalHash,
 });
