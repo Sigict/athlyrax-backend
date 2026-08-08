@@ -3,62 +3,115 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
+const root = path.resolve(process.cwd());
+const stageScript = path.join(root, 'scripts', 'stage-storage-restore.mjs');
+
+function tempDir(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), prefix)); }
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+function runStage(args) {
+  return spawnSync(process.execPath, [stageScript, ...args], { cwd: root, encoding: 'utf8' });
 }
 
-test('temporary backup and restore recovers both canonical tenant datasets without cross-tenant leakage', () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-backup-restore-'));
-  const storageRoot = path.join(tempRoot, 'storage');
-  const backupRoot = path.join(tempRoot, 'backup');
-  fs.mkdirSync(storageRoot, { recursive: true });
-  fs.mkdirSync(backupRoot, { recursive: true });
+test('guarded stage restore preserves tenant separation and never activates production', () => {
+  const temp = tempDir('athlyrax-stage-restore-');
+  try {
+    const exportsDir = path.join(temp, 'exports');
+    const stageDir = path.join(temp, 'stage');
+    const globalDb = path.join(exportsDir, 'global.json');
+    const tenantA = path.join(exportsDir, 'tenant-a.json');
+    const tenantB = path.join(exportsDir, 'tenant-b.json');
 
-  const tenantAPath = path.join(storageRoot, 'tenants', 'tenant-a', 'db.json');
-  const tenantBPath = path.join(storageRoot, 'tenants', 'tenant-b', 'db.json');
+    writeJson(globalDb, { __meta: { tenantId: 'global-owner' }, settings: { version: 1 } });
+    writeJson(tenantA, { __meta: { tenantId: 'tenant-a' }, swimmers: [{ id: 'swimmer-a' }] });
+    writeJson(tenantB, { __meta: { tenantId: 'tenant-b' }, swimmers: [{ id: 'swimmer-b' }] });
 
-  const tenantAData = {
-    swimmers: [{ id: 'swimmerA', name: 'Swimmer A' }],
-    squads: [{ id: 'squadA', name: 'Squad A' }],
-    trainingSessions: [{ id: 'sessionA' }],
-    tests: [{ id: 'testA' }],
-    attendance: [{ id: 'attendanceA', swimmerId: 'swimmerA' }],
-  };
-  const tenantBData = {
-    swimmers: [{ id: 'swimmerB', name: 'Swimmer B' }],
-    squads: [{ id: 'squadB', name: 'Squad B' }],
-    trainingSessions: [{ id: 'sessionB' }],
-    tests: [{ id: 'testB' }],
-    attendance: [{ id: 'attendanceB', swimmerId: 'swimmerB' }],
-  };
+    const result = runStage([
+      '--destination', stageDir,
+      '--global-db', globalDb,
+      '--tenant', `tenant-a=${tenantA}`,
+      '--tenant', `tenant-b=${tenantB}`,
+      '--approve', 'STAGE_ONLY',
+    ]);
 
-  writeJson(tenantAPath, tenantAData);
-  writeJson(tenantBPath, tenantBData);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /ATHLYRAX_STORAGE_RESTORE_STAGED/);
+    assert.match(result.stdout, /Production activation: NOT PERFORMED/);
+    assert.match(result.stdout, /Storage approval marker: NOT CREATED/);
 
-  const backupAPath = path.join(backupRoot, 'tenant-a-backup.json');
-  const backupBPath = path.join(backupRoot, 'tenant-b-backup.json');
-  fs.copyFileSync(tenantAPath, backupAPath);
-  fs.copyFileSync(tenantBPath, backupBPath);
+    const stagedA = JSON.parse(fs.readFileSync(path.join(stageDir, 'tenants', 'tenant-a', 'db.json'), 'utf8'));
+    const stagedB = JSON.parse(fs.readFileSync(path.join(stageDir, 'tenants', 'tenant-b', 'db.json'), 'utf8'));
+    assert.equal(stagedA.__meta.tenantId, 'tenant-a');
+    assert.equal(stagedB.__meta.tenantId, 'tenant-b');
+    assert.equal(stagedA.swimmers[0].id, 'swimmer-a');
+    assert.equal(stagedB.swimmers[0].id, 'swimmer-b');
+    assert.equal(fs.existsSync(path.join(stageDir, '.athlyrax-storage-ready.json')), false);
 
-  writeJson(tenantAPath, { swimmers: [{ id: 'corruptedA' }] });
-  writeJson(tenantBPath, { swimmers: [{ id: 'corruptedB' }] });
-  fs.copyFileSync(backupAPath, tenantAPath);
-  fs.copyFileSync(backupBPath, tenantBPath);
+    const manifest = JSON.parse(fs.readFileSync(path.join(stageDir, 'staged-restore-manifest.json'), 'utf8'));
+    assert.deepEqual(manifest.tenantIds, ['tenant-a', 'tenant-b']);
+    assert.equal(manifest.mode, 'api-export-stage-only');
+    assert.equal(manifest.files.length, 3);
+    assert.ok(manifest.files.every((row) => /^[a-f0-9]{64}$/.test(String(row.sha256 || ''))));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
 
-  const restoredA = readJson(tenantAPath);
-  const restoredB = readJson(tenantBPath);
-  assert.deepEqual(restoredA, tenantAData);
-  assert.deepEqual(restoredB, tenantBData);
-  assert.ok((restoredA.swimmers || []).some((row) => row.id === 'swimmerA'));
-  assert.ok(!(restoredA.swimmers || []).some((row) => row.id === 'swimmerB'));
-  assert.ok((restoredB.swimmers || []).some((row) => row.id === 'swimmerB'));
-  assert.ok(!(restoredB.swimmers || []).some((row) => row.id === 'swimmerA'));
+test('guarded stage restore rejects cross-tenant mapping before staging a tenant database', () => {
+  const temp = tempDir('athlyrax-stage-cross-tenant-');
+  try {
+    const globalDb = path.join(temp, 'global.json');
+    const wrongTenant = path.join(temp, 'wrong-tenant.json');
+    const stageDir = path.join(temp, 'stage');
+    writeJson(globalDb, { settings: { version: 1 } });
+    writeJson(wrongTenant, { __meta: { tenantId: 'tenant-b' }, swimmers: [{ id: 'wrong' }] });
 
-  fs.rmSync(tempRoot, { recursive: true, force: true });
+    const result = runStage([
+      '--destination', stageDir,
+      '--global-db', globalDb,
+      '--tenant', `tenant-a=${wrongTenant}`,
+      '--approve', 'STAGE_ONLY',
+    ]);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /declares tenant tenant-b but restore mapping is tenant-a/);
+    assert.equal(fs.existsSync(path.join(stageDir, 'tenants', 'tenant-a', 'db.json')), false);
+    assert.equal(fs.existsSync(path.join(stageDir, '.athlyrax-storage-ready.json')), false);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test('guarded stage restore refuses a non-empty destination and missing explicit approval', () => {
+  const temp = tempDir('athlyrax-stage-destination-');
+  try {
+    const globalDb = path.join(temp, 'global.json');
+    const nonEmpty = path.join(temp, 'stage');
+    writeJson(globalDb, { settings: { version: 1 } });
+    fs.mkdirSync(nonEmpty, { recursive: true });
+    fs.writeFileSync(path.join(nonEmpty, 'existing.txt'), 'keep\n', 'utf8');
+
+    const nonEmptyResult = runStage([
+      '--destination', nonEmpty,
+      '--global-db', globalDb,
+      '--approve', 'STAGE_ONLY',
+    ]);
+    assert.notEqual(nonEmptyResult.status, 0);
+    assert.match(nonEmptyResult.stderr, /Destination must be empty/);
+    assert.equal(fs.readFileSync(path.join(nonEmpty, 'existing.txt'), 'utf8'), 'keep\n');
+
+    const noApproval = runStage([
+      '--destination', path.join(temp, 'another-stage'),
+      '--global-db', globalDb,
+      '--approve', 'NO',
+    ]);
+    assert.notEqual(noApproval.status, 0);
+    assert.match(noApproval.stderr, /Explicit approval is required: --approve STAGE_ONLY/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
 });
