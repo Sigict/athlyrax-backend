@@ -21,12 +21,16 @@ function writeBase(storageRoot, users) {
   const raw = `${JSON.stringify(users)}\n`;
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), raw);
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), raw);
+  fs.writeFileSync(path.join(storageRoot, 'auth-invites.json'), '[]\n');
+  fs.writeFileSync(path.join(storageRoot, 'snapshot-submissions.json'), '[]\n');
+  fs.writeFileSync(path.join(storageRoot, 'billing-catalog.json'), `${JSON.stringify({ plans: [{ key: 'tier-1' }] })}\n`);
   writeStorageReadyMarker(storageRoot);
 }
-function writeTenant(storageRoot, tenantId, declaredTenantId = tenantId) {
+function writeTenant(storageRoot, tenantId, declaredTenantId = tenantId, meaningful = false) {
   const file = path.join(storageRoot, 'tenants', tenantId, 'db.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify({ __meta: { tenantId: declaredTenantId }, swimmers: [] })}\n`);
+  const swimmers = meaningful ? [{ id: `${tenantId}-swimmer` }] : [];
+  fs.writeFileSync(file, `${JSON.stringify({ __meta: { tenantId: declaredTenantId }, swimmers })}\n`);
 }
 
 test('demo.coach always validates demo-company even when stored tenantId is absent', () => {
@@ -37,7 +41,7 @@ test('demo.coach always validates demo-company even when stored tenantId is abse
     { username: 'softwareowner', role: 'software-owner', passwordHash: 'x' },
     { username: 'demo.coach', role: 'head-coach', passwordHash: 'x', swimClub: 'Demo Company', teamName: 'Demo Team' },
   ]);
-  writeTenant(storage, 'demo-company');
+  writeTenant(storage, 'demo-company', 'demo-company', true);
   assert.doesNotThrow(() => runStorageSafetyCheck({ env: env(storage, backup), repoRoot: root, logger: { info() {}, warn() {} } }));
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -86,7 +90,7 @@ test('storage readiness marker cannot be transplanted to another storage root', 
   fs.copyFileSync(path.join(storageA, '.athlyrax-storage-ready.json'), path.join(storageB, '.athlyrax-storage-ready.json'));
   assert.throws(
     () => runStorageSafetyCheck({ env: env(storageB, backup), repoRoot: root, logger: { info() {}, warn() {} } }),
-    /different storage root/,
+    /not bound to this storage root/,
   );
   fs.rmSync(root, { recursive: true, force: true });
 });
