@@ -5,6 +5,7 @@ const indexPath = path.resolve('index.js');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const marker = '// ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1';
+const signupMarker = '// ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN';
 
 function routeBounds(routeStartText) {
   const start = source.indexOf(routeStartText);
@@ -17,10 +18,27 @@ if (!source.includes(marker)) {
   const { start, end } = routeBounds("app.post('/snapshot/account/auth'");
   let route = source.slice(start, end);
 
-  const signupOld = `\t\t\tconst session = issueAuthToken({ username, role: 'swimmer' });\n\t\t\tres.status(201).json({\n\t\t\t\tok: true,\n\t\t\t\ttoken: session.token,\n\t\t\t\tuser: buildAuthUserPayload(findAuthUser(username)),\n\t\t\t});`;
-  const signupSafe = `\t\t\t// ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN\n\t\t\tres.status(201).json({\n\t\t\t\tok: true,\n\t\t\t\tuser: buildAuthUserPayload(findAuthUser(username)),\n\t\t\t});`;
-  if (!route.includes(signupOld)) throw new Error('Snapshot signup token response anchor missing.');
-  route = route.replace(signupOld, signupSafe);
+  // Harden signup independently from login. Earlier production transforms may
+  // change persistence/user-payload details around this block, so only mutate
+  // the security-relevant session issuance and token response before login.
+  const loginBoundaryCandidates = [
+    route.indexOf('ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE'),
+    route.indexOf('const { user } = resolveLoginUserByIdentifier(identifier);'),
+    route.indexOf('const user = findAuthUserByIdentifier(identifier);'),
+  ].filter((value) => value >= 0);
+  const loginBoundary = loginBoundaryCandidates.length ? Math.min(...loginBoundaryCandidates) : -1;
+  if (loginBoundary < 0) throw new Error('Snapshot login boundary was not found.');
+
+  let signupPart = route.slice(0, loginBoundary);
+  const loginPart = route.slice(loginBoundary);
+  const signupSessionLine = `\t\t\tconst session = issueAuthToken({ username, role: 'swimmer' });\n`;
+  if (!signupPart.includes(signupSessionLine)) throw new Error('Snapshot signup session issuance anchor missing.');
+  signupPart = signupPart.replace(signupSessionLine, `\t\t\t${signupMarker}\n`);
+
+  const signupTokenLine = `\t\t\t\ttoken: session.token,\n`;
+  if (!signupPart.includes(signupTokenLine)) throw new Error('Snapshot signup token response anchor missing.');
+  signupPart = signupPart.replace(signupTokenLine, '');
+  route = signupPart + loginPart;
 
   const loginOld = `\tconst session = issueAuthToken(user);\n\tres.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });`;
   const loginSafe = `\tconst session = issueAuthToken(user);\n\t// ${marker}\n\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });\n\tres.status(200).json({\n\t\tcsrfToken: session.csrf,\n\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,\n\t\tuser: buildAuthUserPayload(user),\n\t});`;
@@ -41,6 +59,7 @@ for (const required of [
 ]) if (!route.includes(required)) throw new Error(`Snapshot cookie-session hardening missing: ${required}`);
 
 for (const forbidden of [
+  `const session = issueAuthToken({ username, role: 'swimmer' });`,
   'res.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });',
   '\ttoken: session.token,',
 ]) if (route.includes(forbidden)) throw new Error(`Snapshot auth still exposes bearer token: ${forbidden}`);
