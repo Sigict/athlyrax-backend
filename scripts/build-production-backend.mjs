@@ -33,6 +33,7 @@ const transforms = [
   'scripts/patch-account-lifecycle-integrity.mjs',
   'scripts/patch-auth-enumeration-safety.mjs',
   'scripts/patch-coach-link-suite.mjs',
+  'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
   'scripts/patch-production-error-redaction.mjs',
   'scripts/patch-production-cors-origins.mjs',
@@ -52,6 +53,7 @@ for (const relative of [
   'scripts/approve-storage-layout.mjs',
   'scripts/signup-legal-acceptance-preload.mjs',
   'scripts/stage-storage-restore.mjs',
+  'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
