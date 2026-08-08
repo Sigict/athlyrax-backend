@@ -22,6 +22,9 @@ function writeBase(storageRoot, users) {
   const raw = `${JSON.stringify(users)}\n`;
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.json'), raw);
   fs.writeFileSync(path.join(storageRoot, 'auth', 'auth-users.backup.json'), raw);
+  fs.writeFileSync(path.join(storageRoot, 'auth-invites.json'), '[]\n');
+  fs.writeFileSync(path.join(storageRoot, 'snapshot-submissions.json'), '[]\n');
+  fs.writeFileSync(path.join(storageRoot, 'billing-catalog.json'), `${JSON.stringify({ plans: [{ key: 'tier-1' }] })}\n`);
   writeStorageReadyMarker(storageRoot);
 }
 
