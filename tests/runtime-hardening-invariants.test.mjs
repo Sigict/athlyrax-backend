@@ -25,7 +25,7 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE',
     'ATHLYRAX_COACH_LINK_WORKFLOW_V1',
     'ATHLYRAX_PARENT_NOTIFICATION_ONLY',
-    'ATHLYRAX_PASSWORD_MINIMUM_12',
+    'ATHLYRAX_PASSWORD_MINIMUM_10',
     'ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
     'ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED',
     'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP',
@@ -57,12 +57,16 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes("return forwarded.split(',')[0].trim();"), false);
   assert.equal(source.includes("app.use(express.json({ limit: '25mb' }));"), false);
   assert.equal(source.includes('`identity:${clientKey}:${identifier}`'), false);
+  assert.equal(source.includes('ATHLYRAX_PASSWORD_MINIMUM_12'), false);
   assert.equal(source.includes('if (password.length < 8) {'), false);
   assert.equal(source.includes('if (nextPassword.length < 8) {'), false);
   assert.equal(source.includes('Password must be at least 8 characters.'), false);
-  assert.ok(source.includes('if (password.length < 12) {'));
-  assert.ok(source.includes('if (nextPassword.length < 12) {'));
-  assert.ok(source.includes('Password must be at least 12 characters.'));
+  assert.equal(source.includes('if (password.length < 12) {'), false);
+  assert.equal(source.includes('if (nextPassword.length < 12) {'), false);
+  assert.equal(source.includes('Password must be at least 12 characters.'), false);
+  assert.ok(source.includes('if (password.length < 10) {'));
+  assert.ok(source.includes('if (nextPassword.length < 10) {'));
+  assert.ok(source.includes('Password must be at least 10 characters.'));
   assert.ok(source.includes(devOnlyErrorDetails));
   assert.ok(source.includes('return chain[chain.length - 1];'));
   assert.ok(source.includes('AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS'));
