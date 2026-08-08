@@ -34,6 +34,7 @@ const expectedTransforms = [
   'scripts/patch-account-lifecycle-integrity.mjs',
   'scripts/patch-auth-enumeration-safety.mjs',
   'scripts/patch-coach-link-suite.mjs',
+  'scripts/patch-request-body-limits.mjs',
   'scripts/patch-production-error-redaction.mjs',
   'scripts/patch-production-cors-origins.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
@@ -66,6 +67,9 @@ else {
   if (new Set(actualTransforms).size !== actualTransforms.length) failures.push('scripts/build-production-backend.mjs: duplicate production transform exists.');
   for (const internalStep of expectedCoachLinkSteps) if (actualTransforms.includes(internalStep)) failures.push(`scripts/build-production-backend.mjs: coach-link internal step leaked back into top-level transform chain: ${internalStep}`);
 }
+if (build.includes('operationalTransformAlreadyFinalized') || build.includes('OPERATIONAL_INTEGRITY_PATCH_ALREADY_FINALIZED')) {
+  failures.push('scripts/build-production-backend.mjs: stale conditional transform-skip shortcut remains. Every transform must execute and prove idempotency.');
+}
 
 const coachSuite = read('scripts/patch-coach-link-suite.mjs');
 const coachStepArrayMatch = coachSuite.match(/const steps = \[([\s\S]*?)\n\];/);
@@ -88,10 +92,10 @@ for (const marker of [
   'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED','const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
   'ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN',
-  'ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
+  'ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_COACH_LINK_WORKFLOW_V1','ATHLYRAX_COACH_LINK_LIFECYCLE_V1','ATHLYRAX_COACH_LINK_INTEGRITY_V1','ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1','ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1','ATHLYRAX_COACH_LINK_RECONNECT_V1','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB','ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
-for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAuthUserByIdentifier(','ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE']) {
+for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAuthUserByIdentifier(','ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',"app.use(express.json({ limit: '25mb' }));"]) {
   if (transformedIndex.includes(forbidden)) failures.push(`index.js: forbidden obsolete/duplicate runtime token remains: ${forbidden}`);
 }
 if (!transformedIndex.includes(': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)')) failures.push('index.js: production CORS still lacks production-only default-origin separation.');
@@ -118,11 +122,16 @@ for (const token of ['ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUC
 }
 if (authEnumerationPatch.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) failures.push('scripts/patch-auth-enumeration-safety.mjs: duplicate onboarding email guard logic returned.');
 
+const requestLimitPatch = read('scripts/patch-request-body-limits.mjs');
+for (const token of ['ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS',"app.use('/db', express.json({ limit: '25mb' }));","app.use('/swimmer/profile/sync', express.json({ limit: '25mb' }));","app.use(express.json({ limit: '5mb' }));",'Unscoped 25 MB JSON parser remains.']) {
+  if (!requestLimitPatch.includes(token)) failures.push(`scripts/patch-request-body-limits.mjs: missing ${token}`);
+}
+
 const redactionPatch = read('scripts/patch-production-error-redaction.mjs');
 for (const token of ['ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','IS_PRODUCTION ? {}','Raw exception detail response remains']) if (!redactionPatch.includes(token)) failures.push(`scripts/patch-production-error-redaction.mjs: missing ${token}`);
 
 const corsPatch = read('scripts/patch-production-cors-origins.mjs');
-for (const token of [': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)',"origin === '*'",'return new Set(origins);']) if (!corsPatch.includes(token)) failures.push(`scripts/patch-production-cors-origins.mjs: missing ${token}`);
+for (const token of [': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)',"origin === '*'",'new URL(origin)','parsed.origin !== origin','return new Set(origins);']) if (!corsPatch.includes(token)) failures.push(`scripts/patch-production-cors-origins.mjs: missing ${token}`);
 
 const coachTransactionPatch = read('scripts/patch-coach-link-transaction-integrity.mjs');
 for (const token of ['ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST','ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET','ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST','database rollback was incomplete']) if (!coachTransactionPatch.includes(token)) failures.push(`scripts/patch-coach-link-transaction-integrity.mjs: missing required token ${token}`);
