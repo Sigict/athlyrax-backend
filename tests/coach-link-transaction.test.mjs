@@ -13,15 +13,19 @@ test('coach request refuses a same-tenant two-database transfer', () => {
   assert.ok(request.includes('ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET'));
   assert.ok(request.includes('sourceTenantId === targetTenantId'));
   assert.ok(request.includes('A cross-tenant connection request was not created.'));
+  assert.ok(request.includes('writeCoachLinkRollbackDb(targetPaths, targetDb)'), 'request rollback is not revision-safe');
 });
 
-test('coach-link lifecycle uses database-first auth-last commit ordering', () => {
+test('coach-link lifecycle uses database-first auth-last commit ordering with authorized exact rollback', () => {
   for (const marker of [
     'ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1',
     'ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST',
     'ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET',
     'ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST',
+    'ATHLYRAX_COACH_LINK_REVISION_SAFE_ROLLBACK',
   ]) assert.ok(source.includes(marker), `missing transaction marker ${marker}`);
+  assert.ok(source.includes("import { runWithDatabaseRollbackAuthorization } from './scripts/data-safety-preload.mjs';"));
+  assert.ok(source.includes('runWithDatabaseRollbackAuthorization(storagePaths.dbPath, previousDb'));
 
   const acceptStart = source.indexOf("app.post('/coach/swimmer-links/:requestId/accept'");
   const rejectStart = source.indexOf("app.post('/coach/swimmer-links/:requestId/reject'", acceptStart);
@@ -33,8 +37,10 @@ test('coach-link lifecycle uses database-first auth-last commit ordering', () =>
   const authPersist = accept.indexOf('persistAuthUsers();');
   assert.ok(targetWrite >= 0 && sourceWrite > targetWrite, 'acceptance does not commit target then source');
   assert.ok(authMove > sourceWrite && authPersist > authMove, 'acceptance changes auth before both database copies commit');
-  assert.ok(accept.includes('writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);'), 'acceptance source rollback missing');
-  assert.ok(accept.includes('writeAtomicJsonFile(targetPaths.dbPath, targetDb);'), 'acceptance target rollback missing');
+  assert.ok(accept.includes('writeCoachLinkRollbackDb(sourcePaths, sourceDb)'), 'acceptance source rollback missing');
+  assert.ok(accept.includes('writeCoachLinkRollbackDb(targetPaths, targetDb)'), 'acceptance target rollback missing');
+  assert.equal(accept.includes('writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);'), false, 'unsafe source rollback remains');
+  assert.equal(accept.includes('writeAtomicJsonFile(targetPaths.dbPath, targetDb);'), false, 'unsafe target rollback remains');
   assert.equal(accept.includes("action: 'coach_link_source_archive_update_failed'"), false, 'acceptance still treats source update as best-effort');
 });
 
@@ -44,9 +50,18 @@ test('rejection cannot report success after swimmer-side update failure', () => 
   assert.ok(rejectStart >= 0 && disconnectStart > rejectStart, 'reject route bounds missing');
   const reject = source.slice(rejectStart, disconnectStart);
   assert.ok(reject.includes('ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET'));
-  assert.ok(reject.includes('writeAtomicJsonFile(targetPaths.dbPath, targetDb);'));
+  assert.ok(reject.includes('writeCoachLinkRollbackDb(targetPaths, targetDb)'));
+  assert.equal(reject.includes('writeAtomicJsonFile(targetPaths.dbPath, targetDb);'), false);
   assert.ok(reject.includes('throw sourceError;'));
   assert.equal(reject.includes("action: 'coach_link_rejection_source_update_failed'"), false, 'rejection still swallows swimmer-side failure');
+});
+
+test('pending-request cancellation rollback uses the same exact authorized previous state', () => {
+  const disconnectStart = source.indexOf("app.post('/swimmer/coach/disconnect'");
+  const dbStart = source.indexOf('// Serve db.json at /db', disconnectStart);
+  const disconnect = source.slice(disconnectStart, dbStart);
+  assert.ok(disconnect.includes('writeCoachLinkRollbackDb(pendingTargetPaths, pendingTargetRollback)'));
+  assert.equal(disconnect.includes('writeAtomicJsonFile(pendingTargetPaths.dbPath, pendingTargetRollback);'), false);
 });
 
 test('approved disconnect commits source and coach archive before auth routing', () => {
@@ -60,7 +75,9 @@ test('approved disconnect commits source and coach archive before auth routing',
   const authPersist = disconnect.indexOf('persistAuthUsers();');
   assert.ok(sourceWrite >= 0 && archiveWrite > sourceWrite, 'disconnect does not commit source then coach archive');
   assert.ok(authMove > archiveWrite && authPersist > authMove, 'disconnect changes auth before both database copies commit');
-  assert.ok(disconnect.includes('writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);'), 'disconnect source rollback missing');
-  assert.ok(disconnect.includes('writeAtomicJsonFile(currentPaths.dbPath, currentDb);'), 'disconnect coach rollback missing');
+  assert.ok(disconnect.includes('writeCoachLinkRollbackDb(sourcePaths, sourceDb)'), 'disconnect source rollback missing');
+  assert.ok(disconnect.includes('writeCoachLinkRollbackDb(currentPaths, currentDb)'), 'disconnect coach rollback missing');
+  assert.equal(disconnect.includes('writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);'), false, 'unsafe disconnect source rollback remains');
+  assert.equal(disconnect.includes('writeAtomicJsonFile(currentPaths.dbPath, currentDb);'), false, 'unsafe disconnect coach rollback remains');
   assert.equal(disconnect.includes("action: 'coach_link_disconnect_archive_update_failed'"), false, 'disconnect still treats coach archive update as best-effort');
 });
