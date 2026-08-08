@@ -19,6 +19,7 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_INVITE_CODE_CRYPTO_RNG',
     'ATHLYRAX_INVITE_CODE_UNIQUENESS_FAIL_CLOSED',
     'ATHLYRAX_STRIPE_EVENT_ORDER_GUARD',
+    'ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED',
     'ATHLYRAX_SERVER_AUTHORITATIVE_OWNERSHIP_METADATA',
     'ATHLYRAX_ORPHAN_TENANT_CLAIM_BLOCKED',
     'ATHLYRAX_LAST_TENANT_ACCOUNT_DELETE_BLOCKED',
@@ -44,6 +45,7 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes("const isBillingEnforced = isBillingEnabled && BILLING_ENFORCED;"), false);
   assert.equal(source.includes("if (!BILLING_ENFORCED || !stripeClient) return next();"), false);
   assert.equal(source.includes("return { planKey: 'tier-1', priceId: linePriceId };"), false);
+  assert.equal(source.includes('if (BILLING_STRIPE_WEBHOOK_SECRET && signature) {'), false);
   assert.equal(source.includes('Math.floor(Math.random() * alphabet.length)'), false);
   assert.equal(source.includes('buildExistingDbRowIdIndex('), false);
   assert.equal(source.includes("responsePayload = JSON.stringify({ swimmers: [] });"), false);
@@ -60,6 +62,10 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes('if (password.length < 8) {'), false);
   assert.equal(source.includes('if (nextPassword.length < 8) {'), false);
   assert.equal(source.includes('Password must be at least 8 characters.'), false);
+  assert.ok(source.includes('if (BILLING_STRIPE_WEBHOOK_SECRET) {'));
+  assert.ok(source.includes("if (!signature) {"));
+  assert.ok(source.includes('Stripe webhook signature is required.'));
+  assert.ok(source.includes('Stripe webhook verification is not configured.'));
   assert.ok(source.includes('if (password.length < 12) {'));
   assert.ok(source.includes('if (nextPassword.length < 12) {'));
   assert.ok(source.includes('Password must be at least 12 characters.'));
