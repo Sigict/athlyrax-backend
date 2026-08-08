@@ -7,6 +7,7 @@ let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 const marker = '// ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE';
 const productionDefaultsMarker = '// ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED';
 const legacyResolverRemovedMarker = '// ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED';
+const resetAttemptMarker = '// ATHLYRAX_PASSWORD_RESET_ACCOUNT_ATTEMPT_LIMIT';
 
 function routeBounds(routeStartText) {
   const start = source.indexOf(routeStartText);
@@ -75,6 +76,17 @@ if (!source.includes(marker)) {
   source = `${marker}\n${source}`;
 }
 
+if (!source.includes(resetAttemptMarker)) {
+  for (const routeStartText of ["app.post('/auth/password-reset/confirm'", "app.post('/snapshot/account/password-reset/confirm'"]) {
+    replaceRoute(routeStartText, (route) => {
+      const comparison = `\tif (!safeEqualText(hashPasswordResetCode(resetCode), String(resetEntry.codeHash || ''))) {`;
+      if (!route.includes(comparison)) throw new Error(`Password-reset constant-time compare anchor missing: ${routeStartText}`);
+      const replacement = `\t${resetAttemptMarker}\n\tif (Math.max(0, Number(resetEntry.failedAttempts || 0)) >= 5) {\n\t\tauthPasswordResetByUser.delete(userKey);\n\t\tres.status(400).json({ error: 'Reset code is invalid or expired.' });\n\t\treturn;\n\t}\n\n\tif (!safeEqualText(hashPasswordResetCode(resetCode), String(resetEntry.codeHash || ''))) {\n\t\tresetEntry.failedAttempts = Math.max(0, Number(resetEntry.failedAttempts || 0)) + 1;\n\t\tif (resetEntry.failedAttempts >= 5) authPasswordResetByUser.delete(userKey);`;
+      return route.replace(comparison, replacement);
+    });
+  }
+}
+
 if (!source.includes(legacyResolverRemovedMarker)) {
   const legacyStart = source.indexOf('function findAuthUserByIdentifier(identifier) {');
   const legacyEnd = source.indexOf('\nfunction resolveLoginUserByIdentifier(', legacyStart);
@@ -94,6 +106,8 @@ for (const required of [
   'ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED',
   'const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
   'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED',
+  'ATHLYRAX_PASSWORD_RESET_ACCOUNT_ATTEMPT_LIMIT',
+  'resetEntry.failedAttempts >= 5',
 ]) if (!source.includes(required)) throw new Error(`Auth identity/enumeration hardening missing: ${required}`);
 
 if (!source.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUE')) throw new Error('Onboarding email uniqueness must be installed by the earlier runtime-retention transform.');
@@ -106,6 +120,9 @@ for (const routeStartText of ["app.post('/auth/password-reset/confirm'", "app.po
   const { start, end } = routeBounds(routeStartText);
   const route = source.slice(start, end);
   if (route.includes("res.status(404).json({ error: 'User not found.' });")) throw new Error(`Password-reset confirm still reveals unknown accounts: ${routeStartText}`);
+  if (!route.includes('ATHLYRAX_PASSWORD_RESET_ACCOUNT_ATTEMPT_LIMIT') || !route.includes('resetEntry.failedAttempts >= 5')) {
+    throw new Error(`Password-reset account-level attempt limit missing: ${routeStartText}`);
+  }
 }
 for (const routeStartText of ["app.post('/auth/password-reset/request'", "app.post('/snapshot/account/password-reset/request'", "app.post('/snapshot/account/auth'", "app.post('/snapshot/account/password-reset/confirm'"]) {
   const { start, end } = routeBounds(routeStartText);
