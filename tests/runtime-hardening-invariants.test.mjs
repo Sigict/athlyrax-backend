@@ -26,6 +26,9 @@ test('production build contains runtime auth billing identity ownership and tena
     'ATHLYRAX_PARENT_NOTIFICATION_ONLY',
     'ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
     'ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED',
+    'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP',
+    'ATHLYRAX_LAYERED_AUTH_RATE_LIMIT',
+    'ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS',
     'ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED',
     'ATHLYRAX_OWNERSHIP_SUMMARY_STRICT_DB_READ',
     'ATHLYRAX_NO_PRODUCTION_STARTUP_AUTOHEAL',
@@ -47,7 +50,16 @@ test('production build contains runtime auth billing identity ownership and tena
   assert.equal(source.includes('Parent 2 consent is required when parent email 2 is provided.'), false);
   assert.equal(source.includes('function findAuthUserByIdentifier('), false);
   assert.equal(source.includes("details: error instanceof Error ? error.message : 'Unknown error'"), false);
+  assert.equal(source.includes("return forwarded.split(',')[0].trim();"), false);
+  assert.equal(source.includes("app.use(express.json({ limit: '25mb' }));"), false);
   assert.ok(source.includes("...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' })"));
+  assert.ok(source.includes('return chain[chain.length - 1];'));
+  assert.ok(source.includes('AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS'));
+  assert.ok(source.includes('`ip:${clientKey}`'));
+  assert.ok(source.includes('`identity:${clientKey}:${identifier}`'));
+  assert.ok(source.includes("app.use('/db', express.json({ limit: '25mb' }));"));
+  assert.ok(source.includes("app.use('/swimmer/profile/sync', express.json({ limit: '25mb' }));"));
+  assert.ok(source.includes("app.use(express.json({ limit: '5mb' }));"));
   assert.ok(source.includes("'https://athlyrax.com'"));
   assert.ok(source.includes("'https://www.athlyrax.com'"));
   assert.ok(source.includes(': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)'));
