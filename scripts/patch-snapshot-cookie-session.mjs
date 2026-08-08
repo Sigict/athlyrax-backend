@@ -27,7 +27,7 @@ if (!source.includes(marker)) {
   if (loginBoundary < 0) throw new Error('Snapshot login boundary was not found.');
 
   let signupPart = route.slice(0, loginBoundary);
-  const loginPart = route.slice(loginBoundary);
+  let loginPart = route.slice(loginBoundary);
   const signupSessionLine = `\t\t\tconst session = issueAuthToken({ username, role: 'swimmer' });\n`;
   if (!signupPart.includes(signupSessionLine)) throw new Error('Snapshot signup session issuance anchor missing.');
   signupPart = signupPart.replace(signupSessionLine, `\t\t\t${signupMarker}\n`);
@@ -35,13 +35,16 @@ if (!source.includes(marker)) {
   const signupTokenLine = `\t\t\t\ttoken: session.token,\n`;
   if (!signupPart.includes(signupTokenLine)) throw new Error('Snapshot signup token response anchor missing.');
   signupPart = signupPart.replace(signupTokenLine, '');
+
+  if (!loginPart.includes('const session = issueAuthToken(user);')) {
+    throw new Error('Snapshot login session issuance anchor missing.');
+  }
+  const loginResponseOld = `\tres.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });`;
+  const loginResponseSafe = `\t// ${marker}\n\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });\n\tres.status(200).json({\n\t\tcsrfToken: session.csrf,\n\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,\n\t\tuser: buildAuthUserPayload(user),\n\t});`;
+  if (!loginPart.includes(loginResponseOld)) throw new Error('Snapshot login bearer response anchor missing.');
+  loginPart = loginPart.replace(loginResponseOld, loginResponseSafe);
+
   route = signupPart + loginPart;
-
-  const loginOld = `\tconst session = issueAuthToken(user);\n\tres.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });`;
-  const loginSafe = `\tconst session = issueAuthToken(user);\n\t// ${marker}\n\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });\n\tres.status(200).json({\n\t\tcsrfToken: session.csrf,\n\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,\n\t\tuser: buildAuthUserPayload(user),\n\t});`;
-  if (!route.includes(loginOld)) throw new Error('Snapshot login bearer response anchor missing.');
-  route = route.replace(loginOld, loginSafe);
-
   source = `${source.slice(0, start)}${route}${source.slice(end)}`;
 }
 
