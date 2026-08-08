@@ -34,6 +34,7 @@ const expectedTransforms = [
   'scripts/patch-account-lifecycle-integrity.mjs',
   'scripts/patch-auth-enumeration-safety.mjs',
   'scripts/patch-coach-link-suite.mjs',
+  'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
   'scripts/patch-production-error-redaction.mjs',
   'scripts/patch-production-cors-origins.mjs',
@@ -92,10 +93,10 @@ for (const marker of [
   'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED','const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
   'ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN',
-  'ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
+  'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_COACH_LINK_WORKFLOW_V1','ATHLYRAX_COACH_LINK_LIFECYCLE_V1','ATHLYRAX_COACH_LINK_INTEGRITY_V1','ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1','ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1','ATHLYRAX_COACH_LINK_RECONNECT_V1','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB','ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
-for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAuthUserByIdentifier(','ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',"app.use(express.json({ limit: '25mb' }));"]) {
+for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAuthUserByIdentifier(','ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',"app.use(express.json({ limit: '25mb' }));","return forwarded.split(',')[0].trim();"]) {
   if (transformedIndex.includes(forbidden)) failures.push(`index.js: forbidden obsolete/duplicate runtime token remains: ${forbidden}`);
 }
 if (!transformedIndex.includes(': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)')) failures.push('index.js: production CORS still lacks production-only default-origin separation.');
@@ -122,6 +123,11 @@ for (const token of ['ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUC
 }
 if (authEnumerationPatch.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) failures.push('scripts/patch-auth-enumeration-safety.mjs: duplicate onboarding email guard logic returned.');
 
+const clientIpPatch = read('scripts/patch-client-ip-integrity.mjs');
+for (const token of ['ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','return chain[chain.length - 1];','Spoofable leftmost X-Forwarded-For selection remains.']) {
+  if (!clientIpPatch.includes(token)) failures.push(`scripts/patch-client-ip-integrity.mjs: missing ${token}`);
+}
+
 const requestLimitPatch = read('scripts/patch-request-body-limits.mjs');
 for (const token of ['ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS',"app.use('/db', express.json({ limit: '25mb' }));","app.use('/swimmer/profile/sync', express.json({ limit: '25mb' }));","app.use(express.json({ limit: '5mb' }));",'Unscoped 25 MB JSON parser remains.']) {
   if (!requestLimitPatch.includes(token)) failures.push(`scripts/patch-request-body-limits.mjs: missing ${token}`);
@@ -135,6 +141,9 @@ for (const token of [': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)',"origin 
 
 const coachTransactionPatch = read('scripts/patch-coach-link-transaction-integrity.mjs');
 for (const token of ['ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST','ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET','ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST','database rollback was incomplete']) if (!coachTransactionPatch.includes(token)) failures.push(`scripts/patch-coach-link-transaction-integrity.mjs: missing required token ${token}`);
+
+const legalPatch = read('scripts/signup-legal-acceptance-preload.mjs');
+for (const token of ['ATHLYRAX_LEGAL_ACCEPTANCE_DUAL_DURABLE_JOURNAL','ATHLYRAX_LEGAL_PROXY_OBSERVED_CLIENT_IP','chain[chain.length - 1]']) if (!legalPatch.includes(token)) failures.push(`scripts/signup-legal-acceptance-preload.mjs: missing ${token}`);
 
 const pkg = JSON.parse(read('package.json') || '{}');
 const postinstall = String(pkg?.scripts?.postinstall || '');
