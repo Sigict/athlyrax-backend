@@ -6,6 +6,7 @@ let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const marker = '// ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1';
 const signupMarker = '// ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN';
+const loginBearerResponsePattern = /res\.status\(200\)\.json\(\{\s*token:\s*session\.token,\s*user:\s*buildAuthUserPayload\(user\)\s*\}\);/;
 
 function routeBounds(routeStartText) {
   const start = source.indexOf(routeStartText);
@@ -39,10 +40,9 @@ if (!source.includes(marker)) {
   if (!loginPart.includes('const session = issueAuthToken(user);')) {
     throw new Error('Snapshot login session issuance anchor missing.');
   }
-  const loginResponseOld = `\tres.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });`;
-  const loginResponseSafe = `\t// ${marker}\n\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });\n\tres.status(200).json({\n\t\tcsrfToken: session.csrf,\n\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,\n\t\tuser: buildAuthUserPayload(user),\n\t});`;
-  if (!loginPart.includes(loginResponseOld)) throw new Error('Snapshot login bearer response anchor missing.');
-  loginPart = loginPart.replace(loginResponseOld, loginResponseSafe);
+  const loginResponseSafe = `// ${marker}\n\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });\n\tres.status(200).json({\n\t\tcsrfToken: session.csrf,\n\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,\n\t\tuser: buildAuthUserPayload(user),\n\t});`;
+  if (!loginBearerResponsePattern.test(loginPart)) throw new Error('Snapshot login bearer response anchor missing.');
+  loginPart = loginPart.replace(loginBearerResponsePattern, loginResponseSafe);
 
   route = signupPart + loginPart;
   source = `${source.slice(0, start)}${route}${source.slice(end)}`;
@@ -58,9 +58,9 @@ for (const required of [
   'csrfHeaderName: AUTH_CSRF_HEADER_NAME',
 ]) if (!route.includes(required)) throw new Error(`Snapshot cookie-session hardening missing: ${required}`);
 
+if (loginBearerResponsePattern.test(route)) throw new Error('Snapshot auth still exposes bearer token response.');
 for (const forbidden of [
   `const session = issueAuthToken({ username, role: 'swimmer' });`,
-  'res.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });',
   '\ttoken: session.token,',
 ]) if (route.includes(forbidden)) throw new Error(`Snapshot auth still exposes bearer token: ${forbidden}`);
 
