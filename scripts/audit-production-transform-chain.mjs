@@ -33,6 +33,7 @@ const expectedTransforms = [
   'scripts/patch-billing-catalog-integrity.mjs',
   'scripts/patch-account-lifecycle-integrity.mjs',
   'scripts/patch-auth-enumeration-safety.mjs',
+  'scripts/patch-password-policy.mjs',
   'scripts/patch-coach-link-suite.mjs',
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
@@ -94,20 +95,19 @@ const transformedIndex = read('index.js');
 for (const marker of [
   'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED','const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
   'ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
-  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN',
+  'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN','ATHLYRAX_PASSWORD_MINIMUM_12',
   'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','ATHLYRAX_LAYERED_AUTH_RATE_LIMIT','ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_COACH_LINK_WORKFLOW_V1','ATHLYRAX_COACH_LINK_LIFECYCLE_V1','ATHLYRAX_COACH_LINK_REJECTION_STALE_GUARD','ATHLYRAX_COACH_LINK_INTEGRITY_V1','ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1','ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1','ATHLYRAX_COACH_LINK_RECONNECT_V1','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB','ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
-for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAuthUserByIdentifier(','ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',"app.use(express.json({ limit: '25mb' }));","return forwarded.split(',')[0].trim();",'`identity:${clientKey}:${identifier}`']) {
+for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAuthUserByIdentifier(','ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',"app.use(express.json({ limit: '25mb' }));","return forwarded.split(',')[0].trim();",'`identity:${clientKey}:${identifier}`','if (password.length < 8) {','if (nextPassword.length < 8) {','Password must be at least 8 characters.']) {
   if (transformedIndex.includes(forbidden)) failures.push(`index.js: forbidden obsolete/duplicate runtime token remains: ${forbidden}`);
 }
 if (!transformedIndex.includes(': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)')) failures.push('index.js: production CORS still lacks production-only default-origin separation.');
 if (!transformedIndex.includes('`identity:${identifier}`')) failures.push('index.js: identity authentication rate limit is not global across source IPs.');
+if (!transformedIndex.includes('if (password.length < 12) {') || !transformedIndex.includes('if (nextPassword.length < 12) {') || !transformedIndex.includes('Password must be at least 12 characters.')) failures.push('index.js: production password minimum is not consistently 12 characters.');
 
 const operationalPatch = read('scripts/patch-operational-integrity.mjs');
 for (const token of ['ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN']) if (!operationalPatch.includes(token)) failures.push(`scripts/patch-operational-integrity.mjs: missing final tenant contract ${token}`);
-// Retention ownership is enforced against transformed index.js above. The operational
-// patch may mention obsolete markers only inside its own forbidden-token verifier.
 
 const retentionPatch = read('scripts/patch-runtime-data-retention.mjs');
 for (const token of ['ATHLYRAX_PRODUCTION_AUDIT_ARCHIVE_BEFORE_DELETE','ATHLYRAX_BOUNDED_PRIMARY_DB_SNAPSHOT_RETENTION']) if (!retentionPatch.includes(token)) failures.push(`scripts/patch-runtime-data-retention.mjs: missing final retention token ${token}`);
@@ -126,6 +126,11 @@ for (const token of ['ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUC
   if (!authEnumerationPatch.includes(token)) failures.push(`scripts/patch-auth-enumeration-safety.mjs: missing required token ${token}`);
 }
 if (authEnumerationPatch.includes('ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS')) failures.push('scripts/patch-auth-enumeration-safety.mjs: duplicate onboarding email guard logic returned.');
+
+const passwordPolicyPatch = read('scripts/patch-password-policy.mjs');
+for (const token of ['ATHLYRAX_PASSWORD_MINIMUM_12','if (password.length < 12) {','if (nextPassword.length < 12) {','Password must be at least 12 characters.','Legacy weak password policy remains']) {
+  if (!passwordPolicyPatch.includes(token)) failures.push(`scripts/patch-password-policy.mjs: missing ${token}`);
+}
 
 const clientIpPatch = read('scripts/patch-client-ip-integrity.mjs');
 for (const token of ['ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','return chain[chain.length - 1];','Spoofable leftmost X-Forwarded-For selection remains.']) {
@@ -168,7 +173,9 @@ if (!coachLinkTestCommand.includes('tests/coach-link-workflow.test.mjs') || !coa
 for (const requiredTest of ['test:storage-safety','test:data-safety','test:persistence-integrity','test:auth-persistence-transaction','test:auth-enumeration-safety','test:storage-routing-safety','test:storage-migration-identity','test:storage-extra-invariants','test:startup-mutation-safety','test:storage-path-integrity','test:storage-path-contract','test:signup-legal-acceptance','test:runtime-hardening','test:billing-catalog-integrity','test:coach-link-workflow','test:closed-pilot-backup-restore','test:closed-pilot-security','audit:storage-paths']) {
   if (!storageAll.includes(requiredTest)) failures.push(`package.json: test:storage-all missing ${requiredTest}`);
 }
-for (const requiredTest of ['test:auth-persistence-transaction','test:auth-enumeration-safety','test:coach-link-workflow','audit:storage-paths']) if (!securityVerify.includes(requiredTest)) failures.push(`package.json: verify:closed-pilot-security missing ${requiredTest}`);
+for (const requiredTest of ['test:signup-legal-acceptance','test:storage-path-contract','test:data-safety','test:persistence-integrity','test:auth-persistence-transaction','test:auth-enumeration-safety','test:storage-routing-safety','test:storage-migration-identity','test:storage-extra-invariants','test:startup-mutation-safety','test:storage-path-integrity','test:runtime-hardening','test:billing-catalog-integrity','test:coach-link-workflow','audit:storage-paths']) {
+  if (!securityVerify.includes(requiredTest)) failures.push(`package.json: verify:closed-pilot-security missing ${requiredTest}`);
+}
 
 if (failures.length) {
   console.error('ATHLYRAX_PRODUCTION_TRANSFORM_CHAIN_AUDIT_FAIL');
