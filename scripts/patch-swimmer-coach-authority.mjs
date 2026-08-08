@@ -16,11 +16,11 @@ const oldFields = `\t\tpathway: sanitizedSync.payload.pathway,\n\t\tcoachConnect
 const previousAuthorityFields = `\t\tpathway: serverCoachLinkApproved ? 'club' : sanitizedSync.payload.pathway,\n\t\tcoachConnected: serverCoachLinkApproved ? previousCoachConnected : false,\n\t\tcoachLinkStatus: nextCoachLinkStatus,\n\t\tcoachEmail: serverCoachLinkApproved\n\t\t\t? String(existingRow?.coachEmail || '')\n\t\t\t: (sanitizedSync.payload.coachEmail || String(existingRow?.coachEmail || '')),\n\t\tcoachCode: serverCoachLinkApproved\n\t\t\t? String(existingRow?.coachCode || '')\n\t\t\t: (sanitizedSync.payload.coachCode || String(existingRow?.coachCode || '')),\n\t\tcoachPhase: String(existingRow?.coachPhase || ''),\n\t\tcoachRequestAt: serverCoachLinkApproved\n\t\t\t? String(existingRow?.coachRequestAt || '')\n\t\t\t: (sanitizedSync.payload.coachRequestAt || String(existingRow?.coachRequestAt || '')),\n\t\tcoachReplyAt: String(existingRow?.coachReplyAt || ''),\n\t\tcoachApprovalAt: String(existingRow?.coachApprovalAt || ''),\n\t\tshareMode: serverCoachLinkApproved\n\t\t\t? (String(existingRow?.shareMode || '').trim() || 'Shared AthlyraX data')\n\t\t\t: (sanitizedSync.payload.shareMode || String(existingRow?.shareMode || '')),`;
 const newFields = `\t\tpathway: serverCoachLinkActive ? 'club' : sanitizedSync.payload.pathway,\n\t\tcoachConnected: previousCoachConnected,\n\t\tcoachLinkStatus: nextCoachLinkStatus,\n\t\tcoachEmail: String(existingRow?.coachEmail || ''),\n\t\tcoachCode: String(existingRow?.coachCode || ''),\n\t\tcoachPhase: String(existingRow?.coachPhase || ''),\n\t\tcoachRequestAt: String(existingRow?.coachRequestAt || ''),\n\t\tcoachReplyAt: String(existingRow?.coachReplyAt || ''),\n\t\tcoachApprovalAt: String(existingRow?.coachApprovalAt || ''),\n\t\tshareMode: String(existingRow?.shareMode || ''),`;
 
-if (!source.includes(newFields)) {
-  if (source.includes(previousAuthorityFields)) source = source.replace(previousAuthorityFields, newFields);
-  else if (source.includes(oldFields)) source = source.replace(oldFields, newFields);
-  else throw new Error('Swimmer sync coach authority fields were not found.');
-}
+// Replace any stale authoritative-field variant wherever it remains. Do not skip
+// this just because a previously hardened copy of the block exists elsewhere.
+if (source.includes(previousAuthorityFields)) source = source.replaceAll(previousAuthorityFields, newFields);
+if (source.includes(oldFields)) source = source.replaceAll(oldFields, newFields);
+if (!source.includes(newFields)) throw new Error('Swimmer sync coach authority fields were not found.');
 
 for (const token of [
   'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE',
@@ -32,10 +32,16 @@ for (const token of [
   "coachApprovalAt: String(existingRow?.coachApprovalAt || '')",
 ]) if (!source.includes(token)) throw new Error(`Swimmer coach authority hardening missing: ${token}`);
 
+if (source.includes(oldFields) || source.includes(previousAuthorityFields)) {
+  throw new Error('Generic swimmer profile sync still contains a stale coach-link write block.');
+}
+
+// These patterns identify writes from generic profile sync. A standalone
+// coachLinkStatus value may still appear in validation/audit details and is not
+// itself authoritative state mutation.
 for (const forbidden of [
   "requestedCoachLinkStatus === 'pending'",
   "coachConnected: sanitizedSync.payload.coachConnected",
-  "coachLinkStatus: sanitizedSync.payload.coachLinkStatus",
   "coachEmail: sanitizedSync.payload.coachEmail",
   "coachRequestAt: sanitizedSync.payload.coachRequestAt",
   "coachApprovalAt: sanitizedSync.payload.coachApprovalAt",
