@@ -5,9 +5,10 @@ const indexPath = path.resolve('index.js');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const marker = '// ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED';
+const exposed = `details: error instanceof Error ? error.message : 'Unknown error'`;
+const safe = `...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' })`;
+
 if (!source.includes(marker)) {
-  const exposed = `details: error instanceof Error ? error.message : 'Unknown error'`;
-  const safe = `...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' })`;
   const count = source.split(exposed).length - 1;
   if (count < 1) throw new Error('Production error-detail redaction found no response anchors.');
   source = source.replaceAll(exposed, safe);
@@ -15,10 +16,17 @@ if (!source.includes(marker)) {
 }
 
 if (!source.includes(marker)) throw new Error('Production error-detail redaction marker missing.');
-if (source.includes(`details: error instanceof Error ? error.message : 'Unknown error'`)) {
-  throw new Error('Raw exception detail response remains after production redaction.');
+
+// The safe environment-aware expression intentionally contains the original
+// `details: error...` text inside its development-only branch. A plain
+// `source.includes(exposed)` therefore produces a false positive. Every raw
+// occurrence must be accounted for by exactly one complete safe expression.
+const exposedCount = source.split(exposed).length - 1;
+const safeCount = source.split(safe).length - 1;
+if (exposedCount !== safeCount) {
+  throw new Error(`Raw exception detail response remains after production redaction (${exposedCount - safeCount} unguarded occurrence(s)).`);
 }
-if (!source.includes(`...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' })`)) {
+if (safeCount < 1) {
   throw new Error('Environment-aware error detail redaction is missing.');
 }
 

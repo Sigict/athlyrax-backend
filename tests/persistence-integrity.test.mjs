@@ -21,7 +21,7 @@ test('installed backend contains all persistence fail-closed guards', () => {
     'Snapshot submissions store is unreadable or invalid. Refusing to replace it with an empty file.',
     'Snapshot submissions in-memory state is invalid. Refusing destructive persistence.',
     'loadLatestBillingCatalogBackupStrict(',
-    'no structurally valid backup is available. Refusing default bootstrap.',
+    'Refusing startup-time recovery, normalization or default bootstrap.',
     'Password reset email delivery is not configured. Refusing to expose reset code through server logs.',
     'Stripe webhook signature is required.',
   ]) {
@@ -41,7 +41,7 @@ test('data safety layer blocks missing production db recreation and corrupt repl
     'ATHLYRAX_MISSING_DB_CREATE_BLOCKED',
     'ATHLYRAX_CURRENT_DB_INVALID',
     'ATHLYRAX_INCOMING_DB_INVALID',
-    'ATHLYRAX_DB_BACKUP_VERIFICATION_FAILED',
+    'ATHLYRAX_BACKUP_VERIFICATION_FAILED',
   ]) assert.ok(source.includes(token), `missing data safety guard: ${token}`);
 });
 
