@@ -45,9 +45,15 @@ test('data safety layer blocks missing production db recreation and corrupt repl
   ]) assert.ok(source.includes(token), `missing data safety guard: ${token}`);
 });
 
-test('persistence and durable-write patches are wired into postinstall', () => {
+test('persistence and durable-write patches are owned by the single verified build orchestrator', () => {
   const pkg = JSON.parse(read('package.json'));
   const postinstall = String(pkg?.scripts?.postinstall || '');
-  assert.match(postinstall, /patch-persistence-integrity\.mjs/);
-  assert.match(postinstall, /patch-durable-storage-writes\.mjs/);
+  assert.equal(postinstall, 'node scripts/build-production-backend.mjs');
+
+  const build = read('scripts/build-production-backend.mjs');
+  assert.match(build, /scripts\/patch-persistence-integrity\.mjs/);
+  assert.match(build, /scripts\/patch-durable-storage-writes\.mjs/);
+  assert.match(build, /audit-storage-paths\.mjs/);
+  assert.match(build, /audit-production-transform-chain\.mjs/);
+  assert.match(build, /ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK/);
 });
