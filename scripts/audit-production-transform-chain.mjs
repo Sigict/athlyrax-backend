@@ -18,6 +18,7 @@ const expectedTransforms = [
   'scripts/patch-index-signup-legal.mjs',
   'scripts/patch-logout-csrf.mjs',
   'scripts/patch-canonical-storage-contract.mjs',
+  'scripts/patch-auth-persistence-transaction.mjs',
   'scripts/patch-persistence-integrity.mjs',
   'scripts/patch-durable-storage-writes.mjs',
   'scripts/patch-operational-integrity.mjs',
@@ -26,7 +27,6 @@ const expectedTransforms = [
   'scripts/patch-auth-tenant-integrity.mjs',
   'scripts/patch-migration-validation.mjs',
   'scripts/patch-runtime-auth-billing-safety.mjs',
-  'scripts/patch-auth-persistence-transaction.mjs',
   'scripts/patch-runtime-identity-event-safety.mjs',
   'scripts/patch-ownership-integrity.mjs',
   'scripts/patch-orphan-tenant-safety.mjs',
@@ -35,6 +35,7 @@ const expectedTransforms = [
   'scripts/patch-auth-enumeration-safety.mjs',
   'scripts/patch-coach-link-suite.mjs',
   'scripts/patch-client-ip-integrity.mjs',
+  'scripts/patch-rate-limit-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
   'scripts/patch-production-error-redaction.mjs',
   'scripts/patch-production-cors-origins.mjs',
@@ -46,6 +47,7 @@ const expectedCoachLinkSteps = [
   'scripts/patch-parent-notification-semantics.mjs',
   'scripts/patch-coach-link-workflow.mjs',
   'scripts/patch-coach-link-lifecycle.mjs',
+  'scripts/patch-coach-link-rejection-stale-guard.mjs',
   'scripts/patch-coach-link-integrity.mjs',
   'scripts/patch-coach-link-ownership.mjs',
   'scripts/patch-coach-link-routing.mjs',
@@ -80,7 +82,7 @@ else {
   if (JSON.stringify(actualCoachSteps) !== JSON.stringify(expectedCoachLinkSteps)) failures.push(`scripts/patch-coach-link-suite.mjs: internal coach-link order mismatch. Expected ${JSON.stringify(expectedCoachLinkSteps)} but found ${JSON.stringify(actualCoachSteps)}.`);
   if (new Set(actualCoachSteps).size !== actualCoachSteps.length) failures.push('scripts/patch-coach-link-suite.mjs: duplicate internal coach-link step exists.');
 }
-for (const token of ['ATHLYRAX_COACH_LINK_SUITE_V1','ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_PARENT_NOTIFICATION_ONLY','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_SUITE_OK']) {
+for (const token of ['ATHLYRAX_COACH_LINK_SUITE_V1','ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_PARENT_NOTIFICATION_ONLY','ATHLYRAX_COACH_LINK_REJECTION_STALE_GUARD','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_SUITE_OK']) {
   if (!coachSuite.includes(token)) failures.push(`scripts/patch-coach-link-suite.mjs: missing suite verification token ${token}`);
 }
 
@@ -93,17 +95,19 @@ for (const marker of [
   'ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE','ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED','const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [',
   'ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE','ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE',
   'ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED','ATHLYRAX_ONBOARDING_EMAIL_UNIQUE','ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN',
-  'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
-  'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_COACH_LINK_WORKFLOW_V1','ATHLYRAX_COACH_LINK_LIFECYCLE_V1','ATHLYRAX_COACH_LINK_INTEGRITY_V1','ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1','ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1','ATHLYRAX_COACH_LINK_RECONNECT_V1','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB','ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
+  'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','ATHLYRAX_LAYERED_AUTH_RATE_LIMIT','ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',
+  'ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE','ATHLYRAX_COACH_LINK_WORKFLOW_V1','ATHLYRAX_COACH_LINK_LIFECYCLE_V1','ATHLYRAX_COACH_LINK_REJECTION_STALE_GUARD','ATHLYRAX_COACH_LINK_INTEGRITY_V1','ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1','ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1','ATHLYRAX_COACH_LINK_RECONNECT_V1','ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1','ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB','ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE',
 ]) if (!transformedIndex.includes(marker)) failures.push(`index.js: missing transformed production marker ${marker}`);
-for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAuthUserByIdentifier(','ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',"app.use(express.json({ limit: '25mb' }));","return forwarded.split(',')[0].trim();"]) {
+for (const forbidden of ['ATHLYRAX_ONBOARDING_EMAIL_UNIQUENESS','function findAuthUserByIdentifier(','ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE',"app.use(express.json({ limit: '25mb' }));","return forwarded.split(',')[0].trim();",'`identity:${clientKey}:${identifier}`']) {
   if (transformedIndex.includes(forbidden)) failures.push(`index.js: forbidden obsolete/duplicate runtime token remains: ${forbidden}`);
 }
 if (!transformedIndex.includes(': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)')) failures.push('index.js: production CORS still lacks production-only default-origin separation.');
+if (!transformedIndex.includes('`identity:${identifier}`')) failures.push('index.js: identity authentication rate limit is not global across source IPs.');
 
 const operationalPatch = read('scripts/patch-operational-integrity.mjs');
 for (const token of ['ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT','ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN']) if (!operationalPatch.includes(token)) failures.push(`scripts/patch-operational-integrity.mjs: missing final tenant contract ${token}`);
-for (const token of ['ATHLYRAX_PRODUCTION_AUDIT_RETENTION_NO_SILENT_DELETE','ATHLYRAX_PRODUCTION_DB_SNAPSHOT_RETENTION_NO_SILENT_DELETE']) if (operationalPatch.includes(token)) failures.push(`scripts/patch-operational-integrity.mjs: temporary retention ownership returned: ${token}`);
+// Retention ownership is enforced against transformed index.js above. The operational
+// patch may mention obsolete markers only inside its own forbidden-token verifier.
 
 const retentionPatch = read('scripts/patch-runtime-data-retention.mjs');
 for (const token of ['ATHLYRAX_PRODUCTION_AUDIT_ARCHIVE_BEFORE_DELETE','ATHLYRAX_BOUNDED_PRIMARY_DB_SNAPSHOT_RETENTION']) if (!retentionPatch.includes(token)) failures.push(`scripts/patch-runtime-data-retention.mjs: missing final retention token ${token}`);
@@ -113,7 +117,7 @@ if (authTenantPatch.includes('function replaceRequired(')) failures.push('script
 if (!authTenantPatch.includes('ATHLYRAX_ROLE_TENANT_COMPATIBILITY')) failures.push('scripts/patch-auth-tenant-integrity.mjs: role tenant compatibility guard missing.');
 
 const authPersistencePatch = read('scripts/patch-auth-persistence-transaction.mjs');
-for (const token of ['ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);','writeAtomicJsonFile(AUTH_USERS_PATH, payload);','Authentication primary/backup verification failed after persistence.','restorePrevious(AUTH_USERS_PATH','restorePrevious(AUTH_USERS_BACKUP_PATH','rollback was incomplete']) {
+for (const token of ['ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION','ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER','writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);','writeAtomicJsonFile(AUTH_USERS_PATH, payload);','Authentication primary/backup verification failed after persistence.','restorePrevious(AUTH_USERS_PATH','restorePrevious(AUTH_USERS_BACKUP_PATH','rollback was incomplete']) {
   if (!authPersistencePatch.includes(token)) failures.push(`scripts/patch-auth-persistence-transaction.mjs: missing required token ${token}`);
 }
 
@@ -128,6 +132,11 @@ for (const token of ['ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','return chain[chain.len
   if (!clientIpPatch.includes(token)) failures.push(`scripts/patch-client-ip-integrity.mjs: missing ${token}`);
 }
 
+const rateLimitPatch = read('scripts/patch-rate-limit-integrity.mjs');
+for (const token of ['ATHLYRAX_LAYERED_AUTH_RATE_LIMIT','AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS','`ip:${clientKey}`','`identity:${identifier}`','Identity rate limit is still coupled to client IP.']) {
+  if (!rateLimitPatch.includes(token)) failures.push(`scripts/patch-rate-limit-integrity.mjs: missing ${token}`);
+}
+
 const requestLimitPatch = read('scripts/patch-request-body-limits.mjs');
 for (const token of ['ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS',"app.use('/db', express.json({ limit: '25mb' }));","app.use('/swimmer/profile/sync', express.json({ limit: '25mb' }));","app.use(express.json({ limit: '5mb' }));",'Unscoped 25 MB JSON parser remains.']) {
   if (!requestLimitPatch.includes(token)) failures.push(`scripts/patch-request-body-limits.mjs: missing ${token}`);
@@ -137,7 +146,7 @@ const redactionPatch = read('scripts/patch-production-error-redaction.mjs');
 for (const token of ['ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','IS_PRODUCTION ? {}','Raw exception detail response remains']) if (!redactionPatch.includes(token)) failures.push(`scripts/patch-production-error-redaction.mjs: missing ${token}`);
 
 const corsPatch = read('scripts/patch-production-cors-origins.mjs');
-for (const token of [': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)',"origin === '*'",'new URL(origin)','parsed.origin !== origin','return new Set(origins);']) if (!corsPatch.includes(token)) failures.push(`scripts/patch-production-cors-origins.mjs: missing ${token}`);
+for (const token of [': (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS)',"origin === '*'",'new URL(origin)','parsed.origin === origin','!exactOrigin','return new Set(origins);']) if (!corsPatch.includes(token)) failures.push(`scripts/patch-production-cors-origins.mjs: missing ${token}`);
 
 const coachTransactionPatch = read('scripts/patch-coach-link-transaction-integrity.mjs');
 for (const token of ['ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET','ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST','ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET','ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST','database rollback was incomplete']) if (!coachTransactionPatch.includes(token)) failures.push(`scripts/patch-coach-link-transaction-integrity.mjs: missing required token ${token}`);
