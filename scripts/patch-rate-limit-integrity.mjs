@@ -13,9 +13,19 @@ if (!source.includes(marker)) {
 
   const oldFunction = `function requireLoginRateLimit(req, res, next) {\n\tconst clientKey = resolveClientKey(req);\n\tconst username = String(req.body?.username || '').trim().toLowerCase();\n\tconst key = username ? \`${'${clientKey}'}:${'${username}'}\` : clientKey;\n\tconst result = checkRateLimit({\n\t\tstore: loginRateBuckets,\n\t\tkey,\n\t\twindowMs: AUTH_LOGIN_RATE_WINDOW_MS,\n\t\tmaxAttempts: AUTH_LOGIN_RATE_MAX_ATTEMPTS,\n\t});\n\tapplyRateLimitHeaders(res, {\n\t\tmaxAttempts: AUTH_LOGIN_RATE_MAX_ATTEMPTS,\n\t\tremaining: result.remaining,\n\t\tresetSeconds: result.resetSeconds,\n\t});\n\tif (!result.allowed) {\n\t\tappendAuthAuditEvent({\n\t\t\taction: 'rate_limit_blocked',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: 'login_rate_limit',\n\t\t\tdetails: { limit: AUTH_LOGIN_RATE_MAX_ATTEMPTS, windowMs: AUTH_LOGIN_RATE_WINDOW_MS },\n\t\t});\n\t\tres.setHeader('Retry-After', String(result.resetSeconds));\n\t\tres.status(429).json({ error: 'Too many login attempts. Please wait and retry.' });\n\t\treturn;\n\t}\n\tnext();\n}`;
 
-  const safeFunction = `function requireLoginRateLimit(req, res, next) {\n\t${marker}\n\tconst clientKey = resolveClientKey(req);\n\tconst identifier = String(req.body?.username || req.body?.identifier || req.body?.email || '').trim().toLowerCase();\n\tconst ipResult = checkRateLimit({\n\t\tstore: loginRateBuckets,\n\t\tkey: \`ip:${'${clientKey}'}\`,\n\t\twindowMs: AUTH_LOGIN_RATE_WINDOW_MS,\n\t\tmaxAttempts: AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,\n\t});\n\tconst identityResult = identifier ? checkRateLimit({\n\t\tstore: loginRateBuckets,\n\t\tkey: \`identity:${'${clientKey}'}:${'${identifier}'}\`,\n\t\twindowMs: AUTH_LOGIN_RATE_WINDOW_MS,\n\t\tmaxAttempts: AUTH_LOGIN_RATE_MAX_ATTEMPTS,\n\t}) : null;\n\tconst blockedByIp = !ipResult.allowed;\n\tconst blockedByIdentity = Boolean(identityResult && !identityResult.allowed);\n\tapplyRateLimitHeaders(res, {\n\t\tmaxAttempts: identityResult ? AUTH_LOGIN_RATE_MAX_ATTEMPTS : AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,\n\t\tremaining: Math.min(ipResult.remaining, identityResult ? identityResult.remaining : ipResult.remaining),\n\t\tresetSeconds: Math.max(ipResult.resetSeconds, identityResult ? identityResult.resetSeconds : 0),\n\t});\n\tif (blockedByIp || blockedByIdentity) {\n\t\tappendAuthAuditEvent({\n\t\t\taction: 'rate_limit_blocked',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: blockedByIp ? 'login_ip_rate_limit' : 'login_identity_rate_limit',\n\t\t\tdetails: {\n\t\t\t\tipLimit: AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,\n\t\t\t\tidentityLimit: AUTH_LOGIN_RATE_MAX_ATTEMPTS,\n\t\t\t\twindowMs: AUTH_LOGIN_RATE_WINDOW_MS,\n\t\t\t},\n\t\t});\n\t\tres.setHeader('Retry-After', String(Math.max(ipResult.resetSeconds, identityResult ? identityResult.resetSeconds : 0)));\n\t\tres.status(429).json({ error: 'Too many authentication requests. Please wait and retry.' });\n\t\treturn;\n\t}\n\tnext();\n}`;
+  const safeFunction = `function requireLoginRateLimit(req, res, next) {\n\t${marker}\n\tconst clientKey = resolveClientKey(req);\n\tconst identifier = String(req.body?.username || req.body?.identifier || req.body?.email || '').trim().toLowerCase();\n\tconst ipResult = checkRateLimit({\n\t\tstore: loginRateBuckets,\n\t\tkey: \`ip:${'${clientKey}'}\`,\n\t\twindowMs: AUTH_LOGIN_RATE_WINDOW_MS,\n\t\tmaxAttempts: AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,\n\t});\n\tconst identityResult = identifier ? checkRateLimit({\n\t\tstore: loginRateBuckets,\n\t\tkey: \`identity:${'${identifier}'}\`,\n\t\twindowMs: AUTH_LOGIN_RATE_WINDOW_MS,\n\t\tmaxAttempts: AUTH_LOGIN_RATE_MAX_ATTEMPTS,\n\t}) : null;\n\tconst blockedByIp = !ipResult.allowed;\n\tconst blockedByIdentity = Boolean(identityResult && !identityResult.allowed);\n\tapplyRateLimitHeaders(res, {\n\t\tmaxAttempts: identityResult ? AUTH_LOGIN_RATE_MAX_ATTEMPTS : AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,\n\t\tremaining: Math.min(ipResult.remaining, identityResult ? identityResult.remaining : ipResult.remaining),\n\t\tresetSeconds: Math.max(ipResult.resetSeconds, identityResult ? identityResult.resetSeconds : 0),\n\t});\n\tif (blockedByIp || blockedByIdentity) {\n\t\tappendAuthAuditEvent({\n\t\t\taction: 'rate_limit_blocked',\n\t\t\treq,\n\t\t\tstatus: 'blocked',\n\t\t\treason: blockedByIp ? 'login_ip_rate_limit' : 'login_identity_rate_limit',\n\t\t\tdetails: {\n\t\t\t\tipLimit: AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,\n\t\t\t\tidentityLimit: AUTH_LOGIN_RATE_MAX_ATTEMPTS,\n\t\t\t\twindowMs: AUTH_LOGIN_RATE_WINDOW_MS,\n\t\t\t},\n\t\t});\n\t\tres.setHeader('Retry-After', String(Math.max(ipResult.resetSeconds, identityResult ? identityResult.resetSeconds : 0)));\n\t\tres.status(429).json({ error: 'Too many authentication requests. Please wait and retry.' });\n\t\treturn;\n\t}\n\tnext();\n}`;
   if (!source.includes(oldFunction)) throw new Error('Login rate-limit function anchor was not found.');
   source = source.replace(oldFunction, safeFunction);
+}
+
+// Older hardened builds coupled the identity bucket to the client IP. That allowed
+// the same account to receive a fresh identity budget whenever the source IP changed.
+// Keep the IP bucket as the network-wide layer, but make the identity bucket global
+// to the normalized login identifier so distributed attempts remain bounded.
+const legacyIdentityKey = '`identity:${clientKey}:${identifier}`';
+const globalIdentityKey = '`identity:${identifier}`';
+if (source.includes(legacyIdentityKey)) {
+  source = source.replaceAll(legacyIdentityKey, globalIdentityKey);
 }
 
 for (const token of [
@@ -23,11 +33,14 @@ for (const token of [
   'AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS',
   "req.body?.username || req.body?.identifier || req.body?.email",
   '`ip:${clientKey}`',
-  '`identity:${clientKey}:${identifier}`',
+  '`identity:${identifier}`',
   "'login_ip_rate_limit'",
   "'login_identity_rate_limit'",
 ]) if (!source.includes(token)) throw new Error(`Layered auth rate limiting missing: ${token}`);
 
+if (source.includes('`identity:${clientKey}:${identifier}`')) {
+  throw new Error('Identity rate limit is still coupled to client IP.');
+}
 if (source.includes('const effective = identityResult || ipResult;') || source.includes('void effective;')) {
   throw new Error('Redundant rate-limit temporary remains.');
 }
