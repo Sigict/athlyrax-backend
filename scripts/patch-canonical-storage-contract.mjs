@@ -166,17 +166,20 @@ for (const required of [
   `crypto.createHmac('sha256', AUTH_SECRET).update(path.resolve(registrationTenantStorage.dbPath)).digest('hex')`,
 ]) if (!source.includes(required)) throw new Error(`Canonical production hardening token is missing: ${required}`);
 
+const forbiddenRuntimeLegacyMigration = 'runtimeLegacyMigration = migrateLegacyStorageIfNeeded' + '({';
+const forbiddenSafeStartEnv = 'process.env.' + 'ATHLYRAX_SAFE_START_ENFORCED';
+const forbiddenRandomProvisioningToken = 'const registrationTenantProvisioningToken = crypto.' + 'randomUUID();';
 for (const forbidden of [
   `path.join(STORAGE_ROOT, 'tenants', 'clubs')`,
   `path.join(STORAGE_ROOT, 'auth-users.json')`,
   `writeAtomicJsonFile(storagePaths.dbPath, {});`,
   `writeJsonFile(AUTH_USERS_PATH,`,
   `writeJsonFile(AUTH_USERS_BACKUP_PATH,`,
-  `runtimeLegacyMigration = migrateLegacyStorageIfNeeded({`,
+  forbiddenRuntimeLegacyMigration,
   `restoreBundledDemoTenantIfNeeded({`,
   `finalizeLegacyStorageMigration({`,
-  `process.env.ATHLYRAX_SAFE_START_ENFORCED`,
-  `const registrationTenantProvisioningToken = crypto.randomUUID();`,
+  forbiddenSafeStartEnv,
+  forbiddenRandomProvisioningToken,
 ]) if (source.includes(forbidden)) throw new Error(`Forbidden legacy/unsafe backend token remains: ${forbidden}`);
 
 fs.writeFileSync(indexPath, source, 'utf8');
