@@ -48,17 +48,7 @@ jobs:
               --output "${config_file}" --write-out '%{http_code}' \
               "${BACKEND_URL}/auth/config" || true)"
 
-            release_match="$(node --input-type=module - "${config_file}" "${EXPECTED_RELEASE_MARKER}" <<'NODE'
-            import fs from 'node:fs';
-            const [filePath, expected] = process.argv.slice(2);
-            try {
-              const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-              process.stdout.write(String(payload?.releaseMarker || '') === expected ? 'yes' : 'no');
-            } catch {
-              process.stdout.write('no');
-            }
-            NODE
-            )"
+            release_match="$(node --input-type=module --eval "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(String(p?.releaseMarker||'')===process.argv[2]?'yes':'no');" "${config_file}" "${EXPECTED_RELEASE_MARKER}" 2>/dev/null || printf 'no')"
 
             if [[ "${config_code}" == "200" && "${release_match}" == "yes" ]]; then
               register_code="$(curl --silent --show-error --location \
