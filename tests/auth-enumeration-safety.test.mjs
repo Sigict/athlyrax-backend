@@ -36,7 +36,7 @@ test('password reset request endpoints do not reveal delivery outcome or use fir
   }
 });
 
-test('password reset confirm endpoints do not reveal whether the account exists', () => {
+test('password reset confirm endpoints hide account existence and cap guesses per reset code', () => {
   for (const startText of [
     "app.post('/auth/password-reset/confirm'",
     "app.post('/snapshot/account/password-reset/confirm'",
@@ -45,6 +45,9 @@ test('password reset confirm endpoints do not reveal whether the account exists'
     assert.ok(body.includes('ATHLYRAX_PASSWORD_RESET_CONFIRM_GENERIC_UNKNOWN_ACCOUNT'));
     assert.equal(body.includes("res.status(404).json({ error: 'User not found.' });"), false);
     assert.ok(body.includes("res.status(400).json({ error: 'Reset code is invalid or expired.' });"));
+    assert.ok(body.includes('ATHLYRAX_PASSWORD_RESET_ACCOUNT_ATTEMPT_LIMIT'));
+    assert.ok(body.includes('resetEntry.failedAttempts >= 5'));
+    assert.ok(body.includes('authPasswordResetByUser.delete(userKey)'));
   }
   const snapshotConfirm = route("app.post('/snapshot/account/password-reset/confirm'");
   assert.ok(snapshotConfirm.includes('resolveLoginUserByIdentifier(identifier)'));
