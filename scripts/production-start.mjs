@@ -12,6 +12,13 @@ const __filename = fileURLToPath(import.meta.url);
 const sourceRoot = path.resolve(path.dirname(__filename), '..');
 const approval = String(process.env.ATHLYRAX_STORAGE_MIGRATION_APPROVAL || '').trim();
 
+// Production password recovery must never silently fall back to console delivery.
+// If Render (or another production host) loses the explicit delivery-mode variable,
+// keep reset codes on the real SMTP/email path. Local/dev entrypoints are untouched.
+if (!String(process.env.AUTH_PASSWORD_RESET_DELIVERY || '').trim()) {
+  process.env.AUTH_PASSWORD_RESET_DELIVERY = 'smtp';
+}
+
 function migrationAlreadyCompleted(markerPath) {
   try {
     const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
