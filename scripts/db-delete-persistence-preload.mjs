@@ -1,4 +1,5 @@
 const PATCH_MARKER = Symbol.for('athlyrax.dbDeletePersistenceInstalled');
+const PERSISTENCE_GUARD_VERSION = '2026-08-13-v1';
 
 function stampDbWrite(req, res, next) {
   const body = req?.body;
@@ -15,6 +16,9 @@ function stampDbWrite(req, res, next) {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
+  res.setHeader('X-AthlyraX-DB-Persistence-Guard', PERSISTENCE_GUARD_VERSION);
+  const commit = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || '').trim();
+  if (commit) res.setHeader('X-AthlyraX-Backend-Commit', commit);
   next();
 }
 
@@ -22,6 +26,7 @@ function markDbRead(_req, res, next) {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
+  res.setHeader('X-AthlyraX-DB-Persistence-Guard', PERSISTENCE_GUARD_VERSION);
   const commit = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || '').trim();
   if (commit) res.setHeader('X-AthlyraX-Backend-Commit', commit);
   next();
