@@ -1,0 +1,126 @@
+name: Verify live DB delete persistence
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-live-db-delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      BACKEND_URL: https://athlyrax-backend.onrender.com
+      DEMO_USERNAME: demo.coach
+      DEMO_PASSWORD: DemoCoach123!
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+
+      - name: Wait for exact Render backend commit
+        run: |
+          set -euo pipefail
+          expected="${GITHUB_SHA}"
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          trap 'rm -f "${headers}" "${body}"' EXIT
+          for attempt in $(seq 1 40); do
+            : >"${headers}"
+            : >"${body}"
+            curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
+              --dump-header "${headers}" --output "${body}" \
+              "${BACKEND_URL}/db?commit_probe=${expected}-${attempt}" || true
+            actual="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
+            if [[ "${actual}" == "${expected}" ]]; then
+              grep -qi '^Cache-Control:.*no-store' "${headers}"
+              echo "Exact Render backend commit ${expected} is live and /db is no-store."
+              exit 0
+            fi
+            echo "Waiting for Render exact commit (${attempt}/40); received=${actual:-missing}"
+            sleep 15
+          done
+          echo "Render did not deploy exact backend commit ${expected}." >&2
+          exit 1
+
+      - name: Prove a live DB deletion survives reload
+        run: |
+          set -euo pipefail
+          jar="$(mktemp)"
+          login="$(mktemp)"
+          original="$(mktemp)"
+          with_probe="$(mktemp)"
+          after_add="$(mktemp)"
+          without_probe="$(mktemp)"
+          after_delete="$(mktemp)"
+          headers="$(mktemp)"
+          trap 'rm -f "${jar}" "${login}" "${original}" "${with_probe}" "${after_add}" "${without_probe}" "${after_delete}" "${headers}"' EXIT
+
+          login_code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
+            --cookie-jar "${jar}" --header 'Content-Type: application/json' \
+            --data "{\"username\":\"${DEMO_USERNAME}\",\"password\":\"${DEMO_PASSWORD}\"}" \
+            --output "${login}" --write-out '%{http_code}' "${BACKEND_URL}/auth/login")"
+          test "${login_code}" = "200"
+
+          csrf="$(awk '$6 ~ /athlyrax_csrf$/ {print $7}' "${jar}" | tail -n 1)"
+          if [[ -z "${csrf}" ]]; then
+            csrf="$(awk '$6 == "athlyrax_csrf" {print $7}' "${jar}" | tail -n 1)"
+          fi
+          test -n "${csrf}"
+
+          curl --fail --silent --show-error --location --cookie "${jar}" \
+            --dump-header "${headers}" --output "${original}" "${BACKEND_URL}/db?phase=original"
+          revision="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-DB-Revision:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
+
+          node --input-type=module - "${original}" "${with_probe}" <<'NODE'
+          import fs from 'node:fs';
+          const [source, target] = process.argv.slice(2);
+          const db = JSON.parse(fs.readFileSync(source, 'utf8'));
+          db.__deletePersistenceProbe = `probe-${Date.now()}`;
+          db.__meta = { ...(db.__meta || {}), updatedAt: new Date().toISOString() };
+          fs.writeFileSync(target, JSON.stringify(db));
+          NODE
+
+          add_code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
+            --cookie "${jar}" --header 'Content-Type: application/json' --header "X-CSRF-Token: ${csrf}" \
+            ${revision:+--header "X-AthlyraX-DB-Revision: ${revision}"} \
+            --data-binary "@${with_probe}" --output /tmp/add-response.json --write-out '%{http_code}' \
+            --request PUT "${BACKEND_URL}/db")"
+          test "${add_code}" = "200"
+
+          curl --fail --silent --show-error --location --cookie "${jar}" \
+            --output "${after_add}" "${BACKEND_URL}/db?phase=after-add&cb=$(date +%s%N)"
+          node --input-type=module - "${after_add}" <<'NODE'
+          import fs from 'node:fs';
+          const db = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (!String(db.__deletePersistenceProbe || '').startsWith('probe-')) throw new Error('Live probe was not persisted.');
+          NODE
+
+          node --input-type=module - "${after_add}" "${without_probe}" <<'NODE'
+          import fs from 'node:fs';
+          const [source, target] = process.argv.slice(2);
+          const db = JSON.parse(fs.readFileSync(source, 'utf8'));
+          delete db.__deletePersistenceProbe;
+          db.__meta = { ...(db.__meta || {}), updatedAt: new Date().toISOString() };
+          fs.writeFileSync(target, JSON.stringify(db));
+          NODE
+
+          delete_code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
+            --cookie "${jar}" --header 'Content-Type: application/json' --header "X-CSRF-Token: ${csrf}" \
+            --data-binary "@${without_probe}" --output /tmp/delete-response.json --write-out '%{http_code}' \
+            --request PUT "${BACKEND_URL}/db")"
+          test "${delete_code}" = "200"
+
+          sleep 3
+          curl --fail --silent --show-error --location --cookie "${jar}" \
+            --output "${after_delete}" "${BACKEND_URL}/db?phase=after-delete&cb=$(date +%s%N)"
+          node --input-type=module - "${after_delete}" <<'NODE'
+          import fs from 'node:fs';
+          const db = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (Object.prototype.hasOwnProperty.call(db, '__deletePersistenceProbe')) {
+            throw new Error('Deleted live DB field returned after reload.');
+          }
+          console.log('LIVE_DB_DELETE_PERSISTENCE_OK');
+          NODE
