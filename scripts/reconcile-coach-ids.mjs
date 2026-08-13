@@ -68,8 +68,12 @@ const coachIdSet = new Set(coaches.map((c) => String(c.id || '').trim()));
 // Set values to a real `coaches[].id` string.
 // ---------------------------------------------------------------------------
 const OVERRIDES = {
-  // 'coach_46jay9nh': '22',
-  // 'coach_hxyoub2y': '17',
+  // Proven by data (only one resolved coach teaches the orphan's exact
+  // (squad, venue, session-type) contexts and is not a same-row teammate):
+  'coach_gqqnevxk': '32',   // Molly Ferrigan — Mon 17:30-18:30 Otters Glass Mill Swim
+  // The remaining 19 orphans are narrowed but not uniquely provable from data.
+  // Send the human-confirmed mapping in this shape:
+  // 'coach_46jay9nh': '<numeric id>',
 };
 
 function isPrefixed(id) { return /^coach_[a-z0-9]+$/i.test(String(id || '')); }
