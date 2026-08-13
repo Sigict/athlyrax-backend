@@ -83,8 +83,8 @@ if (!source.includes(marker)) {
     source = source.replace(getSendOld, getSendNew);
   }
 
-  const putSafeBodyOld = `\t\tconst safeBody = {\n\t\t\t...body,\n\t\t\ttrainingPlannerWeeks: merged.nextWeeks,\n\t\t};`;
-  const putSafeBodyNew = `\t\t// ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE\n\t\tconst safeBody = {\n\t\t\t...body,\n\t\t\ttrainingPlannerWeeks: merged.nextWeeks,\n\t\t\tcoachLinkRequests: Array.isArray(currentDb?.coachLinkRequests) ? currentDb.coachLinkRequests : [],\n\t\t};`;
+  const putSafeBodyOld = `\t\tconst safeBody = {\n\t\t\t...filtered.dbShape,\n\t\t\t__tombstones: mergedTombstones,\n\t\t};`;
+  const putSafeBodyNew = `\t\t// ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE\n\t\tconst safeBody = {\n\t\t\t...filtered.dbShape,\n\t\t\t__tombstones: mergedTombstones,\n\t\t\tcoachLinkRequests: Array.isArray(currentDb?.coachLinkRequests) ? currentDb.coachLinkRequests : [],\n\t\t};`;
   if (!source.includes('ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE')) {
     if (!source.includes(putSafeBodyOld)) throw new Error('Generic DB PUT preservation anchor not found.');
     source = source.replace(putSafeBodyOld, putSafeBodyNew);

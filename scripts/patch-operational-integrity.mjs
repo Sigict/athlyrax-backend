@@ -26,13 +26,13 @@ replaceRequired(
   'Planner backup cross-target metadata recovery',
 );
 replaceRequired(
-  `\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);\n\n\t\treturn {\n\t\t\trecoveredTargets: merged.recoveredTargets,\n\t\t\trecoveredFixtureIds: merged.recoveredFixtureIds,\n\t\t\tstaleWriteIgnored: false,\n\t\t};`,
-  `\t\tlet plannerBackupSaved = true;\n\t\ttry {\n\t\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);\n\t\t} catch (backupError) {\n\t\t\tplannerBackupSaved = false;\n\t\t\tconsole.error('[planner-backup] Database was saved but derived planner backup refresh failed:', backupError instanceof Error ? backupError.message : String(backupError));\n\t\t}\n\n\t\treturn {\n\t\t\trecoveredTargets: merged.recoveredTargets,\n\t\t\trecoveredFixtureIds: merged.recoveredFixtureIds,\n\t\t\tstaleWriteIgnored: false,\n\t\t\tplannerBackupSaved,\n\t\t};`,
+  `\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);\n\n\t\treturn {\n\t\t\trecoveredTargets: merged.recoveredTargets,\n\t\t\trecoveredFixtureIds: merged.recoveredFixtureIds,\n\t\t\tstaleWriteIgnored: false,\n\t\t\tblockedResurrections: filtered.blockedResurrections,\n\t\t\ttombstoneCount: mergedTombstones.length,\n\t\t};`,
+  `\t\tlet plannerBackupSaved = true;\n\t\ttry {\n\t\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);\n\t\t} catch (backupError) {\n\t\t\tplannerBackupSaved = false;\n\t\t\tconsole.error('[planner-backup] Database was saved but derived planner backup refresh failed:', backupError instanceof Error ? backupError.message : String(backupError));\n\t\t}\n\n\t\treturn {\n\t\t\trecoveredTargets: merged.recoveredTargets,\n\t\t\trecoveredFixtureIds: merged.recoveredFixtureIds,\n\t\t\tstaleWriteIgnored: false,\n\t\t\tblockedResurrections: filtered.blockedResurrections,\n\t\t\ttombstoneCount: mergedTombstones.length,\n\t\t\tplannerBackupSaved,\n\t\t};`,
   'Planner backup post-commit handling',
 );
 replaceRequired(
-  `\t\t\t\tstaleWriteIgnored: result.staleWriteIgnored === true,\n\t\t\t});`,
-  `\t\t\t\tstaleWriteIgnored: result.staleWriteIgnored === true,\n\t\t\t\tplannerBackupSaved: result.plannerBackupSaved !== false,\n\t\t\t});`,
+  `\t\t\t\tstaleWriteIgnored: result.staleWriteIgnored === true,\n\t\t\t\tblockedResurrections: Array.isArray(result.blockedResurrections) ? result.blockedResurrections : [],\n\t\t\t\ttombstoneCount: Number.isFinite(result.tombstoneCount) ? result.tombstoneCount : 0,\n\t\t\t});`,
+  `\t\t\t\tstaleWriteIgnored: result.staleWriteIgnored === true,\n\t\t\t\tblockedResurrections: Array.isArray(result.blockedResurrections) ? result.blockedResurrections : [],\n\t\t\t\ttombstoneCount: Number.isFinite(result.tombstoneCount) ? result.tombstoneCount : 0,\n\t\t\t\tplannerBackupSaved: result.plannerBackupSaved !== false,\n\t\t\t});`,
   'Planner backup response status',
 );
 
