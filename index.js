@@ -2885,6 +2885,170 @@ function buildExistingDbRowIdIndex(dbShape) {
 	return index;
 }
 
+// ---------------------------------------------------------------------------
+// Tombstone-based deletion protection.
+//
+// The whole-db PUT model means a stale client copy can silently resurrect a
+// row that was deleted from another tab or by a different user. To close that
+// loop without moving to per-collection endpoints, we maintain a durable
+// tombstone list on the server. Any row whose (collection, id) is tombstoned
+// with a deletedAt newer than the row's own updatedAt is filtered out of the
+// incoming payload before we write it to disk. Tombstones are additive across
+// writes (union of existing + incoming, latest deletedAt wins).
+// ---------------------------------------------------------------------------
+
+const TOMBSTONE_TRACKED_COLLECTION_KEYS = Object.freeze([
+	'timetable',
+	'timetables',
+	'timetableSlots',
+	'schedule',
+	'trainingSessions',
+	'trainingSessionSets',
+	'attendance',
+	'coaches',
+	'squads',
+	'swimmers',
+	'venues',
+	'sessionTypes',
+	'trainingSetBlocks',
+	'templateSets',
+	'templateTests',
+	'tests',
+	'fixtures',
+	'seasons',
+	'trainingPlannerWeeks',
+]);
+
+const TOMBSTONE_MAX_ENTRIES = 5000;
+
+function parseIsoMs(value) {
+	if (!value) return NaN;
+	const ms = Date.parse(String(value));
+	return Number.isFinite(ms) ? ms : NaN;
+}
+
+function normalizeTombstoneEntry(entry) {
+	if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+	const collection = String(entry.collection || '').trim();
+	const id = toRowId(entry.id);
+	if (!collection || !id) return null;
+	if (!TOMBSTONE_TRACKED_COLLECTION_KEYS.includes(collection)) return null;
+	const deletedAtMs = parseIsoMs(entry.deletedAt);
+	const deletedAt = Number.isFinite(deletedAtMs)
+		? new Date(deletedAtMs).toISOString()
+		: new Date().toISOString();
+	return {
+		collection,
+		id,
+		deletedAt,
+		deletedBy: String(entry.deletedBy || '').trim().toLowerCase() || 'unknown-actor',
+	};
+}
+
+function mergeTombstoneLists(existingList, incomingList) {
+	const byKey = new Map();
+	for (const source of [existingList, incomingList]) {
+		if (!Array.isArray(source)) continue;
+		for (const raw of source) {
+			const entry = normalizeTombstoneEntry(raw);
+			if (!entry) continue;
+			const key = `${entry.collection}|${entry.id}`;
+			const prior = byKey.get(key);
+			if (!prior || parseIsoMs(entry.deletedAt) > parseIsoMs(prior.deletedAt)) {
+				byKey.set(key, entry);
+			}
+		}
+	}
+	const merged = Array.from(byKey.values()).sort((a, b) => parseIsoMs(b.deletedAt) - parseIsoMs(a.deletedAt));
+	if (merged.length > TOMBSTONE_MAX_ENTRIES) merged.length = TOMBSTONE_MAX_ENTRIES;
+	return merged;
+}
+
+function buildTombstoneLookup(tombstoneList) {
+	const byCollection = new Map();
+	for (const entry of Array.isArray(tombstoneList) ? tombstoneList : []) {
+		if (!entry || !entry.collection || !entry.id) continue;
+		if (!byCollection.has(entry.collection)) byCollection.set(entry.collection, new Map());
+		byCollection.get(entry.collection).set(entry.id, parseIsoMs(entry.deletedAt));
+	}
+	return byCollection;
+}
+
+function rowLastMutatedMs(row) {
+	const updatedAt = parseIsoMs(row?.updatedAt);
+	if (Number.isFinite(updatedAt)) return updatedAt;
+	const createdAt = parseIsoMs(row?.createdAt);
+	if (Number.isFinite(createdAt)) return createdAt;
+	return 0;
+}
+
+function applyTombstonesToDbShape(dbShape, tombstoneLookup) {
+	if (!dbShape || typeof dbShape !== 'object' || Array.isArray(dbShape)) return { dbShape, blockedResurrections: [] };
+	const next = { ...dbShape };
+	const blockedResurrections = [];
+	for (const collection of TOMBSTONE_TRACKED_COLLECTION_KEYS) {
+		const rows = Array.isArray(next[collection]) ? next[collection] : null;
+		if (!rows) continue;
+		const tombstonesForCollection = tombstoneLookup.get(collection);
+		if (!tombstonesForCollection || tombstonesForCollection.size === 0) continue;
+		const kept = [];
+		for (const row of rows) {
+			const rowId = toRowId(row?.id);
+			if (!rowId) { kept.push(row); continue; }
+			const tombstoneMs = tombstonesForCollection.get(rowId);
+			if (!Number.isFinite(tombstoneMs)) { kept.push(row); continue; }
+			const rowMs = rowLastMutatedMs(row);
+			if (rowMs > tombstoneMs) {
+				// Row legitimately re-created after the tombstone. Keep it and retire the tombstone.
+				kept.push(row);
+				tombstonesForCollection.delete(rowId);
+				continue;
+			}
+			blockedResurrections.push({ collection, id: rowId });
+		}
+		if (kept.length !== rows.length) next[collection] = kept;
+	}
+	return { dbShape: next, blockedResurrections };
+}
+
+// ---------------------------------------------------------------------------
+// Attendance -> Schedule linkage integrity.
+//
+// Every attendance row must link to a real schedule occurrence via scheduleId,
+// never to a timetable template id. We enforce this on write.
+// ---------------------------------------------------------------------------
+
+function collectAttendanceLinkageViolations(dbShape) {
+	if (!dbShape || typeof dbShape !== 'object' || Array.isArray(dbShape)) return [];
+	const attendance = Array.isArray(dbShape.attendance) ? dbShape.attendance : [];
+	if (attendance.length === 0) return [];
+	const scheduleIds = new Set(
+		(Array.isArray(dbShape.schedule) ? dbShape.schedule : [])
+			.map((row) => toRowId(row?.id))
+			.filter(Boolean),
+	);
+	const timetableTemplateIds = new Set([
+		...(Array.isArray(dbShape.timetable) ? dbShape.timetable : []).map((row) => toRowId(row?.id)),
+		...(Array.isArray(dbShape.timetables) ? dbShape.timetables : []).map((row) => toRowId(row?.id)),
+		...(Array.isArray(dbShape.timetableSlots) ? dbShape.timetableSlots : []).map((row) => toRowId(row?.id)),
+	].filter(Boolean));
+
+	const violations = [];
+	for (const row of attendance) {
+		const rowId = toRowId(row?.id) || '<no-id>';
+		const scheduleId = toRowId(row?.scheduleId);
+		if (!scheduleId) {
+			violations.push({ attendanceId: rowId, reason: 'missing_scheduleId' });
+			continue;
+		}
+		if (timetableTemplateIds.has(scheduleId) && !scheduleIds.has(scheduleId)) {
+			violations.push({ attendanceId: rowId, reason: 'points_at_timetable_template', scheduleId });
+		}
+	}
+	return violations;
+}
+
+
 function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 	const actorUsername = String(auth?.username || '').trim().toLowerCase() || 'unknown-actor';
 	const actorTenantId = String(resolveAuthTenantId(auth) || '').trim().toLowerCase();
@@ -5827,6 +5991,25 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		});
 		return;
 	}
+	// [TOMBSTONE_PUT_WIRED_V1] Reject writes where attendance links to non-existent schedule occurrences
+	// or, worse, to a timetable template id. This is a client-authored contract and we make it a
+	// server-enforced invariant so future frontend bugs cannot silently break attendance linkage.
+	const attendanceLinkageViolations = collectAttendanceLinkageViolations(body);
+	if (attendanceLinkageViolations.length > 0) {
+		appendAuthAuditEvent({
+			action: 'unauthorized_access_blocked',
+			req,
+			status: 'blocked',
+			reason: 'attendance_linkage_violations',
+			details: { tenantId: actorTenantId, violations: attendanceLinkageViolations.slice(0, 20) },
+		});
+		res.status(400).json({
+			error: 'Attendance rows must link to real schedule occurrences.',
+			violations: attendanceLinkageViolations.slice(0, 50),
+		});
+		return;
+	}
+
 	const storagePaths = tenantScope.storagePaths;
 	ensureStorageLayout(storagePaths);
 
@@ -5864,13 +6047,28 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		const backupPayload = readJsonFile(storagePaths.backupPath);
 		const backupRows = Array.isArray(backupPayload?.rows) ? backupPayload.rows : [];
 		const merged = mergePlannerTargets(body, backupRows);
-		const safeBody = {
+
+		// Tombstone merge: union of what's on disk with what the client sent.
+		const mergedTombstones = mergeTombstoneLists(
+			Array.isArray(currentDb?.__tombstones) ? currentDb.__tombstones : [],
+			Array.isArray(body?.__tombstones) ? body.__tombstones : [],
+		);
+		const tombstoneLookup = buildTombstoneLookup(mergedTombstones);
+
+		// Filter the incoming payload: any tombstoned row not legitimately re-created after
+		// the tombstone is refused. This is where deletion becomes durable.
+		const filtered = applyTombstonesToDbShape({
 			...body,
 			trainingPlannerWeeks: merged.nextWeeks,
-		};
-			const ownershipStampedBody = applyOwnershipMetadataToDbShape(safeBody, currentDb, req.auth);
+		}, tombstoneLookup);
 
-			writeAtomicJsonFile(storagePaths.dbPath, ownershipStampedBody);
+		const safeBody = {
+			...filtered.dbShape,
+			__tombstones: mergedTombstones,
+		};
+		const ownershipStampedBody = applyOwnershipMetadataToDbShape(safeBody, currentDb, req.auth);
+
+		writeAtomicJsonFile(storagePaths.dbPath, ownershipStampedBody);
 
 		const nextBackup = {
 			savedAt: new Date().toISOString(),
@@ -5882,6 +6080,8 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 			recoveredTargets: merged.recoveredTargets,
 			recoveredFixtureIds: merged.recoveredFixtureIds,
 			staleWriteIgnored: false,
+			blockedResurrections: filtered.blockedResurrections,
+			tombstoneCount: mergedTombstones.length,
 		};
 	})
 		.then((result) => {
@@ -5890,6 +6090,8 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				recoveredTargets: result.recoveredTargets,
 				recoveredFixtureIds: result.recoveredFixtureIds,
 				staleWriteIgnored: result.staleWriteIgnored === true,
+				blockedResurrections: Array.isArray(result.blockedResurrections) ? result.blockedResurrections : [],
+				tombstoneCount: Number.isFinite(result.tombstoneCount) ? result.tombstoneCount : 0,
 			});
 		})
 		.catch((error) => {
