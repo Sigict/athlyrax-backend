@@ -60,6 +60,18 @@ const coaches = Array.isArray(db.coaches) ? db.coaches : [];
 
 const coachIdSet = new Set(coaches.map((c) => String(c.id || '').trim()));
 
+// ---------------------------------------------------------------------------
+// HUMAN-REVIEWED OVERRIDES: once the owner has looked at
+// `coach-id-context-report.mjs` output and identified which real coach each
+// unresolved `coach_xxx` corresponds to, drop the mapping here. Anything in
+// this table wins over the automatic natural-key duplicate-pair heuristic.
+// Set values to a real `coaches[].id` string.
+// ---------------------------------------------------------------------------
+const OVERRIDES = {
+  // 'coach_46jay9nh': '22',
+  // 'coach_hxyoub2y': '17',
+};
+
 function isPrefixed(id) { return /^coach_[a-z0-9]+$/i.test(String(id || '')); }
 function isNumeric(id)  { return /^\d+$/.test(String(id || '')); }
 
@@ -137,6 +149,21 @@ for (const [k, v] of cooccurrenceRemap.entries()) {
   if (String(v).startsWith('AMBIGUOUS')) ambiguous.set(k, v);
   else cleanRemap.set(k, v);
 }
+
+// Pass 3: apply human overrides. These win over heuristic-derived mappings.
+let overrideCount = 0;
+for (const [prefixed, realId] of Object.entries(OVERRIDES)) {
+  if (!isPrefixed(prefixed)) continue;
+  const target = String(realId || '').trim();
+  if (!target || !coachIdSet.has(target)) {
+    console.warn(`OVERRIDES: '${prefixed}' -> '${realId}' is invalid (target coach does not exist in coaches[]).`);
+    continue;
+  }
+  cleanRemap.set(prefixed, target);
+  ambiguous.delete(prefixed);
+  overrideCount += 1;
+}
+if (overrideCount > 0) console.log(`Applied ${overrideCount} human overrides from OVERRIDES table.`);
 
 // Gather every prefixed reference across the DB
 const allPrefixedRefs = new Set();

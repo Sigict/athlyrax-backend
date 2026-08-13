@@ -3049,6 +3049,34 @@ function collectAttendanceLinkageViolations(dbShape) {
 }
 
 
+// ---------------------------------------------------------------------------
+// [TIMETABLE_LEGACY_LOCK_V1] Timetable legacy-shape lock.
+//
+// The canonical planning model is timetables[] (headers) + timetableSlots[]
+// (rows with timetableId back-reference). The legacy singular timetable[] is
+// kept only for reading old snapshots; every hydrated client migrates it into
+// the canonical pair on load. Once the migration has completed for a tenant
+// (__meta.timetableSlotsLegacyMigrationVersion >= 5), any subsequent PUT that
+// puts rows BACK into timetable[] is a regression and refused with 400.
+// ---------------------------------------------------------------------------
+
+const TIMETABLE_LEGACY_LOCK_MIN_VERSION = 5;
+
+function collectTimetableLegacyLockViolations(existingDbShape, incomingBody) {
+	const existingVersion = Number(existingDbShape?.__meta?.timetableSlotsLegacyMigrationVersion || 0);
+	if (!Number.isFinite(existingVersion) || existingVersion < TIMETABLE_LEGACY_LOCK_MIN_VERSION) return [];
+	const incomingTimetableRows = Array.isArray(incomingBody?.timetable) ? incomingBody.timetable : [];
+	if (incomingTimetableRows.length === 0) return [];
+	const incomingVersion = Number(incomingBody?.__meta?.timetableSlotsLegacyMigrationVersion || 0);
+	return [{
+		reason: 'timetable_legacy_shape_locked',
+		message: 'Tenant migration version is >= 5. Legacy timetable[] must be empty on write.',
+		existingMigrationVersion: existingVersion,
+		incomingMigrationVersion: incomingVersion,
+		incomingLegacyRowCount: incomingTimetableRows.length,
+	}];
+}
+
 function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 	const actorUsername = String(auth?.username || '').trim().toLowerCase() || 'unknown-actor';
 	const actorTenantId = String(resolveAuthTenantId(auth) || '').trim().toLowerCase();
@@ -6046,6 +6074,17 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 
 		const backupPayload = readJsonFile(storagePaths.backupPath);
 		const backupRows = Array.isArray(backupPayload?.rows) ? backupPayload.rows : [];
+
+		// [TIMETABLE_LEGACY_LOCK_V1] Refuse to accept rows in the legacy timetable[]
+		// collection once the tenant has been migrated to the canonical shape.
+		const timetableLegacyLockViolations = collectTimetableLegacyLockViolations(currentDb, body);
+		if (timetableLegacyLockViolations.length > 0) {
+			const err = new Error('Legacy timetable[] shape is locked for this tenant.');
+			err.status = 400;
+			err.body = { error: 'Legacy timetable[] shape is locked. Migrate to timetableSlots[] before writing.', violations: timetableLegacyLockViolations };
+			throw err;
+		}
+
 		const merged = mergePlannerTargets(body, backupRows);
 
 		// Tombstone merge: union of what's on disk with what the client sent.
@@ -6095,6 +6134,11 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 			});
 		})
 		.catch((error) => {
+			// [STRUCTURED_400_CATCH_V1] Structured client-facing errors surface with attached body.
+			if (error && error.status === 400 && error.body) {
+				res.status(400).json(error.body);
+				return;
+			}
 			res.status(500).json({
 				error: 'Could not write db.json',
 				details: error instanceof Error ? error.message : 'Unknown error',
