@@ -7,6 +7,7 @@ import {
   installExpressDbRevisionResponseGuard,
 } from './data-safety-preload.mjs';
 import { installDbRevisionPutResponse } from './db-revision-put-response.mjs';
+import { installDbDeletePersistenceGuard } from './db-delete-persistence-preload.mjs';
 import {
   applyCanonicalAuthPaths,
   resolveStorageConfiguration,
@@ -43,8 +44,6 @@ assertCanonicalPathContract({
   indexSource,
 });
 
-// Normal production startup is strictly read-only with respect to persistent
-// storage. It does not mkdir, probe-write, seed, restore, migrate or repair.
 for (const [directory, label] of [
   [configuration.storageRoot, 'Primary storage root'],
   [configuration.backupRoot, 'Safety backup root'],
@@ -86,5 +85,6 @@ globalThis[Symbol.for('athlyrax.safeStartEnforced')] = true;
 installDataSafetyGuards();
 installExpressDbRevisionResponseGuard(express);
 installDbRevisionPutResponse(express);
+installDbDeletePersistenceGuard(express);
 
 await import(pathToFileURL(entryPath).href);
