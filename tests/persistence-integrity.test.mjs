@@ -45,6 +45,31 @@ test('data safety layer blocks missing production db recreation and corrupt repl
   ]) assert.ok(source.includes(token), `missing data safety guard: ${token}`);
 });
 
+test('database write concurrency has one authority: exact storage revision', () => {
+  const indexSource = read('index.js');
+  const safetySource = read('scripts/data-safety-preload.mjs');
+
+  for (const forbidden of [
+    'const isStaleWrite =',
+    'staleWriteIgnored: true',
+    'getRevisionTime(payload)',
+    'ATHLYRAX_STALE_WRITE_TOLERANCE_MS',
+    "error.code = 'ATHLYRAX_STALE_DB_WRITE'",
+  ]) {
+    assert.ok(!indexSource.includes(forbidden), `index retains duplicate timestamp write authority: ${forbidden}`);
+    assert.ok(!safetySource.includes(forbidden), `data-safety retains duplicate timestamp write authority: ${forbidden}`);
+  }
+
+  for (const required of [
+    'const currentRevisionValue = getStorageRevision(current);',
+    'const exactRevisionMatch = currentRevisionValue !== null && incomingRevision === currentRevisionValue;',
+    "error.code = 'ATHLYRAX_DB_REVISION_CONFLICT'",
+    'writeRevisionToIncoming(source, incoming, currentRevision + 1, expectedTenantId, fsModule);',
+  ]) {
+    assert.ok(safetySource.includes(required), `missing exact revision concurrency guard: ${required}`);
+  }
+});
+
 test('persistence and durable-write patches are owned by the single verified build orchestrator', () => {
   const pkg = JSON.parse(read('package.json'));
   const postinstall = String(pkg?.scripts?.postinstall || '');
