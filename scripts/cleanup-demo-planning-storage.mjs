@@ -5,6 +5,15 @@ import crypto from 'node:crypto';
 const DEMO_TENANT_ID = 'demo-company';
 const TRAINING_MIRROR_CLEANUP_VERSION = 1;
 const TIMETABLE_LEGACY_CLEANUP_VERSION = 1;
+const TRAINING_MIRROR_IGNORED_FIELDS = new Set([
+  'createdAt',
+  'updatedAt',
+  'createdByUserId',
+  'updatedByUserId',
+  'tenantId',
+  'attributionStatus',
+  'squadNames',
+]);
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -26,7 +35,15 @@ function canonicalJson(value) {
   return JSON.stringify(canonicalize(value));
 }
 
-function rowsAreExactIdMirror(leftRows, rightRows) {
+function stripMirrorMetadata(row) {
+  const result = {};
+  for (const [key, value] of Object.entries(row || {})) {
+    if (!TRAINING_MIRROR_IGNORED_FIELDS.has(key)) result[key] = value;
+  }
+  return result;
+}
+
+function rowsAreSafeScheduleMirror(leftRows, rightRows) {
   const left = asArray(leftRows);
   const right = asArray(rightRows);
   if (left.length === 0 || left.length !== right.length) return false;
@@ -45,7 +62,7 @@ function rowsAreExactIdMirror(leftRows, rightRows) {
     if (!id || seen.has(id)) return false;
     seen.add(id);
     const other = rightById.get(id);
-    if (!other || canonicalJson(row) !== canonicalJson(other)) return false;
+    if (!other || canonicalJson(stripMirrorMetadata(row)) !== canonicalJson(stripMirrorMetadata(other))) return false;
   }
   return seen.size === left.length;
 }
@@ -111,13 +128,13 @@ export function cleanupDemoPlanningStorage({ storageRoot, backupRoot, fsModule =
     if (legacy.length === 0) {
       next.__meta.demoTrainingSchedulesMirrorCleanupVersion = TRAINING_MIRROR_CLEANUP_VERSION;
       changed = true;
-    } else if (rowsAreExactIdMirror(schedule, legacy)) {
+    } else if (rowsAreSafeScheduleMirror(schedule, legacy)) {
       clearedTrainingSchedules = legacy.length;
       next.trainingSchedules = [];
       next.__meta.demoTrainingSchedulesMirrorCleanupVersion = TRAINING_MIRROR_CLEANUP_VERSION;
       changed = true;
     } else {
-      logger.warn('[planning-cleanup] trainingSchedules is not an exact schedule mirror; leaving it untouched.');
+      logger.warn('[planning-cleanup] trainingSchedules differs from canonical schedule in protected business fields; leaving it untouched.');
     }
   }
 

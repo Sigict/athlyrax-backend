@@ -18,7 +18,7 @@ function writeDb(dbPath, payload) {
   fs.writeFileSync(dbPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
-test('clears only exact trainingSchedules mirror and verified v5 timetable legacy rows', () => {
+test('clears verified trainingSchedules mirror and verified v5 timetable legacy rows', () => {
   const layout = tempLayout();
   const schedule = [
     { id: 'a', date: '2026-08-01', squadIds: ['s1'] },
@@ -56,7 +56,31 @@ test('clears only exact trainingSchedules mirror and verified v5 timetable legac
   assert.equal(rerun.changed, false);
 });
 
-test('refuses non-identical trainingSchedules and pre-v5 timetable cleanup', () => {
+test('clears a schedule mirror when differences are limited to audit/enrichment fields', () => {
+  const layout = tempLayout();
+  writeDb(layout.dbPath, {
+    __meta: { tenantId: 'demo-company', storageRevision: 9 },
+    schedule: [{
+      id: 'a', date: '2026-08-01', squadIds: ['s1'], squadNames: ['Performance'],
+      attributionStatus: 'canonical', tenantId: 'demo-company', createdAt: 'new', updatedAt: 'new',
+      createdByUserId: 'u1', updatedByUserId: 'u1',
+    }],
+    trainingSchedules: [{
+      id: 'a', date: '2026-08-01', squadIds: ['s1'], squadNames: [],
+      attributionStatus: 'legacy', tenantId: '', createdAt: 'old', updatedAt: 'old',
+      createdByUserId: '', updatedByUserId: '',
+    }],
+  });
+
+  const result = cleanupDemoPlanningStorage({ ...layout, logger: { warn() {} } });
+  assert.equal(result.changed, true);
+  assert.equal(result.clearedTrainingSchedules, 1);
+  const written = JSON.parse(fs.readFileSync(layout.dbPath, 'utf8'));
+  assert.equal(written.trainingSchedules.length, 0);
+  assert.equal(written.schedule.length, 1);
+});
+
+test('refuses protected business-field differences and pre-v5 timetable cleanup', () => {
   const layout = tempLayout();
   writeDb(layout.dbPath, {
     __meta: { tenantId: 'demo-company', storageRevision: 3 },
