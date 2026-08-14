@@ -52,13 +52,14 @@ test('database write concurrency has one authority: exact storage revision', () 
   for (const forbidden of [
     'const isStaleWrite =',
     'staleWriteIgnored: true',
-    'getRevisionTime(payload)',
     'ATHLYRAX_STALE_WRITE_TOLERANCE_MS',
     "error.code = 'ATHLYRAX_STALE_DB_WRITE'",
   ]) {
     assert.ok(!indexSource.includes(forbidden), `index retains duplicate timestamp write authority: ${forbidden}`);
     assert.ok(!safetySource.includes(forbidden), `data-safety retains duplicate timestamp write authority: ${forbidden}`);
   }
+
+  assert.ok(safetySource.includes('function getRevisionTime(payload)'), 'timestamp metadata helper may remain for audit/recovery use');
 
   for (const required of [
     'const currentRevisionValue = getStorageRevision(current);',
