@@ -44,62 +44,32 @@ jobs:
           const headers = fs.readFileSync(headersPath, 'utf8');
           const arr = (key) => Array.isArray(db?.[key]) ? db[key] : [];
           const text = (value) => String(value ?? '').trim();
-          const ids = (row) => Array.from(new Set([...(Array.isArray(row?.squadIds) ? row.squadIds : []), row?.squadId].map(text).filter(Boolean))).sort();
-          const day = (row) => text(row?.dayLabel || row?.day || row?.weekday || row?.weekdayNum || row?.weekdayNumber || row?.dayNumber);
-          const sessionShaped = (row) => Boolean(row && typeof row === 'object' && day(row) && text(row?.startTime) && text(row?.endTime) && ids(row).length > 0);
-          const slotKey = (row) => [day(row).toLowerCase(), text(row?.startTime), text(row?.endTime), ids(row).join(','), text(row?.venueId).toLowerCase(), text(row?.sessionTypeId || row?.type).toLowerCase()].join('|');
-          const idSet = (rows) => new Set(rows.map((row) => text(row?.id)).filter(Boolean));
-          const overlapCount = (left, right) => {
-            const rhs = idSet(right);
-            return [...idSet(left)].filter((id) => rhs.has(id)).length;
-          };
-          const timetables = arr('timetables');
-          const timetable = arr('timetable');
-          const timetableSlots = arr('timetableSlots');
-          const embedded = timetables.filter(sessionShaped);
-          const legacy = timetable.filter(sessionShaped);
-          const unionKeys = new Set([...embedded, ...legacy].map(slotKey));
-          const embeddedKeys = new Set(embedded.map(slotKey));
-          const legacyKeys = new Set(legacy.map(slotKey));
-          const keyOverlap = [...legacyKeys].filter((key) => embeddedKeys.has(key)).length;
-          const schedule = arr('schedule');
-          const trainingSchedules = arr('trainingSchedules');
-          const trainingSessions = arr('trainingSessions');
+          const fixtures = arr('fixtures');
+          const plannerWeeks = arr('trainingPlannerWeeks');
           const report = {
             tenantId: text(db?.__meta?.tenantId),
             storageRevision: db?.__meta?.storageRevision ?? null,
-            timetableSlotsLegacyMigrationVersion: db?.__meta?.timetableSlotsLegacyMigrationVersion ?? null,
             counts: {
-              timetable: timetable.length,
-              timetables: timetables.length,
-              timetableSlots: timetableSlots.length,
-              schedule: schedule.length,
-              trainingSchedules: trainingSchedules.length,
-              trainingSessions: trainingSessions.length,
-              trainingSessionSets: arr('trainingSessionSets').length,
+              fixtures: fixtures.length,
+              mainEventFixtures: fixtures.filter((row) => row?.isMainEvent === true).length,
+              plannerWeeks: plannerWeeks.length,
+              plannerWeeksWithPrimaryTarget: plannerWeeks.filter((row) => text(row?.primaryTargetCompetitionKey)).length,
               attendance: arr('attendance').length,
-              fixtures: arr('fixtures').length,
+              trainingSessionSets: arr('trainingSessionSets').length,
             },
-            timetableShape: {
-              sessionShapedInTimetables: embedded.length,
-              headerShapedInTimetables: timetables.filter((row) => !sessionShaped(row)).length,
-              sessionShapedInLegacyTimetable: legacy.length,
-              sessionShapedInTimetableSlots: timetableSlots.filter(sessionShaped).length,
-              uniqueEmbeddedSessionKeys: embeddedKeys.size,
-              uniqueLegacySessionKeys: legacyKeys.size,
-              overlappingLegacyEmbeddedKeys: keyOverlap,
-              uniqueUnionSessionKeys: unionKeys.size,
-            },
-            identityOverlap: {
-              scheduleVsTrainingSchedules: overlapCount(schedule, trainingSchedules),
-              scheduleVsTrainingSessions: overlapCount(schedule, trainingSessions),
-              trainingSchedulesVsTrainingSessions: overlapCount(trainingSchedules, trainingSessions),
-            },
+            recentMainEvents: fixtures
+              .filter((row) => row?.isMainEvent === true)
+              .slice(-10)
+              .map((row) => ({ id: text(row?.id), name: text(row?.name || row?.title), startDate: text(row?.startDate || row?.date) })),
+            recentPlannerTargets: plannerWeeks
+              .filter((row) => text(row?.primaryTargetCompetitionKey))
+              .slice(-10)
+              .map((row) => ({ squadId: text(row?.squadId), weekStart: text(row?.weekStart), fixtureId: text(row?.primaryTargetCompetitionFixtureId), name: text(row?.primaryTargetCompetitionName) })),
             responseHeaders: {
               revision: (headers.match(/^X-AthlyraX-DB-Revision:\s*([^\r\n]+)/im) || [])[1] || null,
               backendCommit: (headers.match(/^X-AthlyraX-Backend-Commit:\s*([^\r\n]+)/im) || [])[1] || null,
               persistenceGuard: (headers.match(/^X-AthlyraX-DB-Persistence-Guard:\s*([^\r\n]+)/im) || [])[1] || null,
             },
           };
-          console.log('LIVE_DEMO_DB_SHAPE=' + JSON.stringify(report));
+          console.log('LIVE_DEMO_TARGET_STATE=' + JSON.stringify(report));
           NODE
