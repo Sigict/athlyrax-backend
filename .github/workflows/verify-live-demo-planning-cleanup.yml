@@ -17,52 +17,78 @@ jobs:
       DEMO_USERNAME: demo.coach
       DEMO_PASSWORD: DemoCoach123!
     steps:
-      - name: Inspect live demo DB differences
+      - name: Prove timetable consolidation mapping
         run: |
           set -euo pipefail
-          jar="$(mktemp)"; login="$(mktemp)"; dbfile="$(mktemp)"; headers="$(mktemp)"
-          trap 'rm -f "${jar}" "${login}" "${dbfile}" "${headers}"' EXIT
+          jar="$(mktemp)"; login="$(mktemp)"; dbfile="$(mktemp)"
+          trap 'rm -f "${jar}" "${login}" "${dbfile}"' EXIT
           login_code="$(curl --silent --show-error --location --cookie-jar "${jar}" --header 'Content-Type: application/json' --data "{\"username\":\"${DEMO_USERNAME}\",\"password\":\"${DEMO_PASSWORD}\"}" --output "${login}" --write-out '%{http_code}' "${BACKEND_URL}/auth/login")"
           test "${login_code}" = "200"
-          curl --fail --silent --show-error --location --cookie "${jar}" --dump-header "${headers}" --output "${dbfile}" "${BACKEND_URL}/db?cleanup_inspect=$(date +%s%N)"
+          curl --fail --silent --show-error --location --cookie "${jar}" --output "${dbfile}" "${BACKEND_URL}/db?timetable_mapping=$(date +%s%N)"
           node --input-type=module - "${dbfile}" <<'NODE'
           import fs from 'node:fs';
           const db = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           const arr = (v) => Array.isArray(v) ? v : [];
           const text = (v) => String(v ?? '').trim();
-          const canon = (v) => Array.isArray(v) ? v.map(canon) : (v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v);
-          const eq = (a,b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
-          const schedule = arr(db.schedule);
-          const legacy = arr(db.trainingSchedules);
-          const byId = new Map(legacy.map(r => [text(r?.id), r]));
-          const diffKeyCounts = new Map();
-          let strippedMismatch = 0;
-          const ignore = new Set(['createdAt','updatedAt','createdByUserId','updatedByUserId','tenantId','storageUpdatedAt','attributionStatus','squadNames']);
-          for (const row of schedule) {
-            const other = byId.get(text(row?.id));
-            if (!other) continue;
-            const keys = new Set([...Object.keys(row||{}), ...Object.keys(other||{})]);
-            for (const key of keys) if (!eq(row?.[key], other?.[key])) diffKeyCounts.set(key, (diffKeyCounts.get(key)||0)+1);
-            const strip = (r) => Object.fromEntries(Object.entries(r||{}).filter(([k]) => !ignore.has(k)));
-            if (!eq(strip(row), strip(other))) strippedMismatch += 1;
+          const ids = (r, plural, singular) => [...new Set([...arr(r?.[plural]), r?.[singular]].map(text).filter(Boolean))].sort();
+          const squads = (r) => ids(r, 'squadIds', 'squadId');
+          const coaches = (r) => ids(r, 'coachIds', 'coachId');
+          const weekday = (r) => {
+            const n = Number(r?.weekdayNum ?? r?.weekdayNumber ?? r?.dayNumber);
+            if (Number.isInteger(n) && n >= 1 && n <= 7) return String(n);
+            return text(r?.dayLabel || r?.day || r?.weekday).toLowerCase();
+          };
+          const subsetCompatible = (a,b) => {
+            if (!a.length || !b.length) return true;
+            const A=new Set(a), B=new Set(b);
+            return a.every(x=>B.has(x)) || b.every(x=>A.has(x));
+          };
+          const scalarCompatible=(a,b)=>!text(a)||!text(b)||text(a)===text(b);
+          const templateCompatible=(a,b)=>!text(a)||!text(b)||text(a).toLowerCase()===text(b).toLowerCase();
+          const compatible=(a,b)=> weekday(a)===weekday(b)
+            && text(a?.startTime)===text(b?.startTime)
+            && text(a?.endTime)===text(b?.endTime)
+            && templateCompatible(a?.templateName || a?.timetableName, b?.templateName || b?.timetableName)
+            && subsetCompatible(squads(a),squads(b))
+            && scalarCompatible(a?.venueId || a?.venue,b?.venueId || b?.venue)
+            && scalarCompatible(a?.sessionTypeId || a?.trainingTypeId || a?.sessionType || a?.type,b?.sessionTypeId || b?.trainingTypeId || b?.sessionType || b?.type);
+
+          const legacy=arr(db.timetable);
+          const allTables=arr(db.timetables);
+          const embedded=allTables.filter(r=>Number.isInteger(Number(r?.weekdayNum))&&text(r?.startTime)&&text(r?.endTime)&&squads(r).length>0);
+          const headers=allTables.filter(r=>!embedded.includes(r));
+          let unmatched=0, ambiguous=0;
+          const coverage=new Set();
+          let coachMergeAdds=0, squadMergeAdds=0;
+          for(const row of embedded){
+            const matches=legacy.map((base,i)=>({base,i})).filter(x=>compatible(x.base,row));
+            if(matches.length===0){unmatched+=1;continue;}
+            if(matches.length>1){ambiguous+=1;continue;}
+            const {base,i}=matches[0]; coverage.add(i);
+            const baseCoaches=new Set(coaches(base)); for(const c of coaches(row)) if(!baseCoaches.has(c)) coachMergeAdds+=1;
+            const baseSquads=new Set(squads(base)); for(const s of squads(row)) if(!baseSquads.has(s)) squadMergeAdds+=1;
           }
-          const tableRows = arr(db.timetables);
-          const sessionRows = tableRows.filter((r) => Number.isInteger(Number(r?.weekdayNum)) && text(r?.startTime) && text(r?.endTime) && arr(r?.squadIds).length > 0);
-          const headers = tableRows.filter((r) => !(Number.isInteger(Number(r?.weekdayNum)) && text(r?.startTime) && text(r?.endTime) && arr(r?.squadIds).length > 0));
-          console.log(JSON.stringify({
-            storageRevision: Number(db?.__meta?.storageRevision || 0),
-            cleanupAt: text(db?.__meta?.demoPlanningStorageCleanupAt),
-            schedule: schedule.length,
-            trainingSchedules: legacy.length,
-            diffKeyCounts: Object.fromEntries([...diffKeyCounts.entries()].sort((a,b)=>b[1]-a[1])),
-            mismatchAfterIgnoringApprovedFields: strippedMismatch,
-            timetable: arr(db.timetable).length,
-            timetablesSessionRows: sessionRows.length,
-            timetablesHeaders: headers.length,
-            timetableSlots: arr(db.timetableSlots).length,
-            timetableMigrationVersion: Number(db?.__meta?.timetableSlotsLegacyMigrationVersion || 0),
-          }, null, 2));
-          if (legacy.length !== 0) throw new Error(`trainingSchedules still contains ${legacy.length} rows.`);
-          if (!text(db?.__meta?.demoPlanningStorageCleanupAt)) throw new Error('Demo planning cleanup timestamp is missing.');
-          console.log('LIVE_TRAINING_SCHEDULE_MIRROR_CLEANUP_OK');
+          const templateCounts={}; for(const r of [...legacy,...embedded]){const k=text(r?.templateName||r?.timetableName||'(blank)');templateCounts[k]=(templateCounts[k]||0)+1;}
+          const report={
+            storageRevision:Number(db?.__meta?.storageRevision||0),
+            trainingSchedules:arr(db.trainingSchedules).length,
+            legacyTimetableRows:legacy.length,
+            embeddedTimetableRows:embedded.length,
+            timetableHeaders:headers.map(h=>({id:text(h?.id),name:text(h?.name)})),
+            timetableSlots:arr(db.timetableSlots).length,
+            migrationVersion:Number(db?.__meta?.timetableSlotsLegacyMigrationVersion||0),
+            embeddedUnmatched:unmatched,
+            embeddedAmbiguous:ambiguous,
+            legacyRowsCoveredByEmbedded:coverage.size,
+            legacyRowsWithoutEmbedded:legacy.length-coverage.size,
+            additionalCoachAssignmentsToMerge:coachMergeAdds,
+            additionalSquadAssignmentsToMerge:squadMergeAdds,
+            templateCounts,
+          };
+          console.log(JSON.stringify(report,null,2));
+          if(arr(db.trainingSchedules).length!==0) throw new Error('Schedule mirror cleanup is not complete.');
+          if(legacy.length!==67) throw new Error(`Expected 67 legacy timetable rows, got ${legacy.length}.`);
+          if(unmatched!==0||ambiguous!==0) throw new Error(`Unsafe timetable mapping: unmatched=${unmatched}, ambiguous=${ambiguous}`);
+          if(coverage.size!==legacy.length) throw new Error(`Not every legacy timetable row is represented by embedded rows: ${coverage.size}/${legacy.length}`);
+          console.log('LIVE_TIMETABLE_CONSOLIDATION_MAPPING_OK');
           NODE
