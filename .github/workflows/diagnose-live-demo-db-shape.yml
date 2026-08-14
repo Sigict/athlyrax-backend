@@ -44,17 +44,27 @@ jobs:
           const headers = fs.readFileSync(headersPath, 'utf8');
           const arr = (key) => Array.isArray(db?.[key]) ? db[key] : [];
           const text = (value) => String(value ?? '').trim();
-          const ids = (row) => Array.from(new Set([...(Array.isArray(row?.squadIds) ? row.squadIds : []), row?.squadId].map(text).filter(Boolean)));
-          const sessionShaped = (row) => Boolean(
-            row && typeof row === 'object'
-            && (text(row?.dayLabel || row?.day || row?.weekday) || Number.isFinite(Number(row?.weekdayNum ?? row?.weekdayNumber ?? row?.dayNumber)))
-            && text(row?.startTime)
-            && text(row?.endTime)
-            && ids(row).length > 0
-          );
+          const ids = (row) => Array.from(new Set([...(Array.isArray(row?.squadIds) ? row.squadIds : []), row?.squadId].map(text).filter(Boolean))).sort();
+          const day = (row) => text(row?.dayLabel || row?.day || row?.weekday || row?.weekdayNum || row?.weekdayNumber || row?.dayNumber);
+          const sessionShaped = (row) => Boolean(row && typeof row === 'object' && day(row) && text(row?.startTime) && text(row?.endTime) && ids(row).length > 0);
+          const slotKey = (row) => [day(row).toLowerCase(), text(row?.startTime), text(row?.endTime), ids(row).join(','), text(row?.venueId).toLowerCase(), text(row?.sessionTypeId || row?.type).toLowerCase()].join('|');
+          const idSet = (rows) => new Set(rows.map((row) => text(row?.id)).filter(Boolean));
+          const overlapCount = (left, right) => {
+            const rhs = idSet(right);
+            return [...idSet(left)].filter((id) => rhs.has(id)).length;
+          };
           const timetables = arr('timetables');
           const timetable = arr('timetable');
           const timetableSlots = arr('timetableSlots');
+          const embedded = timetables.filter(sessionShaped);
+          const legacy = timetable.filter(sessionShaped);
+          const unionKeys = new Set([...embedded, ...legacy].map(slotKey));
+          const embeddedKeys = new Set(embedded.map(slotKey));
+          const legacyKeys = new Set(legacy.map(slotKey));
+          const keyOverlap = [...legacyKeys].filter((key) => embeddedKeys.has(key)).length;
+          const schedule = arr('schedule');
+          const trainingSchedules = arr('trainingSchedules');
+          const trainingSessions = arr('trainingSessions');
           const report = {
             tenantId: text(db?.__meta?.tenantId),
             storageRevision: db?.__meta?.storageRevision ?? null,
@@ -63,18 +73,27 @@ jobs:
               timetable: timetable.length,
               timetables: timetables.length,
               timetableSlots: timetableSlots.length,
-              schedule: arr('schedule').length,
-              trainingSchedules: arr('trainingSchedules').length,
-              trainingSessions: arr('trainingSessions').length,
+              schedule: schedule.length,
+              trainingSchedules: trainingSchedules.length,
+              trainingSessions: trainingSessions.length,
               trainingSessionSets: arr('trainingSessionSets').length,
               attendance: arr('attendance').length,
               fixtures: arr('fixtures').length,
             },
             timetableShape: {
-              sessionShapedInTimetables: timetables.filter(sessionShaped).length,
+              sessionShapedInTimetables: embedded.length,
               headerShapedInTimetables: timetables.filter((row) => !sessionShaped(row)).length,
-              sessionShapedInLegacyTimetable: timetable.filter(sessionShaped).length,
+              sessionShapedInLegacyTimetable: legacy.length,
               sessionShapedInTimetableSlots: timetableSlots.filter(sessionShaped).length,
+              uniqueEmbeddedSessionKeys: embeddedKeys.size,
+              uniqueLegacySessionKeys: legacyKeys.size,
+              overlappingLegacyEmbeddedKeys: keyOverlap,
+              uniqueUnionSessionKeys: unionKeys.size,
+            },
+            identityOverlap: {
+              scheduleVsTrainingSchedules: overlapCount(schedule, trainingSchedules),
+              scheduleVsTrainingSessions: overlapCount(schedule, trainingSessions),
+              trainingSchedulesVsTrainingSessions: overlapCount(trainingSchedules, trainingSessions),
             },
             responseHeaders: {
               revision: (headers.match(/^X-AthlyraX-DB-Revision:\s*([^\r\n]+)/im) || [])[1] || null,
