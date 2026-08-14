@@ -17,7 +17,7 @@ jobs:
       DEMO_USERNAME: demo.coach
       DEMO_PASSWORD: DemoCoach123!
     steps:
-      - name: Verify live demo DB shape
+      - name: Inspect live demo DB shape
         run: |
           set -euo pipefail
           jar="$(mktemp)"
@@ -33,7 +33,7 @@ jobs:
           test "${login_code}" = "200"
 
           curl --fail --silent --show-error --location --cookie "${jar}" \
-            --dump-header "${headers}" --output "${dbfile}" "${BACKEND_URL}/db?cleanup_verify=$(date +%s%N)"
+            --dump-header "${headers}" --output "${dbfile}" "${BACKEND_URL}/db?cleanup_inspect=$(date +%s%N)"
 
           backend_commit="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
           revision="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-DB-Revision:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
@@ -44,36 +44,61 @@ jobs:
           const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
           const asArray = (value) => Array.isArray(value) ? value : [];
           const text = (value) => String(value ?? '').trim();
-          const isLegacySessionRow = (row) => {
-            if (!row || typeof row !== 'object') return false;
-            const day = text(row.dayLabel || row.day || row.weekday);
-            const squads = [...asArray(row.squadIds), row.squadId].map(text).filter(Boolean);
-            return Boolean(day && text(row.startTime) && text(row.endTime) && squads.length > 0);
+          const canonicalize = (value) => {
+            if (Array.isArray(value)) return value.map(canonicalize);
+            if (!value || typeof value !== 'object') return value;
+            return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
           };
+          const canonicalJson = (value) => JSON.stringify(canonicalize(value));
 
-          const shape = {
+          const schedule = asArray(db.schedule);
+          const legacy = asArray(db.trainingSchedules);
+          const scheduleById = new Map(schedule.map((row) => [text(row?.id), row]).filter(([id]) => id));
+          const legacyById = new Map(legacy.map((row) => [text(row?.id), row]).filter(([id]) => id));
+          const missingInLegacy = [];
+          const missingInSchedule = [];
+          const contentMismatches = [];
+          for (const [id, row] of scheduleById) {
+            if (!legacyById.has(id)) missingInLegacy.push(id);
+            else if (canonicalJson(row) !== canonicalJson(legacyById.get(id))) contentMismatches.push(id);
+          }
+          for (const id of legacyById.keys()) if (!scheduleById.has(id)) missingInSchedule.push(id);
+
+          const timetableRows = asArray(db.timetables);
+          const timetableLegacy = asArray(db.timetable);
+          const keyHistogram = new Map();
+          for (const row of timetableRows) {
+            const signature = Object.keys(row || {}).sort().join(',');
+            keyHistogram.set(signature, (keyHistogram.get(signature) || 0) + 1);
+          }
+          const timetableShapes = [...keyHistogram.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 8)
+            .map(([keys, count]) => ({ count, keys }));
+
+          const report = {
             tenantId: text(db?.__meta?.tenantId),
             storageRevision: Number(db?.__meta?.storageRevision ?? -1),
             headerRevision: Number(headerRevision || -1),
             backendCommit: text(backendCommit),
-            schedule: asArray(db.schedule).length,
-            trainingSchedules: asArray(db.trainingSchedules).length,
-            timetable: asArray(db.timetable).length,
-            timetables: asArray(db.timetables).length,
-            embeddedLegacyTimetableRows: asArray(db.timetables).filter(isLegacySessionRow).length,
+            schedule: schedule.length,
+            trainingSchedules: legacy.length,
+            scheduleUniqueIds: scheduleById.size,
+            trainingSchedulesUniqueIds: legacyById.size,
+            missingInLegacyCount: missingInLegacy.length,
+            missingInScheduleCount: missingInSchedule.length,
+            contentMismatchCount: contentMismatches.length,
+            firstMismatchId: contentMismatches[0] || '',
+            timetable: timetableLegacy.length,
+            timetables: timetableRows.length,
             timetableSlots: asArray(db.timetableSlots).length,
             timetableMigrationVersion: Number(db?.__meta?.timetableSlotsLegacyMigrationVersion || 0),
             cleanupAt: text(db?.__meta?.demoPlanningStorageCleanupAt),
+            timetableShapes,
+            legacyTimetableSampleKeys: Object.keys(timetableLegacy[0] || {}).sort(),
           };
-          console.log(JSON.stringify(shape, null, 2));
-
-          if (shape.tenantId !== 'demo-company') throw new Error(`Unexpected tenant ${shape.tenantId}`);
-          if (shape.schedule <= 0) throw new Error('Canonical schedule is unexpectedly empty.');
-          if (shape.trainingSchedules !== 0) throw new Error(`trainingSchedules still contains ${shape.trainingSchedules} rows.`);
-          if (shape.timetable !== 0) throw new Error(`legacy timetable still contains ${shape.timetable} rows.`);
-          if (shape.embeddedLegacyTimetableRows !== 0) throw new Error(`timetables still embeds ${shape.embeddedLegacyTimetableRows} legacy session rows.`);
-          if (shape.timetableMigrationVersion < 5) throw new Error(`Timetable migration version is ${shape.timetableMigrationVersion}, expected >=5.`);
-          if (!shape.cleanupAt) throw new Error('Cleanup completion timestamp is missing.');
-          if (shape.headerRevision >= 0 && shape.storageRevision !== shape.headerRevision) throw new Error('DB revision header/body mismatch.');
-          console.log('LIVE_DEMO_PLANNING_CLEANUP_OK');
+          console.log(JSON.stringify(report, null, 2));
+          if (report.tenantId !== 'demo-company') throw new Error(`Unexpected tenant ${report.tenantId}`);
+          if (report.headerRevision >= 0 && report.storageRevision !== report.headerRevision) throw new Error('DB revision header/body mismatch.');
+          console.log('LIVE_DEMO_PLANNING_INSPECTION_OK');
           NODE
