@@ -2,25 +2,50 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const indexPath = path.resolve('index.js');
+const safetyPath = path.resolve('scripts/data-safety-preload.mjs');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
+let safetySource = fs.readFileSync(safetyPath, 'utf8').replace(/\r\n/g, '\n');
 
-const oldBlock = `\t\tif (isStaleWrite) {\n\t\t\treturn {\n\t\t\t\trecoveredTargets: 0,\n\t\t\t\trecoveredFixtureIds: 0,\n\t\t\t\tstaleWriteIgnored: true,\n\t\t\t};\n\t\t}`;
-const newBlock = `\t\tif (isStaleWrite) {\n\t\t\tconst authoritativeRevision = Number.parseInt(String(currentDb?.__meta?.storageRevision ?? '0'), 10);\n\t\t\treturn {\n\t\t\t\trecoveredTargets: 0,\n\t\t\t\trecoveredFixtureIds: 0,\n\t\t\t\tstaleWriteIgnored: true,\n\t\t\t\tstorageRevision: Number.isFinite(authoritativeRevision) && authoritativeRevision >= 0 ? authoritativeRevision : 0,\n\t\t\t};\n\t\t}`;
-if (!source.includes(newBlock)) {
-  if (!source.includes(oldBlock)) throw new Error('Stale-write response anchor was not found.');
-  source = source.replace(oldBlock, newBlock);
+// One concurrency authority only: storageRevision.
+// Timestamp metadata remains available for audit/recovery helpers, but it must
+// never decide whether a current client is allowed to persist a database write.
+// Genuine stale tabs are rejected by exact storageRevision mismatch.
+const legacyIndexStaleBlock = /\n\t\tconst currentUpdatedAtMs = getDbShapeUpdatedAtMs\(currentDb\);\n\t\tconst incomingUpdatedAtMs = getDbShapeUpdatedAtMs\(body\);\n\t\tconst isStaleWrite = Number\.isFinite\(currentUpdatedAtMs\)\n\t\t\t&& Number\.isFinite\(incomingUpdatedAtMs\)\n\t\t\t&& incomingUpdatedAtMs \+ 1000 < currentUpdatedAtMs;\n\t\tif \(isStaleWrite\) \{\n\t\t\treturn \{\n\t\t\t\trecoveredTargets: 0,\n\t\t\t\trecoveredFixtureIds: 0,\n\t\t\t\tstaleWriteIgnored: true,\n(?:\t\t\t\tstorageRevision: Number\.isFinite\(authoritativeRevision\) && authoritativeRevision >= 0 \? authoritativeRevision : 0,\n)?\t\t\t\};\n\t\t\}\n/;
+source = source.replace(legacyIndexStaleBlock, '\n');
+
+source = source.replace(/\n\t\t\t\tstaleWriteIgnored: result\.staleWriteIgnored === true,/g, '');
+source = source.replace(/\n\t\t\tstaleWriteIgnored: false,/g, '');
+
+safetySource = safetySource.replace(
+  /\n\s*const staleToleranceMs = Math\.max\(0, Number\.parseInt\(String\(env\.ATHLYRAX_STALE_WRITE_TOLERANCE_MS \|\| '1000'\), 10\) \|\| 1000\);/,
+  '',
+);
+safetySource = safetySource.replace(
+  /\n\s*const currentTime = getRevisionTime\(current\);\n\s*const incomingTime = getRevisionTime\(incoming\);\n\s*if \(Number\.isFinite\(currentTime\) && Number\.isFinite\(incomingTime\) && incomingTime \+ staleToleranceMs < currentTime\) \{\n\s*const error = new Error\('Refusing stale database replacement\.'\);\n\s*error\.code = 'ATHLYRAX_STALE_DB_WRITE';\n\s*throw error;\n\s*\}/,
+  '',
+);
+
+for (const forbidden of [
+  'const isStaleWrite =',
+  'staleWriteIgnored: true',
+  'ATHLYRAX_STALE_WRITE_TOLERANCE_MS',
+  "error.code = 'ATHLYRAX_STALE_DB_WRITE'",
+]) {
+  if (source.includes(forbidden) || safetySource.includes(forbidden)) {
+    throw new Error(`Timestamp-based persistence authority still present: ${forbidden}`);
+  }
 }
 
-const oldResponse = `\t\t\t\tplannerBackupSaved: result.plannerBackupSaved !== false,\n\t\t\t});`;
-const newResponse = `\t\t\t\tplannerBackupSaved: result.plannerBackupSaved !== false,\n\t\t\t\t...(Number.isFinite(Number(result.storageRevision)) ? { storageRevision: Number(result.storageRevision) } : {}),\n\t\t\t});`;
-if (!source.includes(newResponse)) {
-  if (!source.includes(oldResponse)) throw new Error('PUT /db response revision anchor was not found.');
-  source = source.replace(oldResponse, newResponse);
-}
-
-for (const token of ['authoritativeRevision', 'storageRevision: Number.isFinite(authoritativeRevision)', 'Number.isFinite(Number(result.storageRevision))']) {
-  if (!source.includes(token)) throw new Error(`Revision integrity verification failed: ${token}`);
+for (const required of [
+  'function getRevisionTime(payload)',
+  'const currentRevisionValue = getStorageRevision(current);',
+  'const exactRevisionMatch = currentRevisionValue !== null && incomingRevision === currentRevisionValue;',
+  "error.code = 'ATHLYRAX_DB_REVISION_CONFLICT'",
+  'writeRevisionToIncoming(source, incoming, currentRevision + 1, expectedTenantId, fsModule);',
+]) {
+  if (!safetySource.includes(required)) throw new Error(`Revision authority missing: ${required}`);
 }
 
 fs.writeFileSync(indexPath, source, 'utf8');
+fs.writeFileSync(safetyPath, safetySource, 'utf8');
 console.log('REVISION_INTEGRITY_PATCH_OK');
