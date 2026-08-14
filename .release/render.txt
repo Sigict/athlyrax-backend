@@ -1,0 +1,3 @@
+AthlyraX backend production release trigger
+Expected backend commit ancestry: fda1d2c9a6de714c5a7b4bfe886210b1c8b7f143
+Reason: production is still serving 398cbede7bd9ff2687f180122a5f82b6aa5db16b and valid UI changes are reverting after reload.
