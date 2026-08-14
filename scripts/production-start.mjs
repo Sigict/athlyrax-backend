@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveStorageConfiguration } from './storage-safety-lib.mjs';
 import { canonicalStoragePaths, restoreBundledDemoTenantIfNeeded } from './storage-path-contract.mjs';
 import { readActiveMigrationTransaction } from './migration-transaction-state.mjs';
+import { cleanupDemoPlanningStorage } from './cleanup-demo-planning-storage.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
 const READY_MARKER_APPROVAL = 'CREATE_READY_MARKER';
@@ -102,6 +103,24 @@ const demoRecovery = restoreBundledDemoTenantIfNeeded({
 });
 if (demoRecovery.restored) {
   console.log(`[storage] Verified synthetic demo tenant recovery completed (${demoRecovery.bytes} bytes).`);
+}
+
+// The only automatic planning-storage cleanup is restricted to demo-company,
+// which is synthetic product-demo data. It refuses to touch a mirrored schedule
+// unless schedule/trainingSchedules are exact id-for-id content mirrors, and it
+// only removes legacy timetable copies after canonical timetable migration v5 is
+// already confirmed. Every mutation takes and verifies an independent backup.
+const demoPlanningCleanup = cleanupDemoPlanningStorage({
+  storageRoot: runtimeConfiguration.storageRoot,
+  backupRoot: runtimeConfiguration.backupRoot,
+  logger: console,
+});
+if (demoPlanningCleanup.changed) {
+  console.log(
+    `[planning-cleanup] demo-company cleaned: trainingSchedules=${demoPlanningCleanup.clearedTrainingSchedules}, `
+    + `timetable=${demoPlanningCleanup.clearedLegacyTimetableRows}, embeddedTimetable=${demoPlanningCleanup.clearedEmbeddedTimetableRows}, `
+    + `revision=${demoPlanningCleanup.storageRevision}`,
+  );
 }
 
 // Older live instances created a storage-ready marker with the previous marker
