@@ -7,21 +7,15 @@ let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 let safetySource = fs.readFileSync(safetyPath, 'utf8').replace(/\r\n/g, '\n');
 
 // One concurrency authority only: storageRevision.
-// Timestamp-based stale checks duplicated the revision handshake and could reject
-// a perfectly current client simply because it carried the previous server-side
-// storageUpdatedAt timestamp. Genuine stale tabs are still rejected by exact
-// storageRevision mismatch in the data-safety guard.
+// Timestamp metadata remains available for audit/recovery helpers, but it must
+// never decide whether a current client is allowed to persist a database write.
+// Genuine stale tabs are rejected by exact storageRevision mismatch.
 const legacyIndexStaleBlock = /\n\t\tconst currentUpdatedAtMs = getDbShapeUpdatedAtMs\(currentDb\);\n\t\tconst incomingUpdatedAtMs = getDbShapeUpdatedAtMs\(body\);\n\t\tconst isStaleWrite = Number\.isFinite\(currentUpdatedAtMs\)\n\t\t\t&& Number\.isFinite\(incomingUpdatedAtMs\)\n\t\t\t&& incomingUpdatedAtMs \+ 1000 < currentUpdatedAtMs;\n\t\tif \(isStaleWrite\) \{\n\t\t\treturn \{\n\t\t\t\trecoveredTargets: 0,\n\t\t\t\trecoveredFixtureIds: 0,\n\t\t\t\tstaleWriteIgnored: true,\n(?:\t\t\t\tstorageRevision: Number\.isFinite\(authoritativeRevision\) && authoritativeRevision >= 0 \? authoritativeRevision : 0,\n)?\t\t\t\};\n\t\t\}\n/;
 source = source.replace(legacyIndexStaleBlock, '\n');
 
-const staleResponseField = /\n\t\t\t\tstaleWriteIgnored: result\.staleWriteIgnored === true,/g;
-source = source.replace(staleResponseField, '');
+source = source.replace(/\n\t\t\t\tstaleWriteIgnored: result\.staleWriteIgnored === true,/g, '');
+source = source.replace(/\n\t\t\tstaleWriteIgnored: false,/g, '');
 
-const resultStaleField = /\n\t\t\tstaleWriteIgnored: false,/g;
-source = source.replace(resultStaleField, '');
-
-const revisionTimeFunction = /\nfunction getRevisionTime\(payload\) \{[\s\S]*?\n\}\n(?=function coreRecordCount)/;
-safetySource = safetySource.replace(revisionTimeFunction, '\n');
 safetySource = safetySource.replace(
   /\n\s*const staleToleranceMs = Math\.max\(0, Number\.parseInt\(String\(env\.ATHLYRAX_STALE_WRITE_TOLERANCE_MS \|\| '1000'\), 10\) \|\| 1000\);/,
   '',
@@ -34,7 +28,6 @@ safetySource = safetySource.replace(
 for (const forbidden of [
   'const isStaleWrite =',
   'staleWriteIgnored: true',
-  'getRevisionTime(payload)',
   'ATHLYRAX_STALE_WRITE_TOLERANCE_MS',
   "error.code = 'ATHLYRAX_STALE_DB_WRITE'",
 ]) {
@@ -44,6 +37,7 @@ for (const forbidden of [
 }
 
 for (const required of [
+  'function getRevisionTime(payload)',
   'const currentRevisionValue = getStorageRevision(current);',
   'const exactRevisionMatch = currentRevisionValue !== null && incomingRevision === currentRevisionValue;',
   "error.code = 'ATHLYRAX_DB_REVISION_CONFLICT'",
