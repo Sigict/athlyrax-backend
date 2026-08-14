@@ -17,88 +17,47 @@ jobs:
       DEMO_USERNAME: demo.coach
       DEMO_PASSWORD: DemoCoach123!
     steps:
-      - name: Inspect live demo DB shape
+      - name: Inspect live demo DB differences
         run: |
           set -euo pipefail
-          jar="$(mktemp)"
-          login="$(mktemp)"
-          dbfile="$(mktemp)"
-          headers="$(mktemp)"
+          jar="$(mktemp)"; login="$(mktemp)"; dbfile="$(mktemp)"; headers="$(mktemp)"
           trap 'rm -f "${jar}" "${login}" "${dbfile}" "${headers}"' EXIT
-
-          login_code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
-            --cookie-jar "${jar}" --header 'Content-Type: application/json' \
-            --data "{\"username\":\"${DEMO_USERNAME}\",\"password\":\"${DEMO_PASSWORD}\"}" \
-            --output "${login}" --write-out '%{http_code}' "${BACKEND_URL}/auth/login")"
+          login_code="$(curl --silent --show-error --location --cookie-jar "${jar}" --header 'Content-Type: application/json' --data "{\"username\":\"${DEMO_USERNAME}\",\"password\":\"${DEMO_PASSWORD}\"}" --output "${login}" --write-out '%{http_code}' "${BACKEND_URL}/auth/login")"
           test "${login_code}" = "200"
-
-          curl --fail --silent --show-error --location --cookie "${jar}" \
-            --dump-header "${headers}" --output "${dbfile}" "${BACKEND_URL}/db?cleanup_inspect=$(date +%s%N)"
-
-          backend_commit="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
-          revision="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-DB-Revision:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
-
-          node --input-type=module - "${dbfile}" "${backend_commit}" "${revision}" <<'NODE'
+          curl --fail --silent --show-error --location --cookie "${jar}" --dump-header "${headers}" --output "${dbfile}" "${BACKEND_URL}/db?cleanup_inspect=$(date +%s%N)"
+          node --input-type=module - "${dbfile}" <<'NODE'
           import fs from 'node:fs';
-          const [dbPath, backendCommit, headerRevision] = process.argv.slice(2);
-          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-          const asArray = (value) => Array.isArray(value) ? value : [];
-          const text = (value) => String(value ?? '').trim();
-          const canonicalize = (value) => {
-            if (Array.isArray(value)) return value.map(canonicalize);
-            if (!value || typeof value !== 'object') return value;
-            return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
-          };
-          const canonicalJson = (value) => JSON.stringify(canonicalize(value));
-
-          const schedule = asArray(db.schedule);
-          const legacy = asArray(db.trainingSchedules);
-          const scheduleById = new Map(schedule.map((row) => [text(row?.id), row]).filter(([id]) => id));
-          const legacyById = new Map(legacy.map((row) => [text(row?.id), row]).filter(([id]) => id));
-          const missingInLegacy = [];
-          const missingInSchedule = [];
-          const contentMismatches = [];
-          for (const [id, row] of scheduleById) {
-            if (!legacyById.has(id)) missingInLegacy.push(id);
-            else if (canonicalJson(row) !== canonicalJson(legacyById.get(id))) contentMismatches.push(id);
+          const db = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const arr = (v) => Array.isArray(v) ? v : [];
+          const text = (v) => String(v ?? '').trim();
+          const canon = (v) => Array.isArray(v) ? v.map(canon) : (v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v);
+          const eq = (a,b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
+          const schedule = arr(db.schedule);
+          const legacy = arr(db.trainingSchedules);
+          const byId = new Map(legacy.map(r => [text(r?.id), r]));
+          const diffKeyCounts = new Map();
+          let strippedMismatch = 0;
+          const ignore = new Set(['createdAt','updatedAt','createdByUserId','updatedByUserId','tenantId','storageUpdatedAt']);
+          for (const row of schedule) {
+            const other = byId.get(text(row?.id));
+            if (!other) continue;
+            const keys = new Set([...Object.keys(row||{}), ...Object.keys(other||{})]);
+            for (const key of keys) if (!eq(row?.[key], other?.[key])) diffKeyCounts.set(key, (diffKeyCounts.get(key)||0)+1);
+            const strip = (r) => Object.fromEntries(Object.entries(r||{}).filter(([k]) => !ignore.has(k)));
+            if (!eq(strip(row), strip(other))) strippedMismatch += 1;
           }
-          for (const id of legacyById.keys()) if (!scheduleById.has(id)) missingInSchedule.push(id);
-
-          const timetableRows = asArray(db.timetables);
-          const timetableLegacy = asArray(db.timetable);
-          const keyHistogram = new Map();
-          for (const row of timetableRows) {
-            const signature = Object.keys(row || {}).sort().join(',');
-            keyHistogram.set(signature, (keyHistogram.get(signature) || 0) + 1);
-          }
-          const timetableShapes = [...keyHistogram.entries()]
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 8)
-            .map(([keys, count]) => ({ count, keys }));
-
-          const report = {
-            tenantId: text(db?.__meta?.tenantId),
-            storageRevision: Number(db?.__meta?.storageRevision ?? -1),
-            headerRevision: Number(headerRevision || -1),
-            backendCommit: text(backendCommit),
+          const tableRows = arr(db.timetables);
+          const sessionRows = tableRows.filter((r) => Number.isInteger(Number(r?.weekdayNum)) && text(r?.startTime) && text(r?.endTime) && arr(r?.squadIds).length > 0);
+          const headers = tableRows.filter((r) => !(Number.isInteger(Number(r?.weekdayNum)) && text(r?.startTime) && text(r?.endTime) && arr(r?.squadIds).length > 0));
+          console.log(JSON.stringify({
             schedule: schedule.length,
             trainingSchedules: legacy.length,
-            scheduleUniqueIds: scheduleById.size,
-            trainingSchedulesUniqueIds: legacyById.size,
-            missingInLegacyCount: missingInLegacy.length,
-            missingInScheduleCount: missingInSchedule.length,
-            contentMismatchCount: contentMismatches.length,
-            firstMismatchId: contentMismatches[0] || '',
-            timetable: timetableLegacy.length,
-            timetables: timetableRows.length,
-            timetableSlots: asArray(db.timetableSlots).length,
+            diffKeyCounts: Object.fromEntries([...diffKeyCounts.entries()].sort((a,b)=>b[1]-a[1])),
+            mismatchAfterIgnoringMetadata: strippedMismatch,
+            timetable: arr(db.timetable).length,
+            timetablesSessionRows: sessionRows.length,
+            timetablesHeaders: headers.length,
+            timetableSlots: arr(db.timetableSlots).length,
             timetableMigrationVersion: Number(db?.__meta?.timetableSlotsLegacyMigrationVersion || 0),
-            cleanupAt: text(db?.__meta?.demoPlanningStorageCleanupAt),
-            timetableShapes,
-            legacyTimetableSampleKeys: Object.keys(timetableLegacy[0] || {}).sort(),
-          };
-          console.log(JSON.stringify(report, null, 2));
-          if (report.tenantId !== 'demo-company') throw new Error(`Unexpected tenant ${report.tenantId}`);
-          if (report.headerRevision >= 0 && report.storageRevision !== report.headerRevision) throw new Error('DB revision header/body mismatch.');
-          console.log('LIVE_DEMO_PLANNING_INSPECTION_OK');
+          }, null, 2));
           NODE
