@@ -37,7 +37,7 @@ jobs:
           const byId = new Map(legacy.map(r => [text(r?.id), r]));
           const diffKeyCounts = new Map();
           let strippedMismatch = 0;
-          const ignore = new Set(['createdAt','updatedAt','createdByUserId','updatedByUserId','tenantId','storageUpdatedAt']);
+          const ignore = new Set(['createdAt','updatedAt','createdByUserId','updatedByUserId','tenantId','storageUpdatedAt','attributionStatus','squadNames']);
           for (const row of schedule) {
             const other = byId.get(text(row?.id));
             if (!other) continue;
@@ -50,14 +50,19 @@ jobs:
           const sessionRows = tableRows.filter((r) => Number.isInteger(Number(r?.weekdayNum)) && text(r?.startTime) && text(r?.endTime) && arr(r?.squadIds).length > 0);
           const headers = tableRows.filter((r) => !(Number.isInteger(Number(r?.weekdayNum)) && text(r?.startTime) && text(r?.endTime) && arr(r?.squadIds).length > 0));
           console.log(JSON.stringify({
+            storageRevision: Number(db?.__meta?.storageRevision || 0),
+            cleanupAt: text(db?.__meta?.demoPlanningStorageCleanupAt),
             schedule: schedule.length,
             trainingSchedules: legacy.length,
             diffKeyCounts: Object.fromEntries([...diffKeyCounts.entries()].sort((a,b)=>b[1]-a[1])),
-            mismatchAfterIgnoringMetadata: strippedMismatch,
+            mismatchAfterIgnoringApprovedFields: strippedMismatch,
             timetable: arr(db.timetable).length,
             timetablesSessionRows: sessionRows.length,
             timetablesHeaders: headers.length,
             timetableSlots: arr(db.timetableSlots).length,
             timetableMigrationVersion: Number(db?.__meta?.timetableSlotsLegacyMigrationVersion || 0),
           }, null, 2));
+          if (legacy.length !== 0) throw new Error(`trainingSchedules still contains ${legacy.length} rows.`);
+          if (!text(db?.__meta?.demoPlanningStorageCleanupAt)) throw new Error('Demo planning cleanup timestamp is missing.');
+          console.log('LIVE_TRAINING_SCHEDULE_MIRROR_CLEANUP_OK');
           NODE
