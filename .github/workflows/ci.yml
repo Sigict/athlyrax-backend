@@ -12,7 +12,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,7 +20,26 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Reject source-controlled runtime storage
+        run: node scripts/verify-repository-runtime-storage.mjs
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Verify closed-pilot security source contract
+        env:
+          NODE_ENV: production
+          AUTH_REQUIRED: 'true'
+          AUTH_SECRET: ci-commercial-security-secret-at-least-32-chars
+          AUTH_ALLOW_COACH_SIGNUP: 'false'
+          AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE: 'false'
+          AUTH_ALLOW_BEARER_COMPAT: 'false'
+          FRONTEND_PUBLIC_ORIGIN: https://athlyrax.example
+          ALLOWED_ORIGINS: https://athlyrax.example
+        run: |
+          export ATHLYRAX_STORAGE_ROOT="$RUNNER_TEMP/athlyrax-storage"
+          export ATHLYRAX_SAFETY_BACKUP_ROOT="$RUNNER_TEMP/athlyrax-safety"
+          mkdir -p "$ATHLYRAX_STORAGE_ROOT" "$ATHLYRAX_SAFETY_BACKUP_ROOT"
+          node verify-closed-pilot-security.mjs
       - name: Guard demo planning cleanup
         run: node --test tests/demo-planning-storage-cleanup.test.mjs
-      - name: Full backend storage contract
+      - name: Full backend storage and security contract
         run: npm run test:storage-all

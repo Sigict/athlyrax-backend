@@ -1,8 +1,14 @@
 node_modules
-storage/db-snapshots/*.json
-storage/tenants/*/db-snapshots/*.json
-storage/auth-audit/backups/*.jsonl
-storage/billing-catalog-backups/*.json
-storage/safety-backups/
+
+# Runtime/auth/billing/customer storage is never source-controlled.
+# The one exception is the verified synthetic demo-company recovery seed used
+# when the persistent demo tenant is missing.
+storage/*
+!storage/tenants/
+storage/tenants/*
+!storage/tenants/demo-company/
+storage/tenants/demo-company/*
+!storage/tenants/demo-company/db.json
+
 .athlyrax-safety-backups/
 .athlyrax-bundled-storage/
