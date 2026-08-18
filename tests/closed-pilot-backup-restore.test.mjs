@@ -30,6 +30,7 @@ test('guarded stage restore preserves tenant separation and never activates prod
     writeJson(tenantA, { __meta: { tenantId: 'tenant-a' }, swimmers: [{ id: 'swimmer-a' }] });
     writeJson(tenantB, { __meta: { tenantId: 'tenant-b' }, swimmers: [{ id: 'swimmer-b' }] });
 
+    const startedAt = Date.now();
     const result = runStage([
       '--destination', stageDir,
       '--global-db', globalDb,
@@ -37,6 +38,7 @@ test('guarded stage restore preserves tenant separation and never activates prod
       '--tenant', `tenant-b=${tenantB}`,
       '--approve', 'STAGE_ONLY',
     ]);
+    const recoveryTimeMs = Date.now() - startedAt;
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /ATHLYRAX_STORAGE_RESTORE_STAGED/);
@@ -56,6 +58,9 @@ test('guarded stage restore preserves tenant separation and never activates prod
     assert.equal(manifest.mode, 'api-export-stage-only');
     assert.equal(manifest.files.length, 3);
     assert.ok(manifest.files.every((row) => /^[a-f0-9]{64}$/.test(String(row.sha256 || ''))));
+
+    console.log(`ATHLYRAX_STAGE_RESTORE_RTO_MS=${recoveryTimeMs}`);
+    console.log(`ATHLYRAX_STAGE_RESTORE_INTEGRITY_SHA256_FILES=${manifest.files.length}`);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
