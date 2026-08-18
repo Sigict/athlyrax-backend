@@ -37,7 +37,6 @@ const transforms = [
   'scripts/patch-password-policy.mjs',
   'scripts/patch-snapshot-cookie-session.mjs',
   'scripts/patch-production-auth-token-redaction.mjs',
-  'scripts/patch-public-demo-readonly.mjs',
   'scripts/patch-coach-link-suite.mjs',
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
@@ -51,6 +50,9 @@ for (const relative of transforms) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required production transform is missing: ${relative}`);
   run(relative, [relative]);
 }
+
+if (!fs.existsSync(path.join(root, 'scripts/patch-public-demo-readonly.mjs'))) throw new Error('Required public demo read-only guard is missing.');
+run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
