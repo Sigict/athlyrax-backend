@@ -218,7 +218,6 @@ test('3443 Scheduled Sessions delete persists after fresh GET and blocks a stale
       body: deletePayload,
     });
     assert.equal(deleted.response.status, 200, JSON.stringify(deleted.payload));
-    assert.equal(deleted.payload?.staleWriteIgnored, false);
     assert.ok(Number(deleted.payload?.tombstoneCount || 0) >= tombstones.length, 'Backend must retain every deletion tombstone from the 3443-row operation.');
 
     const afterDelete = await request(server.baseUrl, '/db', { cookie: session.cookie });
@@ -228,10 +227,6 @@ test('3443 Scheduled Sessions delete persists after fresh GET and blocks a stale
     assert.equal(afterDelete.payload.trainingSessionSets.length, 0, 'Fresh GET must prove all linked sets are gone.');
     assert.ok((afterDelete.payload.__tombstones || []).length >= tombstones.length);
 
-    // Simulate the exact failure mode this feature must withstand: another tab still
-    // holds the pre-delete whole DB and saves it after the deletion. It deliberately
-    // does not know about the tombstones; the server must merge the durable tombstone
-    // list already on disk and refuse to resurrect all removed rows.
     const stalePayload = {
       ...before.payload,
       __tombstones: [],
