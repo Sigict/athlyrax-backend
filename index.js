@@ -3077,6 +3077,143 @@ function collectTimetableLegacyLockViolations(existingDbShape, incomingBody) {
 	}];
 }
 
+
+function getScheduleOccurrenceIdentityParts(row) {
+	if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+	const sourceSlotId = String(
+		row.generatedSourceSlotId
+		|| row.generatedSourceScheduleId
+		|| row.timetableSlotId
+		|| row.sourceSlotId
+		|| '',
+	).trim();
+	const scheduleDate = String(row.scheduleDate || row.rawDate || row.date || row.plannedDate || '').trim();
+	const timetableId = String(row.timetableId || row.timetableSourceId || '').trim();
+	if (!sourceSlotId || !scheduleDate || !timetableId) return null;
+	return { sourceSlotId, scheduleDate, timetableId };
+}
+
+function getScheduleOccurrenceIdentityKey(row) {
+	const identity = getScheduleOccurrenceIdentityParts(row);
+	return identity ? JSON.stringify([identity.sourceSlotId, identity.scheduleDate, identity.timetableId]) : '';
+}
+
+function normalizeScheduleOccurrenceSuppressionEntry(entry) {
+	const identity = getScheduleOccurrenceIdentityParts(entry);
+	if (!identity) return null;
+	const deletedAtMs = parseIsoMs(entry?.deletedAt);
+	const deletedAt = Number.isFinite(deletedAtMs)
+		? new Date(deletedAtMs).toISOString()
+		: new Date().toISOString();
+	return {
+		...identity,
+		deletedAt,
+		deletedBy: String(entry?.deletedBy || '').trim().toLowerCase() || 'unknown-actor',
+	};
+}
+
+function mergeScheduleOccurrenceSuppressionLists(existingList, incomingList) {
+	const byKey = new Map();
+	for (const sourceList of [existingList, incomingList]) {
+		if (!Array.isArray(sourceList)) continue;
+		for (const raw of sourceList) {
+			const entry = normalizeScheduleOccurrenceSuppressionEntry(raw);
+			if (!entry) continue;
+			const key = getScheduleOccurrenceIdentityKey(entry);
+			if (!key) continue;
+			const prior = byKey.get(key);
+			if (!prior || parseIsoMs(entry.deletedAt) >= parseIsoMs(prior.deletedAt)) byKey.set(key, entry);
+		}
+	}
+	return Array.from(byKey.values()).sort((a, b) => parseIsoMs(b.deletedAt) - parseIsoMs(a.deletedAt));
+}
+
+function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
+	if (!dbShape || typeof dbShape !== 'object' || Array.isArray(dbShape)) {
+		return { dbShape, blockedResurrections: [] };
+	}
+	const suppressionKeys = new Set(
+		(Array.isArray(suppressions) ? suppressions : [])
+			.map((entry) => getScheduleOccurrenceIdentityKey(entry))
+			.filter(Boolean),
+	);
+	if (suppressionKeys.size === 0) return { dbShape, blockedResurrections: [] };
+
+	const next = { ...dbShape };
+	const blockedResurrections = [];
+	const blockedScheduleIds = new Set();
+
+	for (const collection of ['schedule', 'trainingSchedules']) {
+		const rows = Array.isArray(next[collection]) ? next[collection] : null;
+		if (!rows) continue;
+		const kept = [];
+		for (const row of rows) {
+			const key = getScheduleOccurrenceIdentityKey(row);
+			if (!key || !suppressionKeys.has(key)) {
+				kept.push(row);
+				continue;
+			}
+			const identity = getScheduleOccurrenceIdentityParts(row);
+			const rowId = toRowId(row?.id);
+			if (collection === 'schedule' && rowId) blockedScheduleIds.add(rowId);
+			blockedResurrections.push({
+				collection,
+				id: rowId,
+				...identity,
+			});
+		}
+		if (kept.length !== rows.length) next[collection] = kept;
+	}
+
+	if (blockedScheduleIds.size === 0) return { dbShape: next, blockedResurrections };
+
+	const sourceSessions = Array.isArray(next.trainingSessions) ? next.trainingSessions : [];
+	const blockedSessionIds = new Set(
+		sourceSessions
+			.filter((row) => blockedScheduleIds.has(toRowId(row?.scheduleId)))
+			.map((row) => toRowId(row?.id))
+			.filter(Boolean),
+	);
+	if (sourceSessions.length > 0) {
+		next.trainingSessions = sourceSessions.filter((row) => !blockedScheduleIds.has(toRowId(row?.scheduleId)));
+	}
+
+	const sourceSets = Array.isArray(next.trainingSessionSets) ? next.trainingSessionSets : [];
+	const blockedSetIds = new Set(
+		sourceSets
+			.filter((row) => blockedSessionIds.has(toRowId(row?.sessionId || row?.trainingSessionId)))
+			.map((row) => toRowId(row?.id))
+			.filter(Boolean),
+	);
+	if (sourceSets.length > 0) {
+		next.trainingSessionSets = sourceSets.filter(
+			(row) => !blockedSessionIds.has(toRowId(row?.sessionId || row?.trainingSessionId)),
+		);
+	}
+
+	const sourceBlocks = Array.isArray(next.trainingSetBlocks) ? next.trainingSetBlocks : [];
+	if (sourceBlocks.length > 0 && (blockedSessionIds.size > 0 || blockedSetIds.size > 0)) {
+		next.trainingSetBlocks = sourceBlocks
+			.map((block) => {
+				const setIds = Array.isArray(block?.setIds) ? block.setIds.map(toRowId).filter(Boolean) : [];
+				const remainingSetIds = setIds.filter((id) => !blockedSetIds.has(id));
+				return remainingSetIds.length === setIds.length ? block : { ...block, setIds: remainingSetIds };
+			})
+			.filter((block) => {
+				const sessionId = toRowId(block?.sessionId || block?.trainingSessionId);
+				if (!blockedSessionIds.has(sessionId)) return true;
+				const setIds = Array.isArray(block?.setIds) ? block.setIds.map(toRowId).filter(Boolean) : [];
+				return setIds.length > 0;
+			});
+	}
+
+	if (Array.isArray(next.attendance)) {
+		next.attendance = next.attendance.filter((row) => !blockedScheduleIds.has(toRowId(row?.scheduleId)));
+	}
+
+	return { dbShape: next, blockedResurrections };
+}
+
 function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 	const actorUsername = String(auth?.username || '').trim().toLowerCase() || 'unknown-actor';
 	const actorTenantId = String(resolveAuthTenantId(auth) || '').trim().toLowerCase();
@@ -6088,22 +6225,35 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		const merged = mergePlannerTargets(body, backupRows);
 
 		// Tombstone merge: union of what's on disk with what the client sent.
-		const mergedTombstones = mergeTombstoneLists(
-			Array.isArray(currentDb?.__tombstones) ? currentDb.__tombstones : [],
-			Array.isArray(body?.__tombstones) ? body.__tombstones : [],
-		);
+		const mergedTombstones = mergeTombstoneLists(
+			Array.isArray(currentDb?.__tombstones) ? currentDb.__tombstones : [],
+			Array.isArray(body?.__tombstones) ? body.__tombstones : [],
+		);
 		const tombstoneLookup = buildTombstoneLookup(mergedTombstones);
+		const mergedScheduleOccurrenceSuppressions = mergeScheduleOccurrenceSuppressionLists(
+			Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : [],
+			Array.isArray(body?.__meta?.scheduleOccurrenceSuppressions) ? body.__meta.scheduleOccurrenceSuppressions : [],
+		);
 
 		// Filter the incoming payload: any tombstoned row not legitimately re-created after
 		// the tombstone is refused. This is where deletion becomes durable.
-		const filtered = applyTombstonesToDbShape({
-			...body,
-			trainingPlannerWeeks: merged.nextWeeks,
-		}, tombstoneLookup);
+		const filtered = applyTombstonesToDbShape({
+			...body,
+			trainingPlannerWeeks: merged.nextWeeks,
+		}, tombstoneLookup);
+
+		const occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape(
+			filtered.dbShape,
+			mergedScheduleOccurrenceSuppressions,
+		);
 
 		const safeBody = {
-			...filtered.dbShape,
+			...occurrenceFiltered.dbShape,
 			__tombstones: mergedTombstones,
+			__meta: {
+				...(occurrenceFiltered.dbShape?.__meta || {}),
+				scheduleOccurrenceSuppressions: mergedScheduleOccurrenceSuppressions,
+			},
 		};
 		const ownershipStampedBody = applyOwnershipMetadataToDbShape(safeBody, currentDb, req.auth);
 
