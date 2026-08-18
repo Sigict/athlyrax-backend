@@ -7,9 +7,13 @@
  *   2. A tombstoned row that has been legitimately re-created (updatedAt >
  *      deletedAt) is NOT dropped (users can un-delete by re-creating).
  *   3. Tombstones are additive across writes (union, latest wins).
- *   4. Attendance rows pointing at a timetable template id (not a schedule
+ *   4. Semantic Schedule occurrence suppressions are additive across writes.
+ *   5. A deleted generated occurrence cannot return under a fresh Schedule id.
+ *   6. Blocking a regenerated occurrence also removes its linked Planner data.
+ *   7. A different recurrence date and manual Schedule rows remain allowed.
+ *   8. Attendance rows pointing at a timetable template id (not a schedule
  *      id) cause the whole PUT to be rejected with HTTP 400.
- *   5. Attendance rows with a missing scheduleId are rejected.
+ *   9. Attendance rows with a missing scheduleId are rejected.
  *
  * These are executed as pure unit tests against the helper functions
  * exported below via a small dynamic-import shim, because the whole server
@@ -27,10 +31,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const INDEX_JS_PATH = path.join(__dirname, '..', 'index.js');
 
-// Read the source, extract the helper block we added, and evaluate it in an
-// isolated function scope. This avoids booting the whole Express app just to
-// unit-test pure helpers, while still guaranteeing we're testing the exact
-// bytes shipped in index.js.
 function loadHelpersFromIndex() {
 	const source = fs.readFileSync(INDEX_JS_PATH, 'utf8');
 	const startMarker = '// Tombstone-based deletion protection.';
@@ -41,7 +41,6 @@ function loadHelpersFromIndex() {
 		throw new Error(`Could not locate tombstone helper block in ${INDEX_JS_PATH}. Refactored?`);
 	}
 	const block = source.slice(startIdx, endIdx);
-	// The block relies on `toRowId`. Grab that too.
 	const toRowIdMatch = source.match(/function toRowId\(value\) \{[\s\S]*?\n\}/);
 	if (!toRowIdMatch) throw new Error('toRowId helper not found in index.js');
 	const evalSource = `
@@ -54,9 +53,13 @@ function loadHelpersFromIndex() {
 			applyTombstonesToDbShape,
 			collectAttendanceLinkageViolations,
 			TOMBSTONE_TRACKED_COLLECTION_KEYS,
+			getScheduleOccurrenceIdentityParts,
+			getScheduleOccurrenceIdentityKey,
+			normalizeScheduleOccurrenceSuppressionEntry,
+			mergeScheduleOccurrenceSuppressionLists,
+			applyScheduleOccurrenceSuppressionsToDbShape,
 		};
 	`;
-	// eslint-disable-next-line no-new-func
 	return new Function(evalSource)();
 }
 
@@ -69,8 +72,8 @@ test('mergeTombstoneLists returns union with latest deletedAt winning per (colle
 		{ collection: 'schedule', id: 'sch_b', deletedAt: '2026-01-01T00:00:00.000Z', deletedBy: 'alice' },
 	];
 	const incoming = [
-		{ collection: 'schedule', id: 'sch_a', deletedAt: '2026-02-01T00:00:00.000Z', deletedBy: 'bob' }, // newer
-		{ collection: 'schedule', id: 'sch_c', deletedAt: '2026-01-15T00:00:00.000Z', deletedBy: 'bob' }, // new
+		{ collection: 'schedule', id: 'sch_a', deletedAt: '2026-02-01T00:00:00.000Z', deletedBy: 'bob' },
+		{ collection: 'schedule', id: 'sch_c', deletedAt: '2026-01-15T00:00:00.000Z', deletedBy: 'bob' },
 	];
 	const merged = helpers.mergeTombstoneLists(existing, incoming);
 	assert.equal(merged.length, 3);
@@ -94,7 +97,7 @@ test('applyTombstonesToDbShape drops resurrected rows and reports them', () => {
 	const dbShape = {
 		schedule: [
 			{ id: 'sch_alive', scheduleDate: '2026-05-01', updatedAt: '2026-05-01T13:00:00.000Z' },
-			{ id: 'sch_dead', scheduleDate: '2026-05-02', updatedAt: '2026-04-30T09:00:00.000Z' }, // older than tombstone
+			{ id: 'sch_dead', scheduleDate: '2026-05-02', updatedAt: '2026-04-30T09:00:00.000Z' },
 		],
 	};
 	const { dbShape: next, blockedResurrections } = helpers.applyTombstonesToDbShape(dbShape, lookup);
@@ -110,7 +113,7 @@ test('applyTombstonesToDbShape KEEPS a row that was legitimately re-created afte
 	const lookup = helpers.buildTombstoneLookup(tombstones);
 	const dbShape = {
 		timetable: [
-			{ id: 'tt_x', updatedAt: '2026-05-02T09:00:00.000Z' }, // recreated 21h after tombstone
+			{ id: 'tt_x', updatedAt: '2026-05-02T09:00:00.000Z' },
 		],
 	};
 	const { dbShape: next, blockedResurrections } = helpers.applyTombstonesToDbShape(dbShape, lookup);
@@ -125,6 +128,105 @@ test('applyTombstonesToDbShape handles rows without ids gracefully', () => {
 	assert.equal(next.schedule.length, 1);
 	assert.equal(next.schedule[0].someField, 'no-id');
 	assert.equal(blockedResurrections.length, 1);
+});
+
+test('semantic Schedule suppressions survive an incoming whole-db write that omits the old suppression', () => {
+	const existing = [{
+		sourceSlotId: 'slot_1',
+		scheduleDate: '2026-08-19',
+		timetableId: 'tt_1',
+		deletedAt: '2026-08-19T00:10:00.000Z',
+		deletedBy: 'scheduled-sessions-bulk-delete',
+	}];
+	const merged = helpers.mergeScheduleOccurrenceSuppressionLists(existing, []);
+	assert.equal(merged.length, 1);
+	assert.equal(merged[0].sourceSlotId, 'slot_1');
+	assert.equal(merged[0].scheduleDate, '2026-08-19');
+	assert.equal(merged[0].timetableId, 'tt_1');
+});
+
+test('semantic Schedule suppression latest delete wins without changing occurrence identity', () => {
+	const existing = [{ sourceSlotId: 'slot_1', scheduleDate: '2026-08-19', timetableId: 'tt_1', deletedAt: '2026-08-19T00:10:00.000Z', deletedBy: 'one' }];
+	const incoming = [{ generatedSourceSlotId: 'slot_1', date: '2026-08-19', timetableSourceId: 'tt_1', deletedAt: '2026-08-19T00:20:00.000Z', deletedBy: 'two' }];
+	const merged = helpers.mergeScheduleOccurrenceSuppressionLists(existing, incoming);
+	assert.equal(merged.length, 1);
+	assert.equal(merged[0].deletedAt, '2026-08-19T00:20:00.000Z');
+	assert.equal(merged[0].deletedBy, 'two');
+});
+
+test('server blocks a deleted generated occurrence recreated under a fresh Schedule id and removes linked Planner data', () => {
+	const suppressions = [{
+		sourceSlotId: 'slot_1',
+		scheduleDate: '2026-08-19',
+		timetableId: 'tt_1',
+		deletedAt: '2026-08-19T00:10:00.000Z',
+	}];
+	const dbShape = {
+		schedule: [
+		{ id: 'schedule_new_id', generatedSourceSlotId: 'slot_1', scheduleDate: '2026-08-19', timetableId: 'tt_1' },
+		{ id: 'schedule_later', generatedSourceSlotId: 'slot_1', scheduleDate: '2026-08-20', timetableId: 'tt_1' },
+	],
+		trainingSchedules: [
+		{ id: 'legacy_new_id', generatedSourceSlotId: 'slot_1', scheduleDate: '2026-08-19', timetableId: 'tt_1' },
+	],
+		trainingSessions: [
+		{ id: 'session_blocked', scheduleId: 'schedule_new_id' },
+		{ id: 'session_later', scheduleId: 'schedule_later' },
+		],
+		trainingSessionSets: [
+		{ id: 'set_blocked', sessionId: 'session_blocked' },
+		{ id: 'set_later', sessionId: 'session_later' },
+		],
+		trainingSetBlocks: [
+		{ id: 'block_blocked', sessionId: 'session_blocked', setIds: ['set_blocked'] },
+		{ id: 'block_shared', sessionId: 'session_later', setIds: ['set_blocked', 'set_later'] },
+		],
+		attendance: [
+		{ id: 'attendance_blocked', scheduleId: 'schedule_new_id' },
+		{ id: 'attendance_later', scheduleId: 'schedule_later' },
+		],
+	};
+
+	const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions);
+	assert.deepEqual(result.dbShape.schedule.map((row) => row.id), ['schedule_later']);
+	assert.equal(result.dbShape.trainingSchedules.length, 0, 'legacy mirror must not retain the suppressed occurrence');
+	assert.deepEqual(result.dbShape.trainingSessions.map((row) => row.id), ['session_later']);
+	assert.deepEqual(result.dbShape.trainingSessionSets.map((row) => row.id), ['set_later']);
+	assert.deepEqual(result.dbShape.trainingSetBlocks.map((row) => row.id), ['block_shared']);
+	assert.deepEqual(result.dbShape.trainingSetBlocks[0].setIds, ['set_later']);
+	assert.deepEqual(result.dbShape.attendance.map((row) => row.id), ['attendance_later']);
+	assert.equal(result.blockedResurrections.some((row) => row.collection === 'schedule' && row.id === 'schedule_new_id'), true);
+});
+
+test('semantic Schedule suppression allows a later recurrence from the same Timetable slot', () => {
+	const suppressions = [{ sourceSlotId: 'slot_1', scheduleDate: '2026-08-19', timetableId: 'tt_1', deletedAt: '2026-08-19T00:10:00.000Z' }];
+	const dbShape = {
+		schedule: [{ id: 'schedule_later', generatedSourceSlotId: 'slot_1', scheduleDate: '2026-08-20', timetableId: 'tt_1' }],
+	};
+	const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions);
+	assert.equal(result.dbShape.schedule.length, 1);
+	assert.equal(result.blockedResurrections.length, 0);
+});
+
+test('semantic Schedule suppression does not block manual same-day Schedule rows without generated source identity', () => {
+	const suppressions = [{ sourceSlotId: 'slot_1', scheduleDate: '2026-08-19', timetableId: 'tt_1', deletedAt: '2026-08-19T00:10:00.000Z' }];
+	const dbShape = {
+		schedule: [{ id: 'manual_same_day', scheduleDate: '2026-08-19', timetableId: 'tt_1', manualScheduleEntry: true }],
+	};
+	const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions);
+	assert.equal(result.dbShape.schedule.length, 1);
+	assert.equal(result.blockedResurrections.length, 0);
+});
+
+test('semantic suppression merge retains 3443 deleted generated occurrences without truncation', () => {
+	const suppressions = Array.from({ length: 3443 }, (_, index) => ({
+		sourceSlotId: `slot_${index}`,
+		scheduleDate: '2026-08-19',
+		timetableId: 'tt_1',
+		deletedAt: '2026-08-19T00:10:00.000Z',
+	}));
+	const merged = helpers.mergeScheduleOccurrenceSuppressionLists([], suppressions);
+	assert.equal(merged.length, 3443);
 });
 
 test('collectAttendanceLinkageViolations flags attendance with missing scheduleId', () => {
