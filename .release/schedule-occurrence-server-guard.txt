@@ -1,0 +1,3 @@
+AthlyraX backend semantic Schedule deletion protection candidate.
+Generated Schedule occurrence suppressions are merged across whole-db PUTs and enforced server-side against canonical Schedule, legacy trainingSchedules mirrors, linked Training Sessions, sets, blocks and attendance.
+Do not deploy until exact final branch head passes full backend storage/security CI and temporary patch tooling is removed.
