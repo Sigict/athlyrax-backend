@@ -6,6 +6,11 @@ const newline = source.includes('\r\n') ? '\r\n' : '\n';
 const nl = (text) => text.replace(/\n/g, newline);
 let changed = false;
 
+if (source.includes('\r\r\n')) {
+  source = source.replace(/\r\r\n/g, '\r\n');
+  changed = true;
+}
+
 const helperMarker = 'function normalizeScheduleOccurrenceSuppressionEntry(entry) {';
 if (!source.includes(helperMarker)) {
   const ownershipAnchor = 'function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {';
@@ -90,11 +95,7 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 \t\t\tconst identity = getScheduleOccurrenceIdentityParts(row);
 \t\t\tconst rowId = toRowId(row?.id);
 \t\t\tif (collection === 'schedule' && rowId) blockedScheduleIds.add(rowId);
-\t\t\tblockedResurrections.push({
-\t\t\t\tcollection,
-\t\t\t\tid: rowId,
-\t\t\t\t...identity,
-\t\t\t});
+\t\t\tblockedResurrections.push({ collection, id: rowId, ...identity });
 \t\t}
 \t\tif (kept.length !== rows.length) next[collection] = kept;
 \t}
@@ -157,11 +158,10 @@ if (!source.includes('const mergedScheduleOccurrenceSuppressions = mergeSchedule
   const tombstoneAnchor = /([\t ]*const mergedTombstones = mergeTombstoneLists\([\s\S]*?\);\r?\n[\t ]*const tombstoneLookup = buildTombstoneLookup\(mergedTombstones\);)/;
   const match = source.match(tombstoneAnchor);
   if (!match) throw new Error('Merged tombstones route anchor missing.');
-  const insertion = nl(`${match[1]}
-\t\tconst mergedScheduleOccurrenceSuppressions = mergeScheduleOccurrenceSuppressionLists(
+  const insertion = `${match[1]}${newline}${nl(`\t\tconst mergedScheduleOccurrenceSuppressions = mergeScheduleOccurrenceSuppressionLists(
 \t\t\tArray.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : [],
 \t\t\tArray.isArray(body?.__meta?.scheduleOccurrenceSuppressions) ? body.__meta.scheduleOccurrenceSuppressions : [],
-\t\t);`);
+\t\t);`)}`;
   source = source.replace(match[1], insertion);
   changed = true;
 }
@@ -170,8 +170,7 @@ if (!source.includes('const occurrenceFiltered = applyScheduleOccurrenceSuppress
   const safeBodyPattern = /([\t ]*const filtered = applyTombstonesToDbShape\(\{[\s\S]*?\}, tombstoneLookup\);\r?\n)\r?\n([\t ]*const safeBody = \{\r?\n[\t ]*\.\.\.filtered\.dbShape,\r?\n[\t ]*__tombstones: mergedTombstones,\r?\n[\t ]*\};)/;
   const match = source.match(safeBodyPattern);
   if (!match) throw new Error('Filtered/safeBody route anchor missing.');
-  const replacement = nl(`${match[1]}
-\t\tconst occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape(
+  const replacement = `${match[1]}${newline}${nl(`\t\tconst occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape(
 \t\t\tfiltered.dbShape,
 \t\t\tmergedScheduleOccurrenceSuppressions,
 \t\t);
@@ -183,7 +182,7 @@ if (!source.includes('const occurrenceFiltered = applyScheduleOccurrenceSuppress
 \t\t\t\t...(occurrenceFiltered.dbShape?.__meta || {}),
 \t\t\t\tscheduleOccurrenceSuppressions: mergedScheduleOccurrenceSuppressions,
 \t\t\t},
-\t\t};`);
+\t\t};`)}`;
   source = source.replace(match[0], replacement);
   changed = true;
 }
@@ -199,5 +198,6 @@ for (const required of [
   if (!source.includes(required)) throw new Error(`Backend occurrence suppression invariant missing: ${required}`);
 }
 
+if (source.includes('\r\r\n')) throw new Error('Double carriage-return line endings remain in index.js.');
 if (changed) fs.writeFileSync(path, source);
 console.log(changed ? 'SCHEDULE_OCCURRENCE_SERVER_GUARD_PATCHED' : 'SCHEDULE_OCCURRENCE_SERVER_GUARD_ALREADY_PRESENT');
