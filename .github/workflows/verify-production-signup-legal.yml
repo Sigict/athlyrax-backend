@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   verify-production:
@@ -25,11 +26,14 @@ jobs:
           grep -F "ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD" index.js
           grep -F "ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE" index.js
           grep -F "ATHLYRAX_DEMO_RECOVERY_RELEASE_2026_08_08_V1" index.js
+          grep -F "ATHLYRAX_PUBLIC_DEMO_READ_ONLY" index.js
           node --test tests/demo-coach-routing-regression.test.mjs
           npm run test:signup-legal-acceptance
+          npm run test:public-demo-readonly
           npm run test:storage-all
 
       - name: Wait for exact backend release and verify rejection
+        id: verify_release
         if: github.event_name != 'pull_request'
         env:
           BACKEND_URL: https://athlyrax-backend.onrender.com
@@ -42,6 +46,7 @@ jobs:
           for attempt in $(seq 1 36); do
             config_file="$(mktemp)"
             body_file="$(mktemp)"
+            header_file="$(mktemp)"
 
             config_code="$(curl --silent --show-error --location \
               --connect-timeout 15 --max-time 30 \
@@ -50,7 +55,14 @@ jobs:
 
             release_match="$(node --input-type=module --eval "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(String(p?.releaseMarker||'')===process.argv[2]?'yes':'no');" "${config_file}" "${EXPECTED_RELEASE_MARKER}" 2>/dev/null || printf 'no')"
 
-            if [[ "${config_code}" == "200" && "${release_match}" == "yes" ]]; then
+            db_code="$(curl --silent --show-error --location \
+              --connect-timeout 15 --max-time 30 \
+              --dump-header "${header_file}" \
+              --output "${body_file}" --write-out '%{http_code}' \
+              "${BACKEND_URL}/db?commit_probe=${expected_sha}-${attempt}" || true)"
+            backend_commit="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${header_file}")"
+
+            if [[ "${config_code}" == "200" && "${release_match}" == "yes" && "${db_code}" == "401" && "${backend_commit}" == "${expected_sha}" ]]; then
               register_code="$(curl --silent --show-error --location \
                 --connect-timeout 15 --max-time 30 \
                 --header 'Content-Type: application/json' \
@@ -59,29 +71,34 @@ jobs:
                 "${BACKEND_URL}/auth/register" || true)"
               if [[ "${register_code}" == "400" \
                 && $(grep -ciE 'Swim club and team name are required|Data Processing Agreement' "${body_file}" || true) -gt 0 ]]; then
-                echo "Exact production backend release and signup legal enforcement verified for ${expected_sha}."
-                cat "${config_file}"
-                cat "${body_file}"
+                echo "Exact production backend commit and signup legal enforcement verified for ${expected_sha}."
+                rm -f "${config_file}" "${body_file}" "${header_file}"
                 exit 0
               fi
             fi
 
-            echo "Attempt ${attempt}/36: config=${config_code}, exactRelease=${release_match}; configResponse=$(cat "${config_file}")"
-            rm -f "${config_file}" "${body_file}"
+            echo "Attempt ${attempt}/36: config=${config_code}, release=${release_match}, db=${db_code}, commit=${backend_commit:-missing}"
+            rm -f "${config_file}" "${body_file}" "${header_file}"
             sleep 15
           done
 
-          echo "Production never exposed the expected backend release marker ${EXPECTED_RELEASE_MARKER}." >&2
+          echo "Production never exposed the exact backend commit ${expected_sha} with required guards." >&2
           exit 1
 
-      - name: Verify live demo coach receives meaningful tenant data
+      - name: Verify live public demo read-only access when credential secret is configured
+        id: verify_demo
         if: github.event_name != 'pull_request'
         env:
           BACKEND_URL: https://athlyrax-backend.onrender.com
           DEMO_USERNAME: demo.coach
-          DEMO_PASSWORD: DemoCoach123!
+          DEMO_PASSWORD: ${{ secrets.ATHLYRAX_DEMO_PASSWORD }}
         run: |
           set -euo pipefail
+          if [ -z "${DEMO_PASSWORD:-}" ]; then
+            echo 'ATHLYRAX_DEMO_PASSWORD is not configured; exact-release verification remains authoritative and the public-demo boundary is covered by the mandatory integration test.'
+            exit 0
+          fi
+
           cookie_jar="$(mktemp)"
           login_body="$(mktemp)"
           me_body="$(mktemp)"
@@ -122,11 +139,27 @@ jobs:
           const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
           const username = String(me?.user?.username || '');
           const tenantId = String(me?.user?.tenantId || '');
+          const role = String(me?.user?.role || '');
           if (username !== 'demo.coach') throw new Error(`Unexpected live demo username: ${username}`);
           if (tenantId !== 'demo-company') throw new Error(`Live demo tenant mismatch: ${tenantId}`);
+          if (role !== 'viewer') throw new Error(`Live demo must be server-forced to viewer, got: ${role}`);
           const keys = ['swimmers','squads','trainingSessions','trainingSessionSets','tests','attendance','competitions','fixtures','groups','timetables','timetableSlots'];
-          const counts = Object.fromEntries(keys.map((key) => [key, Array.isArray(db?.[key]) ? db[key].length : 0]));
-          const meaningful = Object.values(counts).some((count) => count > 0);
-          console.log(JSON.stringify({ username, tenantId, dbBytes: fs.statSync(dbPath).size, counts }));
-          if (!meaningful) throw new Error('Live demo coach database contains no meaningful records.');
+          const meaningful = keys.some((key) => Array.isArray(db?.[key]) && db[key].length > 0);
+          if (!meaningful) throw new Error('Live demo coach database contains no meaningful synthetic records.');
           NODE
+
+      - name: Record production verification result
+        if: always() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 23 --repo "${GITHUB_REPOSITORY}" --body-file - <<EOF
+          PRODUCTION_VERIFICATION_RESULT
+
+          Status: ${{ job.status }}
+          Commit: ${GITHUB_SHA}
+          Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Exact release verification: ${{ steps.verify_release.outcome }}
+          Optional live demo verification: ${{ steps.verify_demo.outcome }}
+          Target: https://athlyrax-backend.onrender.com
+          EOF
