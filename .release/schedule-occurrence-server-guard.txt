@@ -1,3 +1,4 @@
 AthlyraX backend semantic Schedule deletion protection candidate.
 Generated Schedule occurrence suppressions are merged across whole-db PUTs and enforced server-side against canonical Schedule, legacy trainingSchedules mirrors, linked Training Sessions, sets, blocks and attendance.
+The production coach-link build patcher now recognizes and preserves the semantic-suppression safe-body shape instead of failing or replacing it.
 Do not deploy until exact final branch head passes full backend storage/security CI and temporary patch tooling is removed.
