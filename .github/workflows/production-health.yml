@@ -47,7 +47,10 @@ jobs:
           import fs from 'node:fs';
           const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           if (payload?.authRequired !== true) process.exit(1);
-          if (payload?.allowCoachSignup === true) process.exit(1);
+          if (payload?.securityMode !== 'production') process.exit(1);
+          if (payload?.requireInviteCode !== true) process.exit(1);
+          if (payload?.allowCoachInvites !== true) process.exit(1);
+          if (payload?.bearerCompatEnabled !== false) process.exit(1);
           NODE
           then
             failed=1
