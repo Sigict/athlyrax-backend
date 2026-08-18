@@ -1,0 +1,119 @@
+name: AthlyraX production health
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: athlyrax-production-health
+  cancel-in-progress: true
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check public frontend and backend boundaries
+        id: health
+        shell: bash
+        run: |
+          set -u
+          failed=0
+          reasons=()
+
+          frontend_code="$(curl --silent --show-error --location --retry 2 --retry-delay 5 \
+            --connect-timeout 15 --max-time 30 \
+            --output /dev/null --write-out '%{http_code}' \
+            'https://athlyrax.com/signin' || true)"
+          if [ "${frontend_code}" != '200' ]; then
+            failed=1
+            reasons+=("frontend_signin_http_${frontend_code:-000}")
+          fi
+
+          config_file="$(mktemp)"
+          config_code="$(curl --silent --show-error --location --retry 2 --retry-delay 5 \
+            --connect-timeout 15 --max-time 30 \
+            --output "${config_file}" --write-out '%{http_code}' \
+            'https://athlyrax-backend.onrender.com/auth/config' || true)"
+          if [ "${config_code}" != '200' ]; then
+            failed=1
+            reasons+=("backend_auth_config_http_${config_code:-000}")
+          elif ! node --input-type=module - "${config_file}" <<'NODE'
+          import fs from 'node:fs';
+          const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (payload?.authRequired !== true) process.exit(1);
+          if (payload?.allowCoachSignup === true) process.exit(1);
+          NODE
+          then
+            failed=1
+            reasons+=("backend_auth_config_security_contract")
+          fi
+          rm -f "${config_file}"
+
+          header_file="$(mktemp)"
+          body_file="$(mktemp)"
+          db_code="$(curl --silent --show-error --location --retry 2 --retry-delay 5 \
+            --connect-timeout 15 --max-time 30 \
+            --dump-header "${header_file}" \
+            --output "${body_file}" --write-out '%{http_code}' \
+            'https://athlyrax-backend.onrender.com/db?health_probe=1' || true)"
+          backend_commit="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${header_file}")"
+          if [ "${db_code}" != '401' ]; then
+            failed=1
+            reasons+=("protected_db_boundary_http_${db_code:-000}")
+          fi
+          if [[ ! "${backend_commit}" =~ ^[0-9a-f]{40}$ ]]; then
+            failed=1
+            reasons+=("backend_commit_header_missing")
+          fi
+          rm -f "${header_file}" "${body_file}"
+
+          if [ "${failed}" -eq 0 ]; then
+            echo 'state=healthy' >> "${GITHUB_OUTPUT}"
+            echo 'reason=all_public_boundaries_passed' >> "${GITHUB_OUTPUT}"
+            echo 'ATHLYRAX_PRODUCTION_HEALTH_OK'
+          else
+            joined="$(IFS=,; echo "${reasons[*]}")"
+            echo 'state=failed' >> "${GITHUB_OUTPUT}"
+            echo "reason=${joined}" >> "${GITHUB_OUTPUT}"
+            echo "ATHLYRAX_PRODUCTION_HEALTH_FAIL ${joined}"
+          fi
+
+      - name: Record health transition without alert spam
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEALTH_STATE: ${{ steps.health.outputs.state }}
+          HEALTH_REASON: ${{ steps.health.outputs.reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          last_health="$(gh issue view 23 --repo "${GITHUB_REPOSITORY}" --json comments --jq '.comments | map(select(.body | startswith("HEALTH_"))) | last | .body // ""' 2>/dev/null || true)"
+
+          if [ "${HEALTH_STATE:-failed}" = 'failed' ]; then
+            if [[ "${last_health}" != HEALTH_ALERT_OPEN* ]]; then
+              gh issue comment 23 --repo "${GITHUB_REPOSITORY}" --body-file - <<EOF
+          HEALTH_ALERT_OPEN
+
+          Time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          Reason: ${HEALTH_REASON:-unknown}
+          Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+            fi
+          elif [[ "${last_health}" == HEALTH_ALERT_OPEN* ]]; then
+            gh issue comment 23 --repo "${GITHUB_REPOSITORY}" --body-file - <<EOF
+          HEALTH_RECOVERED
+
+          Time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+          fi
+
+      - name: Fail the workflow when production is unhealthy
+        if: steps.health.outputs.state != 'healthy'
+        run: exit 1
