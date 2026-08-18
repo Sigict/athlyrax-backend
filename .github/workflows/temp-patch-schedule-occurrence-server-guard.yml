@@ -19,14 +19,16 @@ jobs:
           fetch-depth: 0
       - name: Apply server guard patch
         run: node scripts/_patch-schedule-occurrence-server-guard.mjs
+      - name: Align coach-link build anchor
+        run: node scripts/_patch-coach-link-build-anchor-for-occurrence-guard.mjs
       - name: Commit patched backend source
         run: |
-          if git diff --quiet -- index.js; then
+          if git diff --quiet -- index.js scripts/patch-coach-link-integrity.mjs; then
             echo "No backend patch needed"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.js
+          git add index.js scripts/patch-coach-link-integrity.mjs
           git commit -m "Enforce deleted Schedule occurrences server-side"
           git push origin HEAD:fix/schedule-occurrence-server-guard
