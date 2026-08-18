@@ -1,0 +1,32 @@
+name: Temporary Schedule occurrence server guard patch
+
+on:
+  push:
+    branches:
+      - fix/schedule-occurrence-server-guard
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/schedule-occurrence-server-guard
+          fetch-depth: 0
+      - name: Apply server guard patch
+        run: node scripts/_patch-schedule-occurrence-server-guard.mjs
+      - name: Commit patched backend source
+        run: |
+          if git diff --quiet -- index.js; then
+            echo "No backend patch needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.js
+          git commit -m "Enforce deleted Schedule occurrences server-side"
+          git push origin HEAD:fix/schedule-occurrence-server-guard
