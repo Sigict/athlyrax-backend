@@ -32,7 +32,11 @@ try {
   process.exit(1);
 }
 
-if (String(seed?.__meta?.tenantId || '').trim() !== 'demo-company') {
+// Existing verified demo seeds may predate explicit tenant metadata. Match the
+// production recovery contract: absence is allowed, but a conflicting declared
+// tenant is rejected.
+const declaredTenantId = String(seed?.__meta?.tenantId || '').trim();
+if (declaredTenantId && declaredTenantId !== 'demo-company') {
   console.error('ATHLYRAX_BACKEND_DEMO_SEED_WRONG_TENANT');
   process.exit(1);
 }
