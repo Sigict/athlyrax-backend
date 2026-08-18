@@ -6225,10 +6225,10 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		const merged = mergePlannerTargets(body, backupRows);
 
 		// Tombstone merge: union of what's on disk with what the client sent.
-		const mergedTombstones = mergeTombstoneLists(
-			Array.isArray(currentDb?.__tombstones) ? currentDb.__tombstones : [],
-			Array.isArray(body?.__tombstones) ? body.__tombstones : [],
-		);
+		const mergedTombstones = mergeTombstoneLists(
+			Array.isArray(currentDb?.__tombstones) ? currentDb.__tombstones : [],
+			Array.isArray(body?.__tombstones) ? body.__tombstones : [],
+		);
 		const tombstoneLookup = buildTombstoneLookup(mergedTombstones);
 		const mergedScheduleOccurrenceSuppressions = mergeScheduleOccurrenceSuppressionLists(
 			Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : [],
@@ -6237,10 +6237,10 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 
 		// Filter the incoming payload: any tombstoned row not legitimately re-created after
 		// the tombstone is refused. This is where deletion becomes durable.
-		const filtered = applyTombstonesToDbShape({
-			...body,
-			trainingPlannerWeeks: merged.nextWeeks,
-		}, tombstoneLookup);
+		const filtered = applyTombstonesToDbShape({
+			...body,
+			trainingPlannerWeeks: merged.nextWeeks,
+		}, tombstoneLookup);
 
 		const occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape(
 			filtered.dbShape,
