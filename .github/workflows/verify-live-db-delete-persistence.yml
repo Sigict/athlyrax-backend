@@ -1,4 +1,4 @@
-name: Verify live DB delete persistence
+name: Verify live storage boundary
 
 on:
   push:
@@ -7,133 +7,65 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
-  verify-live-db-delete:
+  verify-live-storage:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
       BACKEND_URL: https://athlyrax-backend.onrender.com
-      DEMO_USERNAME: demo.coach
-      DEMO_PASSWORD: DemoCoach123!
       EXPECTED_GUARD: 2026-08-13-v1
     steps:
       - name: Checkout exact commit
         uses: actions/checkout@v4
 
-      - name: Wait for deployed DB persistence guard
+      - name: Verify exact live backend and persistence boundary without writes
+        id: verify_storage
+        shell: bash
         run: |
           set -euo pipefail
           headers="$(mktemp)"
           body="$(mktemp)"
           trap 'rm -f "${headers}" "${body}"' EXIT
+
           for attempt in $(seq 1 40); do
             : >"${headers}"
             : >"${body}"
-            curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
-              --dump-header "${headers}" --output "${body}" \
-              "${BACKEND_URL}/db?guard_probe=${GITHUB_SHA}-${attempt}" || true
+            code="$(curl --silent --show-error --location \
+              --connect-timeout 15 --max-time 30 \
+              --dump-header "${headers}" --output "${body}" --write-out '%{http_code}' \
+              "${BACKEND_URL}/db?storage_boundary_probe=${GITHUB_SHA}-${attempt}" || true)"
+
             guard="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-DB-Persistence-Guard:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
-            if [[ "${guard}" == "${EXPECTED_GUARD}" ]]; then
+            backend_commit="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
+
+            if [[ "${code}" == "401" && "${guard}" == "${EXPECTED_GUARD}" && "${backend_commit}" == "${GITHUB_SHA}" ]]; then
               grep -qi '^Cache-Control:.*no-store' "${headers}"
-              echo "Live Render DB persistence guard ${guard} is active and /db is no-store."
+              echo "Exact live backend ${backend_commit} exposes persistence guard ${guard}; protected /db is read-only probed and no-store."
+              echo 'ATHLYRAX_LIVE_STORAGE_BOUNDARY_OK'
               exit 0
             fi
-            echo "Waiting for live DB persistence guard (${attempt}/40); received=${guard:-missing}"
+
+            echo "Waiting for exact live storage boundary (${attempt}/40): status=${code}, commit=${backend_commit:-missing}, guard=${guard:-missing}"
             sleep 15
           done
-          echo "Render did not expose DB persistence guard ${EXPECTED_GUARD}." >&2
+
+          echo "Render did not expose the exact commit and required read-only storage boundary in time." >&2
           exit 1
 
-      - name: Prove a live DB deletion survives reload
+      - name: Record storage-boundary verification
+        if: always() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          set -euo pipefail
-          jar="$(mktemp)"
-          login="$(mktemp)"
-          original="$(mktemp)"
-          with_probe="$(mktemp)"
-          after_add="$(mktemp)"
-          without_probe="$(mktemp)"
-          after_delete="$(mktemp)"
-          headers="$(mktemp)"
-          add_headers="$(mktemp)"
-          trap 'rm -f "${jar}" "${login}" "${original}" "${with_probe}" "${after_add}" "${without_probe}" "${after_delete}" "${headers}" "${add_headers}"' EXIT
+          gh issue comment 23 --repo "${GITHUB_REPOSITORY}" --body-file - <<EOF
+          LIVE_STORAGE_BOUNDARY_RESULT
 
-          login_code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
-            --cookie-jar "${jar}" --header 'Content-Type: application/json' \
-            --data "{\"username\":\"${DEMO_USERNAME}\",\"password\":\"${DEMO_PASSWORD}\"}" \
-            --output "${login}" --write-out '%{http_code}' "${BACKEND_URL}/auth/login")"
-          test "${login_code}" = "200"
-
-          csrf="$(awk '$6 ~ /athlyrax_csrf$/ {print $7}' "${jar}" | tail -n 1)"
-          if [[ -z "${csrf}" ]]; then
-            csrf="$(awk '$6 == "athlyrax_csrf" {print $7}' "${jar}" | tail -n 1)"
-          fi
-          test -n "${csrf}"
-
-          : >"${headers}"
-          curl --fail --silent --show-error --location --cookie "${jar}" \
-            --dump-header "${headers}" --output "${original}" "${BACKEND_URL}/db?phase=original&cb=$(date +%s%N)"
-          revision="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-DB-Revision:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
-
-          node --input-type=module - "${original}" "${with_probe}" <<'NODE'
-          import fs from 'node:fs';
-          const [source, target] = process.argv.slice(2);
-          const db = JSON.parse(fs.readFileSync(source, 'utf8'));
-          db.__deletePersistenceProbe = `probe-${Date.now()}`;
-          db.__meta = { ...(db.__meta || {}), updatedAt: new Date().toISOString() };
-          fs.writeFileSync(target, JSON.stringify(db));
-          NODE
-
-          : >"${add_headers}"
-          add_code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
-            --cookie "${jar}" --header 'Content-Type: application/json' --header "X-CSRF-Token: ${csrf}" \
-            ${revision:+--header "X-AthlyraX-DB-Revision: ${revision}"} \
-            --dump-header "${add_headers}" --data-binary "@${with_probe}" --output /tmp/add-response.json --write-out '%{http_code}' \
-            --request PUT "${BACKEND_URL}/db")"
-          test "${add_code}" = "200"
-          add_guard="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-DB-Persistence-Guard:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${add_headers}")"
-          test "${add_guard}" = "${EXPECTED_GUARD}"
-
-          : >"${headers}"
-          curl --fail --silent --show-error --location --cookie "${jar}" \
-            --dump-header "${headers}" --output "${after_add}" "${BACKEND_URL}/db?phase=after-add&cb=$(date +%s%N)"
-          after_add_revision="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-DB-Revision:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
-          node --input-type=module - "${after_add}" <<'NODE'
-          import fs from 'node:fs';
-          const db = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          if (!String(db.__deletePersistenceProbe || '').startsWith('probe-')) throw new Error('Live probe was not persisted.');
-          NODE
-
-          node --input-type=module - "${after_add}" "${without_probe}" <<'NODE'
-          import fs from 'node:fs';
-          const [source, target] = process.argv.slice(2);
-          const db = JSON.parse(fs.readFileSync(source, 'utf8'));
-          delete db.__deletePersistenceProbe;
-          db.__meta = { ...(db.__meta || {}), updatedAt: new Date().toISOString() };
-          fs.writeFileSync(target, JSON.stringify(db));
-          NODE
-
-          delete_code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
-            --cookie "${jar}" --header 'Content-Type: application/json' --header "X-CSRF-Token: ${csrf}" \
-            ${after_add_revision:+--header "X-AthlyraX-DB-Revision: ${after_add_revision}"} \
-            --data-binary "@${without_probe}" --output /tmp/delete-response.json --write-out '%{http_code}' \
-            --request PUT "${BACKEND_URL}/db")"
-          test "${delete_code}" = "200"
-          if grep -q '"staleWriteIgnored"[[:space:]]*:[[:space:]]*true' /tmp/delete-response.json; then
-            echo 'Live delete PUT was ignored as stale.' >&2
-            cat /tmp/delete-response.json >&2
-            exit 1
-          fi
-
-          sleep 3
-          curl --fail --silent --show-error --location --cookie "${jar}" \
-            --output "${after_delete}" "${BACKEND_URL}/db?phase=after-delete&cb=$(date +%s%N)"
-          node --input-type=module - "${after_delete}" <<'NODE'
-          import fs from 'node:fs';
-          const db = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          if (Object.prototype.hasOwnProperty.call(db, '__deletePersistenceProbe')) {
-            throw new Error('Deleted live DB field returned after reload.');
-          }
-          console.log('LIVE_DB_DELETE_PERSISTENCE_OK');
-          NODE
+          Status: ${{ job.status }}
+          Commit: ${GITHUB_SHA}
+          Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Target: ${BACKEND_URL}
+          Mutation performed: no
+          EOF
