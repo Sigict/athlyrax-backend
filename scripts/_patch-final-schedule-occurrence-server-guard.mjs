@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 
 const path = 'index.js';
-let source = fs.readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+const raw = fs.readFileSync(path, 'utf8');
+let source = raw.replace(/\r\n/g, '\n');
 let changed = false;
 
 const canonicalOnly = "\t\t\tif (collection === 'schedule' && rowId) blockedScheduleIds.add(rowId);";
@@ -20,7 +21,6 @@ if (!source.includes('const readFiltered = applyScheduleOccurrenceSuppressionsTo
   changed = true;
 }
 
-// Swimmer-scoped parsing must consume the already-filtered shape, not the raw disk bytes.
 const swimmerRawParse = "\t\t\t\t\tconst parsed = JSON.parse(String(data || '{}'));";
 const swimmerFilteredParse = "\t\t\t\t\tconst parsed = JSON.parse(String(responsePayload || '{}'));";
 if (source.includes(swimmerRawParse)) {
@@ -39,5 +39,6 @@ if (!source.includes('...(Array.isArray(occurrenceFiltered.blockedResurrections)
   throw new Error('Semantic blocked-resurrection reporting missing.');
 }
 
-if (changed) fs.writeFileSync(path, source);
-console.log(changed ? 'FINAL_SCHEDULE_OCCURRENCE_SERVER_GUARD_PATCHED' : 'FINAL_SCHEDULE_OCCURRENCE_SERVER_GUARD_ALREADY_PRESENT');
+const crlfSource = source.replace(/\n/g, '\r\n');
+if (changed || raw !== crlfSource) fs.writeFileSync(path, crlfSource);
+console.log(changed ? 'FINAL_SCHEDULE_OCCURRENCE_SERVER_GUARD_PATCHED' : 'FINAL_SCHEDULE_OCCURRENCE_SERVER_GUARD_FORMAT_VERIFIED');
