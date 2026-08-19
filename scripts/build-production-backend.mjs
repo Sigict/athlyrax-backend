@@ -57,6 +57,9 @@ run('bulk-delete tombstone capacity guard', ['scripts/patch-bulk-delete-tombston
 if (!fs.existsSync(path.join(root, 'scripts/patch-server-authoritative-schedule-delete.mjs'))) throw new Error('Required server-authoritative schedule deletion guard is missing.');
 run('server-authoritative schedule deletion guard', ['scripts/patch-server-authoritative-schedule-delete.mjs']);
 
+if (!fs.existsSync(path.join(root, 'scripts/patch-server-authoritative-schedule-delete-verification.mjs'))) throw new Error('Required server-authoritative schedule deletion match verification is missing.');
+run('server-authoritative schedule deletion match verification', ['scripts/patch-server-authoritative-schedule-delete-verification.mjs']);
+
 if (!fs.existsSync(path.join(root, 'scripts/patch-public-demo-readonly.mjs'))) throw new Error('Required public demo read-only guard is missing.');
 run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 
@@ -79,6 +82,7 @@ for (const relative of [
   'scripts/patch-request-body-limits.mjs',
   'scripts/patch-bulk-delete-tombstone-capacity.mjs',
   'scripts/patch-server-authoritative-schedule-delete.mjs',
+  'scripts/patch-server-authoritative-schedule-delete-verification.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
