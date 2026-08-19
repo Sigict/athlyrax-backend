@@ -84,6 +84,126 @@ test('legacy fingerprint blocks the same generated occurrence under both a fresh
   assert.equal(result.blockedResurrections.some((row) => row.id === 'fresh-schedule-id'), true);
 });
 
+test('stale generatedByPlanner=false does not turn a regenerated occurrence into a manual exception', () => {
+  const regenerated = {
+    id: 'stale-generated-flag',
+    generatedByPlanner: false,
+    generatedSourceSlotId: 'fresh-source-slot-id',
+    scheduleDate: legacySuppression.scheduleDate,
+    timetableId: legacySuppression.timetableId,
+    startTime: legacySuppression.startTime,
+    endTime: legacySuppression.endTime,
+    venueId: legacySuppression.venueId,
+    squadIds: ['squad-a'],
+  };
+  const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape({ schedule: [regenerated] }, [legacySuppression]);
+  assert.deepEqual(result.dbShape.schedule, [], 'only manualScheduleEntry=true may bypass generated occurrence suppression');
+
+  const explicitManual = { ...regenerated, id: 'explicit-manual', manualScheduleEntry: true };
+  const manualResult = helpers.applyScheduleOccurrenceSuppressionsToDbShape({ schedule: [explicitManual] }, [legacySuppression]);
+  assert.deepEqual(manualResult.dbShape.schedule.map((row) => row.id), ['explicit-manual']);
+});
+
+test('legacy fingerprint without timetable id blocks a regenerated occurrence that later gains timetable/source ids', () => {
+  const incompleteSuppression = {
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19T00:00:00.000Z',
+    startTime: '17:00',
+    endTime: '19:00',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  };
+  const merged = helpers.mergeScheduleOccurrenceSuppressionLists([], [incompleteSuppression]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].timetableId, undefined);
+  assert.equal(merged[0].scheduleDate, '2026-08-19');
+
+  const regenerated = {
+    id: 'fresh-regenerated',
+    generatedByPlanner: true,
+    generatedSourceSlotId: 'fresh-slot',
+    scheduleDate: '2026-08-19',
+    timetableId: 'main',
+    startTime: '17:00',
+    endTime: '19:00',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+  };
+  const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape({ schedule: [regenerated] }, merged);
+  assert.deepEqual(result.dbShape.schedule, []);
+  assert.equal(result.blockedResurrections.length, 1);
+});
+
+test('partial legacy fingerprint needs time plus context and refuses an over-broad date/squad-only identity', () => {
+  const safePartial = {
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19',
+    startTime: '17:00',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  };
+  const normalized = helpers.normalizeScheduleOccurrenceSuppressionEntry(safePartial);
+  assert.ok(normalized);
+  assert.equal(normalized.identityType, 'legacy-fingerprint');
+  assert.equal(normalized.scheduleDate, '2026-08-19');
+  assert.equal(normalized.startTime, '17:00');
+  assert.equal(normalized.venueId, 'pool-a');
+  assert.deepEqual(normalized.squadIds, ['perf-a']);
+
+  const tooBroad = helpers.normalizeScheduleOccurrenceSuppressionEntry({
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  });
+  assert.equal(tooBroad, null, 'date/squad alone must fail closed instead of blocking unrelated same-day sessions');
+});
+
+test('placeholder times are not accepted as backend semantic deletion evidence', () => {
+  const placeholder = helpers.normalizeScheduleOccurrenceSuppressionEntry({
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19',
+    startTime: '--:--',
+    endTime: '--:--',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  });
+  assert.equal(placeholder, null, 'placeholder clock text must not make an unsafe fingerprint look durable');
+});
+
+test('backend normalizes legacy clock formats before matching a regenerated occurrence', () => {
+  const legacyClockSuppression = {
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19',
+    startTime: '6:00',
+    endTime: '07:00:30',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  };
+  const merged = helpers.mergeScheduleOccurrenceSuppressionLists([], [legacyClockSuppression]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].startTime, '06:00');
+  assert.equal(merged[0].endTime, '07:00');
+
+  const regenerated = {
+    id: 'fresh-normalized-clock',
+    generatedByPlanner: true,
+    generatedSourceSlotId: 'fresh-slot',
+    timetableId: 'new-timetable',
+    scheduleDate: '2026-08-19',
+    startTime: '06:00',
+    endTime: '07:00',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+  };
+  const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape({ schedule: [regenerated] }, merged);
+  assert.deepEqual(result.dbShape.schedule, []);
+});
+
 test('legacy fingerprint still allows the next recurrence and an explicit manual same-day replacement', () => {
   const nextWeek = {
     id: 'next-week',
