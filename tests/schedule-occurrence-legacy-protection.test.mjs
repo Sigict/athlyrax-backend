@@ -84,6 +84,26 @@ test('legacy fingerprint blocks the same generated occurrence under both a fresh
   assert.equal(result.blockedResurrections.some((row) => row.id === 'fresh-schedule-id'), true);
 });
 
+test('stale generatedByPlanner=false does not turn a regenerated occurrence into a manual exception', () => {
+  const regenerated = {
+    id: 'stale-generated-flag',
+    generatedByPlanner: false,
+    generatedSourceSlotId: 'fresh-source-slot-id',
+    scheduleDate: legacySuppression.scheduleDate,
+    timetableId: legacySuppression.timetableId,
+    startTime: legacySuppression.startTime,
+    endTime: legacySuppression.endTime,
+    venueId: legacySuppression.venueId,
+    squadIds: ['squad-a'],
+  };
+  const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape({ schedule: [regenerated] }, [legacySuppression]);
+  assert.deepEqual(result.dbShape.schedule, [], 'only manualScheduleEntry=true may bypass generated occurrence suppression');
+
+  const explicitManual = { ...regenerated, id: 'explicit-manual', manualScheduleEntry: true };
+  const manualResult = helpers.applyScheduleOccurrenceSuppressionsToDbShape({ schedule: [explicitManual] }, [legacySuppression]);
+  assert.deepEqual(manualResult.dbShape.schedule.map((row) => row.id), ['explicit-manual']);
+});
+
 test('legacy fingerprint without timetable id blocks a regenerated occurrence that later gains timetable/source ids', () => {
   const incompleteSuppression = {
     identityType: 'legacy-fingerprint',
