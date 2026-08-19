@@ -3117,8 +3117,10 @@ function getScheduleOccurrenceSquadIds(row) {
 
 function isExplicitManualScheduleRow(row) {
 	if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
-	if (row?.manualScheduleEntry === true) return true;
-	return row?.generatedByPlanner === false && !getScheduleOccurrenceSourceSlotId(row);
+	// Current one-off Schedule creation persists this explicit marker. A stale
+	// generatedByPlanner=false flag is not sufficient evidence of manual origin:
+	// migrated generated rows can carry it and must remain durably deletable.
+	return row?.manualScheduleEntry === true;
 }
 
 function getScheduleOccurrenceIdentityParts(row) {
