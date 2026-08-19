@@ -3120,48 +3120,6 @@ function isExplicitManualScheduleRow(row) {
 	return row?.generatedByPlanner === false && !getScheduleOccurrenceSourceSlotId(row);
 }
 
-function scheduleOccurrenceText(value) {
-	return String(value ?? '').trim();
-}
-
-function scheduleOccurrenceArray(value) {
-	return Array.isArray(value) ? value : [];
-}
-
-function scheduleOccurrenceUnique(values) {
-	return Array.from(new Set(values.map(scheduleOccurrenceText).filter(Boolean)));
-}
-
-function getScheduleOccurrenceSourceSlotId(row) {
-	return scheduleOccurrenceText(
-		row?.generatedSourceSlotId
-		|| row?.generatedSourceScheduleId
-		|| row?.timetableSlotId
-		|| row?.sourceSlotId,
-	);
-}
-
-function getScheduleOccurrenceDate(row) {
-	return scheduleOccurrenceText(row?.scheduleDate || row?.rawDate || row?.date || row?.plannedDate);
-}
-
-function getScheduleOccurrenceTimetableId(row) {
-	return scheduleOccurrenceText(row?.timetableId || row?.timetableSourceId);
-}
-
-function getScheduleOccurrenceSquadIds(row) {
-	return scheduleOccurrenceUnique([
-		...scheduleOccurrenceArray(row?.squadIds),
-		row?.squadId,
-	]).sort();
-}
-
-function isExplicitManualScheduleRow(row) {
-	if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
-	if (row?.manualScheduleEntry === true) return true;
-	return row?.generatedByPlanner === false && !getScheduleOccurrenceSourceSlotId(row);
-}
-
 function getScheduleOccurrenceIdentityParts(row) {
 	if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
 	const sourceSlotId = getScheduleOccurrenceSourceSlotId(row);
