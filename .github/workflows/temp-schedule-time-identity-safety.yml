@@ -1,0 +1,25 @@
+name: Temporary Schedule time identity safety patch
+on:
+  push:
+    branches: [fix/schedule-deletion-fail-closed]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/schedule-deletion-fail-closed
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/_patch_schedule_time_identity_safety.mjs
+      - run: |
+          rm -f scripts/_patch_schedule_time_identity_safety.mjs
+          rm -f .github/workflows/temp-schedule-time-identity-safety.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.js scripts/_patch_schedule_time_identity_safety.mjs .github/workflows/temp-schedule-time-identity-safety.yml
+          git commit -m "Normalize Schedule clock-time suppression evidence"
+          git push origin HEAD:fix/schedule-deletion-fail-closed
