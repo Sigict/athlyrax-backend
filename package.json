@@ -37,7 +37,7 @@
     "approve:storage-layout": "node scripts/approve-storage-layout.mjs",
     "smoke:prod": "node scripts/prod-isolation-smoke.mjs",
     "test:stripe-webhook-processing-availability": "node --test tests/stripe-webhook-processing-availability.test.mjs",
-    "test:planning-deletion-protection": "node --test tests/planning-deletion-protection.test.mjs",
+    "test:planning-deletion-protection": "node --test tests/planning-deletion-protection.test.mjs tests/schedule-occurrence-server-route-contract.test.mjs",
     "audit:planning-data-shape": "node scripts/audit-planning-data-shape.mjs storage/db.json",
     "test:timetable-legacy-lock": "node --test tests/timetable-legacy-lock.test.mjs"
   },

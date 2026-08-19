@@ -84,10 +84,17 @@ if (!source.includes(marker)) {
   }
 
   const putSafeBodyOld = `\t\tconst safeBody = {\n\t\t\t...filtered.dbShape,\n\t\t\t__tombstones: mergedTombstones,\n\t\t};`;
-  const putSafeBodyNew = `\t\t// ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE\n\t\tconst safeBody = {\n\t\t\t...filtered.dbShape,\n\t\t\t__tombstones: mergedTombstones,\n\t\t\tcoachLinkRequests: Array.isArray(currentDb?.coachLinkRequests) ? currentDb.coachLinkRequests : [],\n\t\t};`;
+  const putSafeBodyOccurrence = `\t\tconst safeBody = {\n\t\t\t...occurrenceFiltered.dbShape,\n\t\t\t__tombstones: mergedTombstones,\n\t\t\t__meta: {\n\t\t\t\t...(occurrenceFiltered.dbShape?.__meta || {}),\n\t\t\t\tscheduleOccurrenceSuppressions: mergedScheduleOccurrenceSuppressions,\n\t\t\t},\n\t\t};`;
+  const putSafeBodyNewOld = `\t\t// ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE\n\t\tconst safeBody = {\n\t\t\t...filtered.dbShape,\n\t\t\t__tombstones: mergedTombstones,\n\t\t\tcoachLinkRequests: Array.isArray(currentDb?.coachLinkRequests) ? currentDb.coachLinkRequests : [],\n\t\t};`;
+  const putSafeBodyNewOccurrence = `\t\t// ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE\n\t\tconst safeBody = {\n\t\t\t...occurrenceFiltered.dbShape,\n\t\t\t__tombstones: mergedTombstones,\n\t\t\t__meta: {\n\t\t\t\t...(occurrenceFiltered.dbShape?.__meta || {}),\n\t\t\t\tscheduleOccurrenceSuppressions: mergedScheduleOccurrenceSuppressions,\n\t\t\t},\n\t\t\tcoachLinkRequests: Array.isArray(currentDb?.coachLinkRequests) ? currentDb.coachLinkRequests : [],\n\t\t};`;
   if (!source.includes('ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE')) {
-    if (!source.includes(putSafeBodyOld)) throw new Error('Generic DB PUT preservation anchor not found.');
-    source = source.replace(putSafeBodyOld, putSafeBodyNew);
+    if (source.includes(putSafeBodyOccurrence)) {
+      source = source.replace(putSafeBodyOccurrence, putSafeBodyNewOccurrence);
+    } else if (source.includes(putSafeBodyOld)) {
+      source = source.replace(putSafeBodyOld, putSafeBodyNewOld);
+    } else {
+      throw new Error('Generic DB PUT preservation anchor not found.');
+    }
   }
 
   source = `${marker}\n// Dedicated coach-link routes are the sole lifecycle authority.\n${source}`;

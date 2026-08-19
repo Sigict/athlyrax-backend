@@ -7,16 +7,30 @@ let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 const marker = '// ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED';
 if (!source.includes(marker)) {
   const getRouteStart = source.indexOf("app.get('/db', requireAuth, (req, res) => {");
-  const readAnchor = `\t\t} else {\n\t\t\tlet responsePayload = data;\n\t\t\tconst role = String(req.auth?.role || '').trim().toLowerCase();`;
-  const readIndex = source.indexOf(readAnchor, getRouteStart);
+  const legacyReadAnchor = `\t\t} else {\n\t\t\tlet responsePayload = data;\n\t\t\tconst role = String(req.auth?.role || '').trim().toLowerCase();`;
+  const occurrenceReadAnchor = `\t\t} else {\n\t\t\tlet responsePayload = data;\n\t\t\ttry {\n\t\t\t\tconst persistedShape = JSON.parse(String(data || '{}'));\n\t\t\t\tconst persistedSuppressions = Array.isArray(persistedShape?.__meta?.scheduleOccurrenceSuppressions)\n\t\t\t\t\t? persistedShape.__meta.scheduleOccurrenceSuppressions\n\t\t\t\t\t: [];\n\t\t\t\tconst readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(persistedShape, persistedSuppressions);\n\t\t\t\tresponsePayload = JSON.stringify(readFiltered.dbShape);\n\t\t\t} catch {\n\t\t\t\t// Invalid db.json is handled by the storage safety layer; preserve the original response here.\n\t\t\t}\n\t\t\tconst role = String(req.auth?.role || '').trim().toLowerCase();`;
+  const readIndex = source.indexOf(
+    source.includes(occurrenceReadAnchor) ? occurrenceReadAnchor : legacyReadAnchor,
+    getRouteStart,
+  );
   if (getRouteStart < 0 || readIndex < 0) throw new Error('GET /db read-integrity anchor was not found.');
-  const replacement = `\t\t} else {\n\t\t\t${marker}\n\t\t\tlet parsedDatabase;\n\t\t\ttry {\n\t\t\t\tparsedDatabase = JSON.parse(String(data || ''));\n\t\t\t\tif (!parsedDatabase || typeof parsedDatabase !== 'object' || Array.isArray(parsedDatabase)) {\n\t\t\t\t\tthrow new Error('Database root must be an object.');\n\t\t\t\t}\n\t\t\t} catch (error) {\n\t\t\t\tappendAuthAuditEvent({\n\t\t\t\t\taction: 'database_read_blocked',\n\t\t\t\t\treq,\n\t\t\t\t\tstatus: 'blocked',\n\t\t\t\t\treason: 'database_invalid_json',\n\t\t\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t\t\t});\n\t\t\t\tres.status(503).json({\n\t\t\t\t\terror: 'Tenant data is unavailable because the stored database failed integrity validation. No empty replacement was created.',\n\t\t\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t\t\t});\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tlet responsePayload = JSON.stringify(parsedDatabase);\n\t\t\tconst role = String(req.auth?.role || '').trim().toLowerCase();`;
-  source = source.slice(0, readIndex) + source.slice(readIndex).replace(readAnchor, replacement);
 
-  const swimmerParse = `\t\t\t\ttry {\n\t\t\t\t\tconst parsed = JSON.parse(String(data || '{}'));\n\t\t\t\t\tconst swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];`;
-  const swimmerParsed = `\t\t\t\ttry {\n\t\t\t\t\tconst parsed = parsedDatabase;\n\t\t\t\t\tconst swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];`;
-  if (!source.includes(swimmerParse)) throw new Error('GET /db swimmer parse anchor was not found.');
-  source = source.replace(swimmerParse, swimmerParsed);
+  const occurrenceAwareReplacement = `\t\t} else {\n\t\t\t${marker}\n\t\t\tlet parsedDatabase;\n\t\t\ttry {\n\t\t\t\tparsedDatabase = JSON.parse(String(data || ''));\n\t\t\t\tif (!parsedDatabase || typeof parsedDatabase !== 'object' || Array.isArray(parsedDatabase)) {\n\t\t\t\t\tthrow new Error('Database root must be an object.');\n\t\t\t\t}\n\t\t\t} catch (error) {\n\t\t\t\tappendAuthAuditEvent({\n\t\t\t\t\taction: 'database_read_blocked',\n\t\t\t\t\treq,\n\t\t\t\t\tstatus: 'blocked',\n\t\t\t\t\treason: 'database_invalid_json',\n\t\t\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t\t\t});\n\t\t\t\tres.status(503).json({\n\t\t\t\t\terror: 'Tenant data is unavailable because the stored database failed integrity validation. No empty replacement was created.',\n\t\t\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t\t\t});\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tconst persistedSuppressions = Array.isArray(parsedDatabase?.__meta?.scheduleOccurrenceSuppressions)\n\t\t\t\t? parsedDatabase.__meta.scheduleOccurrenceSuppressions\n\t\t\t\t: [];\n\t\t\tconst readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(parsedDatabase, persistedSuppressions);\n\t\t\tlet responsePayload = JSON.stringify(readFiltered.dbShape);\n\t\t\tconst role = String(req.auth?.role || '').trim().toLowerCase();`;
+
+  const legacyReplacement = `\t\t} else {\n\t\t\t${marker}\n\t\t\tlet parsedDatabase;\n\t\t\ttry {\n\t\t\t\tparsedDatabase = JSON.parse(String(data || ''));\n\t\t\t\tif (!parsedDatabase || typeof parsedDatabase !== 'object' || Array.isArray(parsedDatabase)) {\n\t\t\t\t\tthrow new Error('Database root must be an object.');\n\t\t\t\t}\n\t\t\t} catch (error) {\n\t\t\t\tappendAuthAuditEvent({\n\t\t\t\t\taction: 'database_read_blocked',\n\t\t\t\t\treq,\n\t\t\t\t\tstatus: 'blocked',\n\t\t\t\t\treason: 'database_invalid_json',\n\t\t\t\t\tdetails: { tenantKey: storagePaths.tenantKey },\n\t\t\t\t});\n\t\t\t\tres.status(503).json({\n\t\t\t\t\terror: 'Tenant data is unavailable because the stored database failed integrity validation. No empty replacement was created.',\n\t\t\t\t\ttenantKey: storagePaths.tenantKey,\n\t\t\t\t});\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tlet responsePayload = JSON.stringify(parsedDatabase);\n\t\t\tconst role = String(req.auth?.role || '').trim().toLowerCase();`;
+
+  if (source.includes(occurrenceReadAnchor)) {
+    source = source.slice(0, readIndex) + source.slice(readIndex).replace(occurrenceReadAnchor, occurrenceAwareReplacement);
+  } else {
+    source = source.slice(0, readIndex) + source.slice(readIndex).replace(legacyReadAnchor, legacyReplacement);
+  }
+
+  const swimmerRawParse = `\t\t\t\ttry {\n\t\t\t\t\tconst parsed = JSON.parse(String(data || '{}'));\n\t\t\t\t\tconst swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];`;
+  const swimmerResponseParse = `\t\t\t\ttry {\n\t\t\t\t\tconst parsed = JSON.parse(String(responsePayload || '{}'));\n\t\t\t\t\tconst swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];`;
+  const swimmerParsed = `\t\t\t\ttry {\n\t\t\t\t\tconst parsed = typeof readFiltered !== 'undefined' ? readFiltered.dbShape : parsedDatabase;\n\t\t\t\t\tconst swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];`;
+  if (source.includes(swimmerResponseParse)) source = source.replace(swimmerResponseParse, swimmerParsed);
+  else if (source.includes(swimmerRawParse)) source = source.replace(swimmerRawParse, swimmerParsed);
+  else throw new Error('GET /db swimmer parse anchor was not found.');
 
   const unsafeSwimmerCatch = `\t\t\t\t} catch {\n\t\t\t\t\tresponsePayload = JSON.stringify({ swimmers: [] });\n\t\t\t\t}`;
   const safeSwimmerCatch = `\t\t\t\t} catch (error) {\n\t\t\t\t\tappendAuthAuditEvent({ action: 'database_read_blocked', req, status: 'blocked', reason: 'swimmer_scope_filter_failed', details: { tenantKey: storagePaths.tenantKey } });\n\t\t\t\t\tres.status(503).json({ error: 'Swimmer data could not be safely scoped. No empty result was substituted.' });\n\t\t\t\t\treturn;\n\t\t\t\t}`;
