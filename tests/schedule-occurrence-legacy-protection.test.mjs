@@ -161,6 +161,49 @@ test('partial legacy fingerprint needs time plus context and refuses an over-bro
   assert.equal(tooBroad, null, 'date/squad alone must fail closed instead of blocking unrelated same-day sessions');
 });
 
+test('placeholder times are not accepted as backend semantic deletion evidence', () => {
+  const placeholder = helpers.normalizeScheduleOccurrenceSuppressionEntry({
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19',
+    startTime: '--:--',
+    endTime: '--:--',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  });
+  assert.equal(placeholder, null, 'placeholder clock text must not make an unsafe fingerprint look durable');
+});
+
+test('backend normalizes legacy clock formats before matching a regenerated occurrence', () => {
+  const legacyClockSuppression = {
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19',
+    startTime: '6:00',
+    endTime: '07:00:30',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  };
+  const merged = helpers.mergeScheduleOccurrenceSuppressionLists([], [legacyClockSuppression]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].startTime, '06:00');
+  assert.equal(merged[0].endTime, '07:00');
+
+  const regenerated = {
+    id: 'fresh-normalized-clock',
+    generatedByPlanner: true,
+    generatedSourceSlotId: 'fresh-slot',
+    timetableId: 'new-timetable',
+    scheduleDate: '2026-08-19',
+    startTime: '06:00',
+    endTime: '07:00',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+  };
+  const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape({ schedule: [regenerated] }, merged);
+  assert.deepEqual(result.dbShape.schedule, []);
+});
+
 test('legacy fingerprint still allows the next recurrence and an explicit manual same-day replacement', () => {
   const nextWeek = {
     id: 'next-week',
