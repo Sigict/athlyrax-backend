@@ -20,11 +20,15 @@ test('server semantic guard covers canonical Schedule and stale trainingSchedule
   assert.ok(!source.includes("if (collection === 'schedule' && rowId) blockedScheduleIds.add(rowId);"));
 });
 
-test('GET /db filters already-persisted suppressed occurrences before returning them', () => {
-  assert.ok(source.includes("const persistedSuppressions = Array.isArray(persistedShape?.__meta?.scheduleOccurrenceSuppressions)"));
-  assert.ok(source.includes('const readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(persistedShape, persistedSuppressions);'));
-  assert.ok(source.includes('responsePayload = JSON.stringify(readFiltered.dbShape);'));
-  assert.ok(source.includes("const parsed = JSON.parse(String(responsePayload || '{}'));"), 'swimmer-scoped GET must consume the filtered payload');
+test('installed GET /db validates stored data then filters already-persisted suppressed occurrences before returning them', () => {
+  assert.ok(source.includes('// ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED'), 'production GET must retain the fail-closed database-read guard');
+  assert.ok(source.includes("const persistedSuppressions = Array.isArray(parsedDatabase?.__meta?.scheduleOccurrenceSuppressions)"));
+  assert.ok(source.includes('const readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(parsedDatabase, persistedSuppressions);'));
+  assert.ok(source.includes('let responsePayload = JSON.stringify(readFiltered.dbShape);'));
+  assert.ok(
+    source.includes("const parsed = typeof readFiltered !== 'undefined' ? readFiltered.dbShape : parsedDatabase;"),
+    'swimmer-scoped GET must consume the validated, suppression-filtered database shape',
+  );
 });
 
 test('PUT /db reports both row-id and semantic resurrection blocks', () => {
