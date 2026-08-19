@@ -1,0 +1,31 @@
+name: Temporary tighten Schedule legacy fingerprint
+
+on:
+  push:
+    branches:
+      - fix/schedule-deletion-fail-closed
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/schedule-deletion-fail-closed
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/_tighten_schedule_legacy_fingerprint.mjs
+      - run: |
+          rm -f scripts/_tighten_schedule_legacy_fingerprint.mjs
+          rm -f .github/workflows/temp-tighten-schedule-legacy-fingerprint.yml
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.js scripts/_tighten_schedule_legacy_fingerprint.mjs .github/workflows/temp-tighten-schedule-legacy-fingerprint.yml
+          git commit -m "Reject over-broad backend Schedule fingerprints"
+          git push origin HEAD:fix/schedule-deletion-fail-closed
