@@ -1,0 +1,38 @@
+name: Temporary Schedule fail-closed patch
+
+on:
+  push:
+    branches:
+      - fix/schedule-deletion-fail-closed
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/schedule-deletion-fail-closed
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Patch backend Schedule suppression
+        run: node scripts/_patch_schedule_fail_closed.mjs
+      - name: Remove temporary patch machinery
+        run: |
+          rm -f scripts/_patch_schedule_fail_closed.mjs
+          rm -f .github/workflows/temp-schedule-fail-closed.yml
+      - name: Commit patched backend source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.js scripts/_patch_schedule_fail_closed.mjs .github/workflows/temp-schedule-fail-closed.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Make backend Schedule suppression tolerate incomplete legacy identity"
+          git push origin HEAD:fix/schedule-deletion-fail-closed
