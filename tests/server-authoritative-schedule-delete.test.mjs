@@ -43,12 +43,29 @@ test('authoritative delete rereads persisted tenant DB and refuses success if an
   assert.ok(route.includes("res.setHeader('X-AthlyraX-DB-Revision', String(result.storageRevision));"));
 });
 
-test('production build permanently installs the authoritative deletion route after canonical transforms', () => {
+test('authoritative delete cannot report verified success when zero persisted rows matched', () => {
+  const routeStart = source.indexOf("app.post('/db/schedule-delete'");
+  const putStart = source.indexOf("app.put('/db'", routeStart);
+  const route = source.slice(routeStart, putStart);
+  assert.ok(route.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_MATCH_VERIFICATION_V1'));
+  assert.ok(route.includes('removedPersistedScheduleCount'));
+  assert.ok(route.includes('removedPersistedTrainingSessionCount'));
+  assert.ok(route.includes('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.'));
+  const refusalIndex = route.indexOf('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.');
+  const successIndex = route.indexOf('verified: true');
+  assert.ok(refusalIndex > route.indexOf('const persisted = readJsonFile(storagePaths.dbPath);'));
+  assert.ok(successIndex > refusalIndex);
+});
+
+test('production build permanently installs the authoritative deletion route and match verification after canonical transforms', () => {
   const capacityIndex = buildSource.indexOf("run('bulk-delete tombstone capacity guard'");
   const authoritativeIndex = buildSource.indexOf("run('server-authoritative schedule deletion guard'");
+  const verificationIndex = buildSource.indexOf("run('server-authoritative schedule deletion match verification'");
   const demoIndex = buildSource.indexOf("run('public demo read-only guard'");
   assert.ok(capacityIndex >= 0);
   assert.ok(authoritativeIndex > capacityIndex);
-  assert.ok(demoIndex > authoritativeIndex);
+  assert.ok(verificationIndex > authoritativeIndex);
+  assert.ok(demoIndex > verificationIndex);
   assert.ok(buildSource.includes("'scripts/patch-server-authoritative-schedule-delete.mjs',"));
+  assert.ok(buildSource.includes("'scripts/patch-server-authoritative-schedule-delete-verification.mjs',"));
 });
