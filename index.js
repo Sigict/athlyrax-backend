@@ -3155,7 +3155,7 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 			}
 			const identity = getScheduleOccurrenceIdentityParts(row);
 			const rowId = toRowId(row?.id);
-			if (collection === 'schedule' && rowId) blockedScheduleIds.add(rowId);
+			if (rowId) blockedScheduleIds.add(rowId);
 			blockedResurrections.push({
 				collection,
 				id: rowId,
@@ -5988,13 +5988,23 @@ app.get('/db', requireAuth, (req, res) => {
 			res.status(500).json({ error: 'Could not read db.json', tenant: storagePaths.tenantKey });
 		} else {
 			let responsePayload = data;
+			try {
+				const persistedShape = JSON.parse(String(data || '{}'));
+				const persistedSuppressions = Array.isArray(persistedShape?.__meta?.scheduleOccurrenceSuppressions)
+					? persistedShape.__meta.scheduleOccurrenceSuppressions
+					: [];
+				const readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(persistedShape, persistedSuppressions);
+				responsePayload = JSON.stringify(readFiltered.dbShape);
+			} catch {
+				// Invalid db.json is handled by the storage safety layer; preserve the original response here.
+			}
 			const role = String(req.auth?.role || '').trim().toLowerCase();
 			if (role === 'swimmer') {
 				const authUsername = String(req.auth?.username || '').trim().toLowerCase();
 				const authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
 				const authEmail = String(authUser?.email || '').trim().toLowerCase();
 				try {
-					const parsed = JSON.parse(String(data || '{}'));
+					const parsed = JSON.parse(String(responsePayload || '{}'));
 					const swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];
 					let scopedSwimmers = swimmers.filter((row) => {
 						const rowUsername = String(row?.swimmerAccountUsername || '').trim().toLowerCase();
@@ -6269,7 +6279,10 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 			recoveredTargets: merged.recoveredTargets,
 			recoveredFixtureIds: merged.recoveredFixtureIds,
 			staleWriteIgnored: false,
-			blockedResurrections: filtered.blockedResurrections,
+			blockedResurrections: [
+				...(Array.isArray(filtered.blockedResurrections) ? filtered.blockedResurrections : []),
+				...(Array.isArray(occurrenceFiltered.blockedResurrections) ? occurrenceFiltered.blockedResurrections : []),
+			],
 			tombstoneCount: mergedTombstones.length,
 		};
 	})
