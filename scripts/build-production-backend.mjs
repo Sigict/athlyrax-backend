@@ -44,13 +44,15 @@ const transforms = [
   'scripts/patch-production-error-redaction.mjs',
   'scripts/patch-production-cors-origins.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
-  'scripts/patch-bulk-delete-tombstone-capacity.mjs',
 ];
 
 for (const relative of transforms) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required production transform is missing: ${relative}`);
   run(relative, [relative]);
 }
+
+if (!fs.existsSync(path.join(root, 'scripts/patch-bulk-delete-tombstone-capacity.mjs'))) throw new Error('Required bulk-delete tombstone capacity guard is missing.');
+run('bulk-delete tombstone capacity guard', ['scripts/patch-bulk-delete-tombstone-capacity.mjs']);
 
 if (!fs.existsSync(path.join(root, 'scripts/patch-public-demo-readonly.mjs'))) throw new Error('Required public demo read-only guard is missing.');
 run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
