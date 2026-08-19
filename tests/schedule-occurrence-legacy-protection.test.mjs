@@ -115,20 +115,30 @@ test('legacy fingerprint without timetable id blocks a regenerated occurrence th
   assert.equal(result.blockedResurrections.length, 1);
 });
 
-test('partial legacy fingerprint can be normalized without start/end when other stable evidence exists', () => {
-  const sparse = {
+test('partial legacy fingerprint needs time plus context and refuses an over-broad date/squad-only identity', () => {
+  const safePartial = {
     identityType: 'legacy-fingerprint',
     scheduleDate: '2026-08-19',
+    startTime: '17:00',
     venueId: 'pool-a',
     squadIds: ['perf-a'],
     deletedAt: '2026-08-19T10:30:00.000Z',
   };
-  const normalized = helpers.normalizeScheduleOccurrenceSuppressionEntry(sparse);
+  const normalized = helpers.normalizeScheduleOccurrenceSuppressionEntry(safePartial);
   assert.ok(normalized);
   assert.equal(normalized.identityType, 'legacy-fingerprint');
   assert.equal(normalized.scheduleDate, '2026-08-19');
+  assert.equal(normalized.startTime, '17:00');
   assert.equal(normalized.venueId, 'pool-a');
   assert.deepEqual(normalized.squadIds, ['perf-a']);
+
+  const tooBroad = helpers.normalizeScheduleOccurrenceSuppressionEntry({
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  });
+  assert.equal(tooBroad, null, 'date/squad alone must fail closed instead of blocking unrelated same-day sessions');
 });
 
 test('legacy fingerprint still allows the next recurrence and an explicit manual same-day replacement', () => {
