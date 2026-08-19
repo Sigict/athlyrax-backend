@@ -3103,6 +3103,19 @@ function getScheduleOccurrenceDate(row) {
 	return scheduleOccurrenceText(row?.scheduleDate || row?.rawDate || row?.date || row?.plannedDate).slice(0, 10);
 }
 
+function getScheduleOccurrenceTime(value) {
+	const rawValue = scheduleOccurrenceText(value);
+	const match = rawValue.match(/^(\d{1,2})[.:](\d{2})(?::(\d{2}))?$/);
+	if (!match) return '';
+	const hour = Number(match[1]);
+	const minute = Number(match[2]);
+	const second = match[3] === undefined ? 0 : Number(match[3]);
+	if (!Number.isInteger(hour) || hour < 0 || hour > 23) return '';
+	if (!Number.isInteger(minute) || minute < 0 || minute > 59) return '';
+	if (!Number.isInteger(second) || second < 0 || second > 59) return '';
+	return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
 function getScheduleOccurrenceTimetableId(row) {
 	return scheduleOccurrenceText(row?.timetableId || row?.timetableSourceId);
 }
@@ -3142,8 +3155,8 @@ function getScheduleOccurrenceFingerprint(row) {
 	const scheduleDate = getScheduleOccurrenceDate(row);
 	if (!scheduleDate) return null;
 	const timetableId = getScheduleOccurrenceTimetableId(row);
-	const startTime = scheduleOccurrenceText(row?.startTime);
-	const endTime = scheduleOccurrenceText(row?.endTime);
+	const startTime = getScheduleOccurrenceTime(row?.startTime);
+	const endTime = getScheduleOccurrenceTime(row?.endTime);
 	const venueId = scheduleOccurrenceText(row?.venueId || row?.venue);
 	const squadIds = getScheduleOccurrenceSquadIds(row);
 	const sessionTypeId = scheduleOccurrenceText(row?.sessionTypeId || row?.trainingTypeId || row?.sessionType || row?.type);
