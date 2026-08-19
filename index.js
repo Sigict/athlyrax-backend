@@ -3145,7 +3145,14 @@ function getScheduleOccurrenceFingerprint(row) {
 	const venueId = scheduleOccurrenceText(row?.venueId || row?.venue);
 	const squadIds = getScheduleOccurrenceSquadIds(row);
 	const sessionTypeId = scheduleOccurrenceText(row?.sessionTypeId || row?.trainingTypeId || row?.sessionType || row?.type);
-	if (!timetableId && !startTime && !endTime && !venueId && squadIds.length === 0 && !sessionTypeId) return null;
+	const timeEvidenceCount = Number(Boolean(startTime)) + Number(Boolean(endTime));
+	const contextEvidenceCount = Number(Boolean(timetableId))
+		+ Number(Boolean(venueId))
+		+ Number(squadIds.length > 0)
+		+ Number(Boolean(sessionTypeId));
+	const hasSafeFingerprintEvidence = timeEvidenceCount >= 2
+		|| (timeEvidenceCount >= 1 && contextEvidenceCount >= 1);
+	if (!hasSafeFingerprintEvidence) return null;
 	return {
 		identityType: 'legacy-fingerprint',
 		scheduleDate,
