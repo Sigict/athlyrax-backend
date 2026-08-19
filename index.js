@@ -3137,20 +3137,23 @@ function getScheduleOccurrenceIdentityKey(row) {
 function getScheduleOccurrenceFingerprint(row) {
 	if (!row || typeof row !== 'object' || Array.isArray(row) || isExplicitManualScheduleRow(row)) return null;
 	const scheduleDate = getScheduleOccurrenceDate(row);
+	if (!scheduleDate) return null;
 	const timetableId = getScheduleOccurrenceTimetableId(row);
 	const startTime = scheduleOccurrenceText(row?.startTime);
 	const endTime = scheduleOccurrenceText(row?.endTime);
-	if (!scheduleDate || !timetableId || !startTime || !endTime) return null;
 	const venueId = scheduleOccurrenceText(row?.venueId || row?.venue);
 	const squadIds = getScheduleOccurrenceSquadIds(row);
+	const sessionTypeId = scheduleOccurrenceText(row?.sessionTypeId || row?.trainingTypeId || row?.sessionType || row?.type);
+	if (!timetableId && !startTime && !endTime && !venueId && squadIds.length === 0 && !sessionTypeId) return null;
 	return {
 		identityType: 'legacy-fingerprint',
 		scheduleDate,
-		timetableId,
-		startTime,
-		endTime,
+		...(timetableId ? { timetableId } : {}),
+		...(startTime ? { startTime } : {}),
+		...(endTime ? { endTime } : {}),
 		...(venueId ? { venueId } : {}),
 		squadIds,
+		...(sessionTypeId ? { sessionTypeId } : {}),
 	};
 }
 
@@ -3163,12 +3166,13 @@ function getScheduleOccurrenceSuppressionKey(row) {
 	if (!fingerprint) return '';
 	return JSON.stringify([
 		'legacy-fingerprint',
-		fingerprint.timetableId,
+		fingerprint.timetableId || '*',
 		fingerprint.scheduleDate,
-		fingerprint.startTime,
-		fingerprint.endTime,
+		fingerprint.startTime || '*',
+		fingerprint.endTime || '*',
 		fingerprint.venueId || '*',
 		fingerprint.squadIds,
+		fingerprint.sessionTypeId || '*',
 	]);
 }
 
@@ -3231,12 +3235,13 @@ function matchesScheduleOccurrenceSuppression(suppression, row) {
 	const candidate = getScheduleOccurrenceFingerprint({ ...row, manualScheduleEntry: false, generatedByPlanner: true });
 	if (!candidate) return false;
 	if (candidate.scheduleDate !== suppression.scheduleDate) return false;
-	if (candidate.timetableId !== suppression.timetableId) return false;
-	if (candidate.startTime !== suppression.startTime) return false;
-	if (candidate.endTime !== suppression.endTime) return false;
+	if (suppression.timetableId && candidate.timetableId !== suppression.timetableId) return false;
+	if (suppression.startTime && candidate.startTime !== suppression.startTime) return false;
+	if (suppression.endTime && candidate.endTime !== suppression.endTime) return false;
 	if (suppression.venueId && candidate.venueId !== suppression.venueId) return false;
 	if (scheduleOccurrenceArray(suppression.squadIds).length > 0
 		&& !scheduleOccurrenceSameIds(candidate.squadIds, suppression.squadIds)) return false;
+	if (suppression.sessionTypeId && candidate.sessionTypeId !== suppression.sessionTypeId) return false;
 	return true;
 }
 
