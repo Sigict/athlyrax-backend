@@ -84,6 +84,53 @@ test('legacy fingerprint blocks the same generated occurrence under both a fresh
   assert.equal(result.blockedResurrections.some((row) => row.id === 'fresh-schedule-id'), true);
 });
 
+test('legacy fingerprint without timetable id blocks a regenerated occurrence that later gains timetable/source ids', () => {
+  const incompleteSuppression = {
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19T00:00:00.000Z',
+    startTime: '17:00',
+    endTime: '19:00',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  };
+  const merged = helpers.mergeScheduleOccurrenceSuppressionLists([], [incompleteSuppression]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].timetableId, undefined);
+  assert.equal(merged[0].scheduleDate, '2026-08-19');
+
+  const regenerated = {
+    id: 'fresh-regenerated',
+    generatedByPlanner: true,
+    generatedSourceSlotId: 'fresh-slot',
+    scheduleDate: '2026-08-19',
+    timetableId: 'main',
+    startTime: '17:00',
+    endTime: '19:00',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+  };
+  const result = helpers.applyScheduleOccurrenceSuppressionsToDbShape({ schedule: [regenerated] }, merged);
+  assert.deepEqual(result.dbShape.schedule, []);
+  assert.equal(result.blockedResurrections.length, 1);
+});
+
+test('partial legacy fingerprint can be normalized without start/end when other stable evidence exists', () => {
+  const sparse = {
+    identityType: 'legacy-fingerprint',
+    scheduleDate: '2026-08-19',
+    venueId: 'pool-a',
+    squadIds: ['perf-a'],
+    deletedAt: '2026-08-19T10:30:00.000Z',
+  };
+  const normalized = helpers.normalizeScheduleOccurrenceSuppressionEntry(sparse);
+  assert.ok(normalized);
+  assert.equal(normalized.identityType, 'legacy-fingerprint');
+  assert.equal(normalized.scheduleDate, '2026-08-19');
+  assert.equal(normalized.venueId, 'pool-a');
+  assert.deepEqual(normalized.squadIds, ['perf-a']);
+});
+
 test('legacy fingerprint still allows the next recurrence and an explicit manual same-day replacement', () => {
   const nextWeek = {
     id: 'next-week',
