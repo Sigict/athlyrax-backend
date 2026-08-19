@@ -3078,19 +3078,55 @@ function collectTimetableLegacyLockViolations(existingDbShape, incomingBody) {
 }
 
 
+function scheduleOccurrenceText(value) {
+	return String(value ?? '').trim();
+}
+
+function scheduleOccurrenceArray(value) {
+	return Array.isArray(value) ? value : [];
+}
+
+function scheduleOccurrenceUnique(values) {
+	return Array.from(new Set(values.map(scheduleOccurrenceText).filter(Boolean)));
+}
+
+function getScheduleOccurrenceSourceSlotId(row) {
+	return scheduleOccurrenceText(
+		row?.generatedSourceSlotId
+		|| row?.generatedSourceScheduleId
+		|| row?.timetableSlotId
+		|| row?.sourceSlotId,
+	);
+}
+
+function getScheduleOccurrenceDate(row) {
+	return scheduleOccurrenceText(row?.scheduleDate || row?.rawDate || row?.date || row?.plannedDate);
+}
+
+function getScheduleOccurrenceTimetableId(row) {
+	return scheduleOccurrenceText(row?.timetableId || row?.timetableSourceId);
+}
+
+function getScheduleOccurrenceSquadIds(row) {
+	return scheduleOccurrenceUnique([
+		...scheduleOccurrenceArray(row?.squadIds),
+		row?.squadId,
+	]).sort();
+}
+
+function isExplicitManualScheduleRow(row) {
+	if (!row || typeof row !== 'object' || Array.isArray(row)) return false;
+	if (row?.manualScheduleEntry === true) return true;
+	return row?.generatedByPlanner === false && !getScheduleOccurrenceSourceSlotId(row);
+}
+
 function getScheduleOccurrenceIdentityParts(row) {
 	if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
-	const sourceSlotId = String(
-		row.generatedSourceSlotId
-		|| row.generatedSourceScheduleId
-		|| row.timetableSlotId
-		|| row.sourceSlotId
-		|| '',
-	).trim();
-	const scheduleDate = String(row.scheduleDate || row.rawDate || row.date || row.plannedDate || '').trim();
-	const timetableId = String(row.timetableId || row.timetableSourceId || '').trim();
+	const sourceSlotId = getScheduleOccurrenceSourceSlotId(row);
+	const scheduleDate = getScheduleOccurrenceDate(row);
+	const timetableId = getScheduleOccurrenceTimetableId(row);
 	if (!sourceSlotId || !scheduleDate || !timetableId) return null;
-	return { sourceSlotId, scheduleDate, timetableId };
+	return { identityType: 'source-slot', sourceSlotId, scheduleDate, timetableId };
 }
 
 function getScheduleOccurrenceIdentityKey(row) {
@@ -3098,17 +3134,62 @@ function getScheduleOccurrenceIdentityKey(row) {
 	return identity ? JSON.stringify([identity.sourceSlotId, identity.scheduleDate, identity.timetableId]) : '';
 }
 
+function getScheduleOccurrenceFingerprint(row) {
+	if (!row || typeof row !== 'object' || Array.isArray(row) || isExplicitManualScheduleRow(row)) return null;
+	const scheduleDate = getScheduleOccurrenceDate(row);
+	const timetableId = getScheduleOccurrenceTimetableId(row);
+	const startTime = scheduleOccurrenceText(row?.startTime);
+	const endTime = scheduleOccurrenceText(row?.endTime);
+	if (!scheduleDate || !timetableId || !startTime || !endTime) return null;
+	const venueId = scheduleOccurrenceText(row?.venueId || row?.venue);
+	const squadIds = getScheduleOccurrenceSquadIds(row);
+	return {
+		identityType: 'legacy-fingerprint',
+		scheduleDate,
+		timetableId,
+		startTime,
+		endTime,
+		...(venueId ? { venueId } : {}),
+		squadIds,
+	};
+}
+
+function getScheduleOccurrenceSuppressionKey(row) {
+	const identity = getScheduleOccurrenceIdentityParts(row);
+	if (identity && scheduleOccurrenceText(row?.identityType) !== 'legacy-fingerprint') {
+		return JSON.stringify([identity.sourceSlotId, identity.scheduleDate, identity.timetableId]);
+	}
+	const fingerprint = getScheduleOccurrenceFingerprint({ ...row, manualScheduleEntry: false, generatedByPlanner: true });
+	if (!fingerprint) return '';
+	return JSON.stringify([
+		'legacy-fingerprint',
+		fingerprint.timetableId,
+		fingerprint.scheduleDate,
+		fingerprint.startTime,
+		fingerprint.endTime,
+		fingerprint.venueId || '*',
+		fingerprint.squadIds,
+	]);
+}
+
 function normalizeScheduleOccurrenceSuppressionEntry(entry) {
-	const identity = getScheduleOccurrenceIdentityParts(entry);
-	if (!identity) return null;
+	if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+	const requestedType = scheduleOccurrenceText(entry?.identityType);
+	let normalizedIdentity = null;
+	if (requestedType === 'legacy-fingerprint' || (!getScheduleOccurrenceSourceSlotId(entry) && (entry?.startTime || entry?.endTime))) {
+		normalizedIdentity = getScheduleOccurrenceFingerprint({ ...entry, manualScheduleEntry: false, generatedByPlanner: true });
+	} else {
+		normalizedIdentity = getScheduleOccurrenceIdentityParts(entry);
+	}
+	if (!normalizedIdentity) return null;
 	const deletedAtMs = parseIsoMs(entry?.deletedAt);
 	const deletedAt = Number.isFinite(deletedAtMs)
 		? new Date(deletedAtMs).toISOString()
 		: new Date().toISOString();
 	return {
-		...identity,
+		...normalizedIdentity,
 		deletedAt,
-		deletedBy: String(entry?.deletedBy || '').trim().toLowerCase() || 'unknown-actor',
+		deletedBy: scheduleOccurrenceText(entry?.deletedBy).toLowerCase() || 'unknown-actor',
 	};
 }
 
@@ -3119,7 +3200,7 @@ function mergeScheduleOccurrenceSuppressionLists(existingList, incomingList) {
 		for (const raw of sourceList) {
 			const entry = normalizeScheduleOccurrenceSuppressionEntry(raw);
 			if (!entry) continue;
-			const key = getScheduleOccurrenceIdentityKey(entry);
+			const key = getScheduleOccurrenceSuppressionKey(entry);
 			if (!key) continue;
 			const prior = byKey.get(key);
 			if (!prior || parseIsoMs(entry.deletedAt) >= parseIsoMs(prior.deletedAt)) byKey.set(key, entry);
@@ -3128,16 +3209,43 @@ function mergeScheduleOccurrenceSuppressionLists(existingList, incomingList) {
 	return Array.from(byKey.values()).sort((a, b) => parseIsoMs(b.deletedAt) - parseIsoMs(a.deletedAt));
 }
 
+function scheduleOccurrenceSameIds(left, right) {
+	const a = scheduleOccurrenceUnique(scheduleOccurrenceArray(left)).sort();
+	const b = scheduleOccurrenceUnique(scheduleOccurrenceArray(right)).sort();
+	if (a.length !== b.length) return false;
+	return a.every((value, index) => value === b[index]);
+}
+
+function matchesScheduleOccurrenceSuppression(suppression, row) {
+	if (isExplicitManualScheduleRow(row)) return false;
+	if (suppression?.identityType === 'source-slot') {
+		const identity = getScheduleOccurrenceIdentityParts(row);
+		return Boolean(
+			identity
+			&& identity.sourceSlotId === suppression.sourceSlotId
+			&& identity.scheduleDate === suppression.scheduleDate
+			&& identity.timetableId === suppression.timetableId
+		);
+	}
+	if (suppression?.identityType !== 'legacy-fingerprint') return false;
+	const candidate = getScheduleOccurrenceFingerprint({ ...row, manualScheduleEntry: false, generatedByPlanner: true });
+	if (!candidate) return false;
+	if (candidate.scheduleDate !== suppression.scheduleDate) return false;
+	if (candidate.timetableId !== suppression.timetableId) return false;
+	if (candidate.startTime !== suppression.startTime) return false;
+	if (candidate.endTime !== suppression.endTime) return false;
+	if (suppression.venueId && candidate.venueId !== suppression.venueId) return false;
+	if (scheduleOccurrenceArray(suppression.squadIds).length > 0
+		&& !scheduleOccurrenceSameIds(candidate.squadIds, suppression.squadIds)) return false;
+	return true;
+}
+
 function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 	if (!dbShape || typeof dbShape !== 'object' || Array.isArray(dbShape)) {
 		return { dbShape, blockedResurrections: [] };
 	}
-	const suppressionKeys = new Set(
-		(Array.isArray(suppressions) ? suppressions : [])
-			.map((entry) => getScheduleOccurrenceIdentityKey(entry))
-			.filter(Boolean),
-	);
-	if (suppressionKeys.size === 0) return { dbShape, blockedResurrections: [] };
+	const normalizedSuppressions = mergeScheduleOccurrenceSuppressionLists([], suppressions);
+	if (normalizedSuppressions.length === 0) return { dbShape, blockedResurrections: [] };
 
 	const next = { ...dbShape };
 	const blockedResurrections = [];
@@ -3148,18 +3256,20 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 		if (!rows) continue;
 		const kept = [];
 		for (const row of rows) {
-			const key = getScheduleOccurrenceIdentityKey(row);
-			if (!key || !suppressionKeys.has(key)) {
+			const matched = normalizedSuppressions.find((entry) => matchesScheduleOccurrenceSuppression(entry, row));
+			if (!matched) {
 				kept.push(row);
 				continue;
 			}
-			const identity = getScheduleOccurrenceIdentityParts(row);
 			const rowId = toRowId(row?.id);
 			if (rowId) blockedScheduleIds.add(rowId);
 			blockedResurrections.push({
 				collection,
 				id: rowId,
-				...identity,
+				identityType: matched.identityType,
+				scheduleDate: matched.scheduleDate,
+				timetableId: matched.timetableId,
+				...(matched.sourceSlotId ? { sourceSlotId: matched.sourceSlotId } : {}),
 			});
 		}
 		if (kept.length !== rows.length) next[collection] = kept;
@@ -3170,12 +3280,14 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 	const sourceSessions = Array.isArray(next.trainingSessions) ? next.trainingSessions : [];
 	const blockedSessionIds = new Set(
 		sourceSessions
-			.filter((row) => blockedScheduleIds.has(toRowId(row?.scheduleId)))
+			.filter((row) => blockedScheduleIds.has(toRowId(row?.scheduleId || row?.trainingScheduleId)))
 			.map((row) => toRowId(row?.id))
 			.filter(Boolean),
 	);
 	if (sourceSessions.length > 0) {
-		next.trainingSessions = sourceSessions.filter((row) => !blockedScheduleIds.has(toRowId(row?.scheduleId)));
+		next.trainingSessions = sourceSessions.filter(
+			(row) => !blockedScheduleIds.has(toRowId(row?.scheduleId || row?.trainingScheduleId)),
+		);
 	}
 
 	const sourceSets = Array.isArray(next.trainingSessionSets) ? next.trainingSessionSets : [];
@@ -3195,20 +3307,30 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 	if (sourceBlocks.length > 0 && (blockedSessionIds.size > 0 || blockedSetIds.size > 0)) {
 		next.trainingSetBlocks = sourceBlocks
 			.map((block) => {
-				const setIds = Array.isArray(block?.setIds) ? block.setIds.map(toRowId).filter(Boolean) : [];
-				const remainingSetIds = setIds.filter((id) => !blockedSetIds.has(id));
-				return remainingSetIds.length === setIds.length ? block : { ...block, setIds: remainingSetIds };
+				const arraySetIds = Array.isArray(block?.setIds) ? block.setIds.map(toRowId).filter(Boolean) : [];
+				const singularSetId = toRowId(block?.setId);
+				const allSetIds = scheduleOccurrenceUnique([...arraySetIds, singularSetId]);
+				const remainingSetIds = allSetIds.filter((id) => !blockedSetIds.has(id));
+				if (remainingSetIds.length === allSetIds.length) return block;
+				return {
+					...block,
+					setIds: remainingSetIds,
+					...(singularSetId && blockedSetIds.has(singularSetId) ? { setId: '' } : {}),
+				};
 			})
 			.filter((block) => {
 				const sessionId = toRowId(block?.sessionId || block?.trainingSessionId);
 				if (!blockedSessionIds.has(sessionId)) return true;
-				const setIds = Array.isArray(block?.setIds) ? block.setIds.map(toRowId).filter(Boolean) : [];
-				return setIds.length > 0;
+				const arraySetIds = Array.isArray(block?.setIds) ? block.setIds.map(toRowId).filter(Boolean) : [];
+				const remainingSetIds = scheduleOccurrenceUnique([...arraySetIds, toRowId(block?.setId)]);
+				return remainingSetIds.length > 0;
 			});
 	}
 
 	if (Array.isArray(next.attendance)) {
-		next.attendance = next.attendance.filter((row) => !blockedScheduleIds.has(toRowId(row?.scheduleId)));
+		next.attendance = next.attendance.filter(
+			(row) => !blockedScheduleIds.has(toRowId(row?.scheduleId || row?.trainingScheduleId)),
+		);
 	}
 
 	return { dbShape: next, blockedResurrections };
