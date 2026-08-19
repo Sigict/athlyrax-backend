@@ -3100,7 +3100,7 @@ function getScheduleOccurrenceSourceSlotId(row) {
 }
 
 function getScheduleOccurrenceDate(row) {
-	return scheduleOccurrenceText(row?.scheduleDate || row?.rawDate || row?.date || row?.plannedDate);
+	return scheduleOccurrenceText(row?.scheduleDate || row?.rawDate || row?.date || row?.plannedDate).slice(0, 10);
 }
 
 function getScheduleOccurrenceTimetableId(row) {
@@ -3111,6 +3111,7 @@ function getScheduleOccurrenceSquadIds(row) {
 	return scheduleOccurrenceUnique([
 		...scheduleOccurrenceArray(row?.squadIds),
 		row?.squadId,
+		row?.squad,
 	]).sort();
 }
 
@@ -3180,10 +3181,26 @@ function normalizeScheduleOccurrenceSuppressionEntry(entry) {
 	if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
 	const requestedType = scheduleOccurrenceText(entry?.identityType);
 	let normalizedIdentity = null;
-	if (requestedType === 'legacy-fingerprint' || (!getScheduleOccurrenceSourceSlotId(entry) && (entry?.startTime || entry?.endTime))) {
+	const hasLegacyFingerprintEvidence = Boolean(
+		entry?.startTime
+		|| entry?.endTime
+		|| entry?.venueId
+		|| entry?.venue
+		|| entry?.squadId
+		|| entry?.squad
+		|| scheduleOccurrenceArray(entry?.squadIds).length > 0
+		|| entry?.sessionTypeId
+		|| entry?.trainingTypeId
+		|| entry?.sessionType
+		|| entry?.type
+	);
+	if (requestedType === 'legacy-fingerprint' || (!getScheduleOccurrenceSourceSlotId(entry) && hasLegacyFingerprintEvidence)) {
 		normalizedIdentity = getScheduleOccurrenceFingerprint({ ...entry, manualScheduleEntry: false, generatedByPlanner: true });
 	} else {
 		normalizedIdentity = getScheduleOccurrenceIdentityParts(entry);
+		if (!normalizedIdentity) {
+			normalizedIdentity = getScheduleOccurrenceFingerprint({ ...entry, manualScheduleEntry: false, generatedByPlanner: true });
+		}
 	}
 	if (!normalizedIdentity) return null;
 	const deletedAtMs = parseIsoMs(entry?.deletedAt);
