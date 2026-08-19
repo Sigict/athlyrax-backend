@@ -51,6 +51,9 @@ for (const relative of transforms) {
   run(relative, [relative]);
 }
 
+if (!fs.existsSync(path.join(root, 'scripts/patch-bulk-delete-tombstone-capacity.mjs'))) throw new Error('Required bulk-delete tombstone capacity guard is missing.');
+run('bulk-delete tombstone capacity guard', ['scripts/patch-bulk-delete-tombstone-capacity.mjs']);
+
 if (!fs.existsSync(path.join(root, 'scripts/patch-public-demo-readonly.mjs'))) throw new Error('Required public demo read-only guard is missing.');
 run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 
@@ -71,6 +74,7 @@ for (const relative of [
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
+  'scripts/patch-bulk-delete-tombstone-capacity.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
