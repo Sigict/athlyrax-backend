@@ -60,6 +60,9 @@ run('server-authoritative schedule deletion guard', ['scripts/patch-server-autho
 if (!fs.existsSync(path.join(root, 'scripts/patch-server-authoritative-schedule-delete-verification.mjs'))) throw new Error('Required server-authoritative schedule deletion match verification is missing.');
 run('server-authoritative schedule deletion match verification', ['scripts/patch-server-authoritative-schedule-delete-verification.mjs']);
 
+if (!fs.existsSync(path.join(root, 'scripts/patch-retire-legacy-training-schedules.mjs'))) throw new Error('Required legacy trainingSchedules retirement guard is missing.');
+run('legacy trainingSchedules retirement guard', ['scripts/patch-retire-legacy-training-schedules.mjs']);
+
 if (!fs.existsSync(path.join(root, 'scripts/patch-public-demo-readonly.mjs'))) throw new Error('Required public demo read-only guard is missing.');
 run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 
@@ -83,6 +86,7 @@ for (const relative of [
   'scripts/patch-bulk-delete-tombstone-capacity.mjs',
   'scripts/patch-server-authoritative-schedule-delete.mjs',
   'scripts/patch-server-authoritative-schedule-delete-verification.mjs',
+  'scripts/patch-retire-legacy-training-schedules.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
