@@ -29,45 +29,22 @@ const indexSource = fs.readFileSync(entryPath, 'utf8');
 
 function assertPermanentDeletionRuntimeContract(source) {
   const failures = [];
-  if (!source.includes('const TOMBSTONE_MAX_ENTRIES = Number.POSITIVE_INFINITY;')) {
-    failures.push('permanent tombstone retention is missing');
-  }
-  if (!source.includes('Tombstoned physical ids are permanent.')) {
-    failures.push('same-id timestamp resurrection block is missing');
-  }
-  if (source.includes('tombstonesForCollection.delete(rowId)')) {
-    failures.push('timestamp-based tombstone retirement is still present');
-  }
-  if (source.includes('if (rowMs > tombstoneMs)')) {
-    failures.push('row timestamps can still override deletion tombstones');
-  }
-  if (!source.includes("app.post('/db/schedule-delete'")) {
-    failures.push('server-authoritative Scheduled Session delete route is missing');
-  }
-  if (!source.includes('ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1')) {
-    failures.push('server-authoritative Scheduled Session delete marker is missing');
-  }
-  if (!source.includes('Server-authoritative schedule deletion verification failed after persistence reread.')) {
-    failures.push('post-write physical deletion reread verification is missing');
-  }
-  if (!source.includes('ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1')) {
-    failures.push('Scheduled Session linked-block integrity guard is missing');
-  }
-  if (!source.includes('const nextBlocks = blockRows.flatMap((row) => {')) {
-    failures.push('Scheduled Session delete cannot preserve unrelated training-set block data');
-  }
-  if (source.includes('trainingSetBlocks: blockRows.filter((row) => !linkedBlockIds.has(textId(row?.id)))')) {
-    failures.push('unsafe whole-block deletion is still present');
-  }
-  if (!source.includes('staleBlockSetReferences')) {
-    failures.push('persisted linked-block set-reference verification is missing');
-  }
-  if (!source.includes('staleBlockOwnerReferences')) {
-    failures.push('persisted linked-block owner-reference verification is missing');
-  }
-  if (!source.includes('trainingSchedules: []')) {
-    failures.push('legacy trainingSchedules persistence retirement is missing');
-  }
+  if (!source.includes('const TOMBSTONE_MAX_ENTRIES = Number.POSITIVE_INFINITY;')) failures.push('permanent tombstone retention is missing');
+  if (!source.includes('Tombstoned physical ids are permanent.')) failures.push('same-id timestamp resurrection block is missing');
+  if (source.includes('tombstonesForCollection.delete(rowId)')) failures.push('timestamp-based tombstone retirement is still present');
+  if (source.includes('if (rowMs > tombstoneMs)')) failures.push('row timestamps can still override deletion tombstones');
+  if (!source.includes("app.post('/db/schedule-delete'")) failures.push('server-authoritative Scheduled Session delete route is missing');
+  if (!source.includes('ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1')) failures.push('server-authoritative Scheduled Session delete marker is missing');
+  if (!source.includes('Server-authoritative schedule deletion verification failed after persistence reread.')) failures.push('post-write physical deletion reread verification is missing');
+  if (!source.includes('ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1')) failures.push('Scheduled Session linked-block integrity guard is missing');
+  if (!source.includes('const nextBlocks = blockRows.flatMap((row) => {')) failures.push('Scheduled Session delete cannot preserve unrelated training-set block data');
+  if (source.includes('trainingSetBlocks: blockRows.filter((row) => !linkedBlockIds.has(textId(row?.id)))')) failures.push('unsafe whole-block deletion is still present');
+  if (!source.includes('staleBlockSetReferences')) failures.push('persisted linked-block set-reference verification is missing');
+  if (!source.includes('staleBlockOwnerReferences')) failures.push('persisted linked-block owner-reference verification is missing');
+  if (!source.includes('ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1')) failures.push('semantic suppression shared-block owner repair is missing');
+  if (!source.includes('next.trainingSetBlocks = sourceBlocks.flatMap((blockRow) => {')) failures.push('semantic suppression cannot safely repair shared blocks');
+  if (!source.includes('ownerDeleted && remainingOwnerIds.length === 1')) failures.push('semantic suppression cannot reassign one surviving block owner');
+  if (!source.includes('trainingSchedules: []')) failures.push('legacy trainingSchedules persistence retirement is missing');
   if (failures.length > 0) {
     const error = new Error(`Unsafe production deletion runtime:\n- ${failures.join('\n- ')}`);
     error.code = 'ATHLYRAX_PERMANENT_DELETE_GUARD_MISSING';
@@ -79,10 +56,6 @@ if (String(process.env.NODE_ENV || '').trim().toLowerCase() !== 'production') {
   throw new Error('Safe production start requires NODE_ENV=production. Refusing development/default mode.');
 }
 
-// Build/install transforms harden index.js before Render starts it. Production
-// startup independently verifies the exact transformed runtime source and fails
-// closed if any resurrection escape hatch, collateral block-delete path, or
-// legacy Schedule store reappears.
 assertPermanentDeletionRuntimeContract(indexSource);
 
 const configuration = resolveStorageConfiguration(process.env, repoRoot);
@@ -92,11 +65,7 @@ if (configuration.failures.length > 0) {
   throw error;
 }
 
-assertCanonicalPathContract({
-  sourceRoot,
-  storageRoot: configuration.storageRoot,
-  indexSource,
-});
+assertCanonicalPathContract({ sourceRoot, storageRoot: configuration.storageRoot, indexSource });
 
 for (const [directory, label] of [
   [configuration.storageRoot, 'Primary storage root'],
