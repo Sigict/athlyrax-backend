@@ -62,7 +62,7 @@ function runtimeAlreadyHardened() {
     'ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1',
     'ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1',
     'ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1',
-    'trainingSchedules: []',
+    'ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1',
   ].every((token) => source.includes(token));
 }
 
