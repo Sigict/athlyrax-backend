@@ -13,9 +13,6 @@ const __filename = fileURLToPath(import.meta.url);
 const sourceRoot = path.resolve(path.dirname(__filename), '..');
 const approval = String(process.env.ATHLYRAX_STORAGE_MIGRATION_APPROVAL || '').trim();
 
-// Production password recovery must never silently fall back to console delivery.
-// If Render (or another production host) loses the explicit delivery-mode variable,
-// keep reset codes on the real SMTP/email path. Local/dev entrypoints are untouched.
 if (!String(process.env.AUTH_PASSWORD_RESET_DELIVERY || '').trim()) {
   process.env.AUTH_PASSWORD_RESET_DELIVERY = 'smtp';
 }
@@ -54,17 +51,34 @@ function runChecked(label, args) {
   if (result.status !== 0) throw new Error(`${label} failed with exit code ${result.status}.`);
 }
 
+function runtimeAlreadyHardened() {
+  const entryPath = path.join(sourceRoot, 'index.js');
+  const source = fs.readFileSync(entryPath, 'utf8');
+  return [
+    'installSignupLegalAcceptanceGuard(express);',
+    'ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD',
+    'const TOMBSTONE_MAX_ENTRIES = Number.POSITIVE_INFINITY;',
+    'Tombstoned physical ids are permanent.',
+    'ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1',
+    'ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1',
+    'ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1',
+    'ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1',
+  ].every((token) => source.includes(token));
+}
+
 // ATHLYRAX_PRODUCTION_START_APPLIES_RUNTIME_BUILD
-// Do not depend on a hosting provider rerunning npm postinstall. Cached installs,
-// prebuilt deploys and provider-specific build commands can all legitimately skip
-// that lifecycle hook. The production entrypoint therefore applies the verified,
-// idempotent source-hardening chain itself before safe-start inspects index.js.
-// This mutates only the ephemeral application checkout; persistent customer
-// storage is not touched by the transformation chain.
-runChecked(
-  'Production runtime hardening build',
-  [path.join(sourceRoot, 'scripts', 'build-production-backend.mjs')],
-);
+// postinstall normally prepares index.js. Some hosts can legitimately skip
+// lifecycle hooks, so production start verifies the installed runtime and only
+// runs the one-shot transform chain when the hardened markers are absent.
+// Never re-run the chain over an already transformed backend: several historic
+// source transforms are intentionally one-shot and a second pass can fail before
+// the new instance becomes healthy, leaving the previous Render deploy serving.
+if (!runtimeAlreadyHardened()) {
+  runChecked(
+    'Production runtime hardening build',
+    [path.join(sourceRoot, 'scripts', 'build-production-backend.mjs')],
+  );
+}
 
 if (approval && approval !== APPROVAL) {
   throw new Error(`ATHLYRAX_STORAGE_MIGRATION_APPROVAL has an invalid value. Expected ${APPROVAL} or leave it unset.`);
@@ -79,10 +93,7 @@ if (approval === APPROVAL) {
 
   // ATHLYRAX_ONE_TIME_MIGRATION_APPROVAL_MUST_BE_REMOVED
   // Crash recovery takes priority. Otherwise a completed migration plus the
-  // approval environment variable is an operator configuration error: refuse
-  // startup until the one-time approval is removed. This prevents a lost marker
-  // in a later incident from silently turning a stale environment variable into
-  // authorization to run migration again.
+  // approval environment variable is an operator configuration error.
   if (interrupted) {
     console.log('[storage] Interrupted migration transaction detected. Running approved recovery before normal startup.');
     runChecked(
@@ -100,11 +111,6 @@ if (approval === APPROVAL) {
   }
 }
 
-// The demo-company tenant is synthetic product-demo data, not customer data.
-// Recover it from the verified bundled seed when its persistent database is
-// missing or contains no meaningful demo records. The recovery helper preserves
-// the existing live file in the independent safety backup root before replacing
-// it. Ordinary customer tenants remain fail-closed and are never auto-seeded.
 const runtimeConfiguration = resolveStorageConfiguration(process.env, sourceRoot);
 if (runtimeConfiguration.failures.length > 0) throw new Error(runtimeConfiguration.failures.join('\n'));
 const demoRecovery = restoreBundledDemoTenantIfNeeded({
@@ -117,11 +123,6 @@ if (demoRecovery.restored) {
   console.log(`[storage] Verified synthetic demo tenant recovery completed (${demoRecovery.bytes} bytes).`);
 }
 
-// The only automatic planning-storage cleanup is restricted to demo-company,
-// which is synthetic product-demo data. It refuses to touch a mirrored schedule
-// unless schedule/trainingSchedules are exact id-for-id content mirrors, and it
-// only removes legacy timetable copies after canonical timetable migration v5 is
-// already confirmed. Every mutation takes and verifies an independent backup.
 const demoPlanningCleanup = cleanupDemoPlanningStorage({
   storageRoot: runtimeConfiguration.storageRoot,
   backupRoot: runtimeConfiguration.backupRoot,
@@ -135,13 +136,6 @@ if (demoPlanningCleanup.changed) {
   );
 }
 
-// Older live instances created a storage-ready marker with the previous marker
-// schema. The Render shell attaches to the currently live instance, so an old
-// shell cannot create a marker understood by the new release. If the marker is
-// absent or not bound to the configured canonical root, regenerate it using the
-// current approval script. That script validates the global DB, auth primary and
-// backup parity, billing/invite/snapshot stores, and every auth-bound tenant DB
-// before atomically replacing the marker. It never seeds ordinary customer data.
 if (!readyMarkerMatchesStorageRoot(runtimeConfiguration.readyMarkerPath, runtimeConfiguration.storageRoot)) {
   console.log('[storage] Storage-ready marker is absent or uses a legacy binding. Re-validating canonical storage before startup.');
   runChecked(

@@ -51,6 +51,8 @@ test('production startup refuses to boot if permanent deletion runtime invariant
     'Safe-start must require the shared Training Set Block preservation guard.');
   assert.match(safeStart, /staleBlockSetReferences/,
     'Safe-start must require persisted verification that deleted set ids do not survive inside blocks.');
+  assert.match(safeStart, /staleBlockOwnerReferences/,
+    'Safe-start must require persisted verification that surviving blocks do not point at deleted Training Sessions.');
   assert.match(safeStart, /trainingSetBlocks: blockRows\.filter\(\(row\) => !linkedBlockIds\.has/,
     'Safe-start must explicitly reject the old whole-block deletion implementation.');
   assert.match(safeStart, /trainingSchedules: \[\]/,

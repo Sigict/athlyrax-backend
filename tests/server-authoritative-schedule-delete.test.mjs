@@ -35,22 +35,26 @@ test('authoritative delete removes selected Schedule rows while preserving unrel
   assert.ok(route.includes('applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions)'));
 });
 
-test('authoritative delete rereads persisted tenant DB and verifies deleted set references are absent from surviving blocks', () => {
+test('authoritative delete rereads persisted tenant DB and verifies deleted set and owner references are absent from surviving blocks', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
   const writeIndex = route.indexOf('writeAtomicJsonFile(storagePaths.dbPath, nextDb);');
   const rereadIndex = route.indexOf('const persisted = readJsonFile(storagePaths.dbPath);');
-  const blockVerificationIndex = route.indexOf('staleBlockSetReferences');
+  const setVerificationIndex = route.indexOf('staleBlockSetReferences');
+  const ownerVerificationIndex = route.indexOf('staleBlockOwnerReferences');
   const verificationIndex = route.indexOf('Server-authoritative schedule deletion verification failed after persistence reread.');
   const successIndex = route.indexOf('verified: true');
   assert.ok(writeIndex >= 0);
   assert.ok(rereadIndex > writeIndex);
-  assert.ok(blockVerificationIndex > rereadIndex);
-  assert.ok(verificationIndex > blockVerificationIndex);
+  assert.ok(setVerificationIndex > rereadIndex);
+  assert.ok(ownerVerificationIndex > setVerificationIndex);
+  assert.ok(verificationIndex > ownerVerificationIndex);
   assert.ok(successIndex > verificationIndex);
   assert.ok(route.includes('remainingBlockIds'));
   assert.ok(route.includes('staleBlockSetReferences'));
+  assert.ok(route.includes('staleBlockOwnerReferences'));
+  assert.ok(route.includes("linkedSessionIds.has(textId(row?.sessionId || row?.trainingSessionId))"));
   assert.ok(route.includes("res.setHeader('X-AthlyraX-DB-Revision', String(result.storageRevision));"));
 });
 
