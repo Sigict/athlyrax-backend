@@ -4,8 +4,8 @@
  * Covers:
  *   1. A row tombstoned in the previous PUT is dropped from an incoming PUT
  *      that still contains it (deletion resurrection is blocked).
- *   2. A tombstoned row that has been legitimately re-created (updatedAt >
- *      deletedAt) is NOT dropped (users can un-delete by re-creating).
+ *   2. A tombstoned physical id remains deleted even if a stale payload carries
+ *      a later updatedAt timestamp; intentional recreation must use a fresh id.
  *   3. Tombstones are additive across writes (union, latest wins).
  *   4. Semantic Schedule occurrence suppressions are additive across writes.
  *   5. A deleted generated occurrence cannot return under a fresh Schedule id.
@@ -106,7 +106,7 @@ test('applyTombstonesToDbShape drops resurrected rows and reports them', () => {
 	assert.deepEqual(blockedResurrections, [{ collection: 'schedule', id: 'sch_dead' }]);
 });
 
-test('applyTombstonesToDbShape KEEPS a row that was legitimately re-created after the tombstone', () => {
+test('applyTombstonesToDbShape blocks a tombstoned id even when stale data has a later updatedAt', () => {
 	const tombstones = [
 		{ collection: 'timetable', id: 'tt_x', deletedAt: '2026-05-01T12:00:00.000Z' },
 	];
@@ -117,8 +117,8 @@ test('applyTombstonesToDbShape KEEPS a row that was legitimately re-created afte
 		],
 	};
 	const { dbShape: next, blockedResurrections } = helpers.applyTombstonesToDbShape(dbShape, lookup);
-	assert.equal(next.timetable.length, 1, 'legitimately-recreated row must be kept');
-	assert.equal(blockedResurrections.length, 0);
+	assert.equal(next.timetable.length, 0, 'same-id deleted row must stay deleted regardless of updatedAt');
+	assert.deepEqual(blockedResurrections, [{ collection: 'timetable', id: 'tt_x' }]);
 });
 
 test('applyTombstonesToDbShape handles rows without ids gracefully', () => {
