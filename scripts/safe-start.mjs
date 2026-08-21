@@ -60,7 +60,10 @@ function assertPermanentDeletionRuntimeContract(source) {
     failures.push('unsafe whole-block deletion is still present');
   }
   if (!source.includes('staleBlockSetReferences')) {
-    failures.push('persisted linked-block deletion verification is missing');
+    failures.push('persisted linked-block set-reference verification is missing');
+  }
+  if (!source.includes('staleBlockOwnerReferences')) {
+    failures.push('persisted linked-block owner-reference verification is missing');
   }
   if (!source.includes('trainingSchedules: []')) {
     failures.push('legacy trainingSchedules persistence retirement is missing');
