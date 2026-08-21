@@ -18,8 +18,8 @@ test('production start does not rerun one-shot transforms over an already harden
   assert.match(start, /ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1/);
   assert.match(start, /ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1/);
   assert.match(start, /ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1/);
+  assert.match(start, /ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1/);
   assert.match(start, /const TOMBSTONE_MAX_ENTRIES = Number\.POSITIVE_INFINITY;/);
-  assert.match(start, /trainingSchedules: \[\]/);
 
   const conditionIndex = start.indexOf('if (!runtimeAlreadyHardened())');
   const buildIndex = start.indexOf("'Production runtime hardening build'");
@@ -37,7 +37,7 @@ test('the installed backend currently satisfies every production-start hardened 
     'ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1',
     'ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1',
     'ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1',
-    'trainingSchedules: []',
+    'ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1',
   ]) {
     assert.ok(source.includes(token), `installed backend is missing production-start marker: ${token}`);
   }
