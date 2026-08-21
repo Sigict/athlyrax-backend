@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Check public frontend and backend boundaries
+      - name: Check public frontend and exact backend boundaries
         id: health
         shell: bash
         run: |
@@ -58,13 +58,24 @@ jobs:
           fi
           rm -f "${config_file}"
 
+          expected_backend_commit="$(curl --fail --silent --show-error \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'User-Agent: athlyrax-production-health' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const x=JSON.parse(s);process.stdout.write(String(x.sha||''));});" \
+            || true)"
+          if [[ ! "${expected_backend_commit}" =~ ^[0-9a-f]{40}$ ]]; then
+            failed=1
+            reasons+=("backend_main_commit_unresolved")
+          fi
+
           header_file="$(mktemp)"
           body_file="$(mktemp)"
           db_code="$(curl --silent --show-error --location --retry 2 --retry-delay 5 \
             --connect-timeout 15 --max-time 30 \
             --dump-header "${header_file}" \
             --output "${body_file}" --write-out '%{http_code}' \
-            'https://athlyrax-backend.onrender.com/db?health_probe=1' || true)"
+            "https://athlyrax-backend.onrender.com/db?health_probe=${expected_backend_commit:-unknown}" || true)"
           backend_commit="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${header_file}")"
           if [ "${db_code}" != '401' ]; then
             failed=1
@@ -73,13 +84,16 @@ jobs:
           if [[ ! "${backend_commit}" =~ ^[0-9a-f]{40}$ ]]; then
             failed=1
             reasons+=("backend_commit_header_missing")
+          elif [[ "${expected_backend_commit}" =~ ^[0-9a-f]{40}$ && "${backend_commit}" != "${expected_backend_commit}" ]]; then
+            failed=1
+            reasons+=("backend_commit_stale_expected_${expected_backend_commit}_received_${backend_commit}")
           fi
           rm -f "${header_file}" "${body_file}"
 
           if [ "${failed}" -eq 0 ]; then
             echo 'state=healthy' >> "${GITHUB_OUTPUT}"
-            echo 'reason=all_public_boundaries_passed' >> "${GITHUB_OUTPUT}"
-            echo 'ATHLYRAX_PRODUCTION_HEALTH_OK'
+            echo 'reason=all_public_boundaries_and_exact_backend_commit_passed' >> "${GITHUB_OUTPUT}"
+            echo "ATHLYRAX_PRODUCTION_HEALTH_OK backend=${backend_commit}"
           else
             joined="$(IFS=,; echo "${reasons[*]}")"
             echo 'state=failed' >> "${GITHUB_OUTPUT}"
