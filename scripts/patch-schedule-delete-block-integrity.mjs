@@ -33,15 +33,15 @@ if (!source.includes(marker)) {
   );
   source = source.replace(
     "\t\tconst remainingSetIds = persistedSets.map((row) => textId(row?.id)).filter((id) => linkedSetIds.has(id));",
-    "\t\tconst remainingSetIds = persistedSets.map((row) => textId(row?.id)).filter((id) => linkedSetIds.has(id));\n\t\tconst remainingBlockIds = persistedBlocks.map((row) => textId(row?.id)).filter((id) => removedBlockIds.has(id));\n\t\tconst staleBlockSetReferences = persistedBlocks.flatMap((row) => {\n\t\t\tconst referenced = [textId(row?.setId), ...(Array.isArray(row?.setIds) ? row.setIds.map(textId) : [])].filter(Boolean);\n\t\t\tconst stale = referenced.filter((id) => linkedSetIds.has(id));\n\t\t\treturn stale.length > 0 ? [{ blockId: textId(row?.id), setIds: stale }] : [];\n\t\t});",
+    "\t\tconst remainingSetIds = persistedSets.map((row) => textId(row?.id)).filter((id) => linkedSetIds.has(id));\n\t\tconst remainingBlockIds = persistedBlocks.map((row) => textId(row?.id)).filter((id) => removedBlockIds.has(id));\n\t\tconst staleBlockSetReferences = persistedBlocks.flatMap((row) => {\n\t\t\tconst referenced = [textId(row?.setId), ...(Array.isArray(row?.setIds) ? row.setIds.map(textId) : [])].filter(Boolean);\n\t\t\tconst stale = referenced.filter((id) => linkedSetIds.has(id));\n\t\t\treturn stale.length > 0 ? [{ blockId: textId(row?.id), setIds: stale }] : [];\n\t\t});\n\t\tconst staleBlockOwnerReferences = persistedBlocks\n\t\t\t.filter((row) => linkedSessionIds.has(textId(row?.sessionId || row?.trainingSessionId)))\n\t\t\t.map((row) => textId(row?.id));",
   );
   source = source.replace(
     'if (remainingScheduleIds.length || remainingLegacyIds.length || remainingSessionIds.length || remainingSetIds.length) {',
-    'if (remainingScheduleIds.length || remainingLegacyIds.length || remainingSessionIds.length || remainingSetIds.length || remainingBlockIds.length || staleBlockSetReferences.length) {',
+    'if (remainingScheduleIds.length || remainingLegacyIds.length || remainingSessionIds.length || remainingSetIds.length || remainingBlockIds.length || staleBlockSetReferences.length || staleBlockOwnerReferences.length) {',
   );
   source = source.replace(
     "\t\t\t\tremainingSetIds,\n\t\t\t};",
-    "\t\t\t\tremainingSetIds,\n\t\t\t\tremainingBlockIds,\n\t\t\t\tstaleBlockSetReferences,\n\t\t\t};",
+    "\t\t\t\tremainingSetIds,\n\t\t\t\tremainingBlockIds,\n\t\t\t\tstaleBlockSetReferences,\n\t\t\t\tstaleBlockOwnerReferences,\n\t\t\t};",
   );
   source = source.replace(
     'removedTrainingSetBlockCount: linkedBlockIds.size,',
@@ -55,6 +55,7 @@ for (const required of [
   'const removedBlockIds = new Set();',
   'trainingSetBlocks: nextBlocks,',
   'staleBlockSetReferences',
+  'staleBlockOwnerReferences',
   'removedTrainingSetBlockCount: removedBlockIds.size,',
 ]) {
   if (!source.includes(required)) throw new Error(`Schedule delete block-integrity invariant missing: ${required}`);
