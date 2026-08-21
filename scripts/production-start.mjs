@@ -91,6 +91,9 @@ if (approval === APPROVAL) {
   const interrupted = readActiveMigrationTransaction(configuration.backupRoot, fs);
   const completed = migrationAlreadyCompleted(paths.legacyMigrationMarker);
 
+  // ATHLYRAX_ONE_TIME_MIGRATION_APPROVAL_MUST_BE_REMOVED
+  // Crash recovery takes priority. Otherwise a completed migration plus the
+  // approval environment variable is an operator configuration error.
   if (interrupted) {
     console.log('[storage] Interrupted migration transaction detected. Running approved recovery before normal startup.');
     runChecked(
