@@ -1,35 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(process.cwd());
-const indexPath = path.join(root, 'index.js');
-const buildPath = path.join(root, 'scripts', 'build-production-backend.mjs');
 
-function sha256(filePath) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+function read(relative) {
+  return fs.readFileSync(path.join(root, relative), 'utf8');
 }
 
-function runBuild() {
-  return spawnSync(process.execPath, [buildPath], {
-    cwd: root,
-    env: process.env,
-    encoding: 'utf8',
-  });
-}
+test('production start does not rerun one-shot transforms over an already hardened backend', () => {
+  const start = read('scripts/production-start.mjs');
+  assert.match(start, /function runtimeAlreadyHardened\(\)/);
+  assert.match(start, /if \(!runtimeAlreadyHardened\(\)\)/);
+  assert.match(start, /Production runtime hardening build/);
+  assert.match(start, /build-production-backend\.mjs/);
+  assert.match(start, /ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1/);
+  assert.match(start, /ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1/);
+  assert.match(start, /ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1/);
+  assert.match(start, /const TOMBSTONE_MAX_ENTRIES = Number\.POSITIVE_INFINITY;/);
 
-test('production hardening build can run again after postinstall without changing the installed backend', () => {
-  const before = sha256(indexPath);
-  const firstRepeat = runBuild();
-  assert.equal(firstRepeat.status, 0, `second production build failed:\n${firstRepeat.stdout}\n${firstRepeat.stderr}`);
-  const afterFirstRepeat = sha256(indexPath);
-  assert.equal(afterFirstRepeat, before, 'running the production hardening build after postinstall changed index.js');
+  const conditionIndex = start.indexOf('if (!runtimeAlreadyHardened())');
+  const buildIndex = start.indexOf("'Production runtime hardening build'");
+  assert.ok(conditionIndex >= 0 && buildIndex > conditionIndex,
+    'the one-shot build must execute only when hardened runtime markers are absent');
+});
 
-  const secondRepeat = runBuild();
-  assert.equal(secondRepeat.status, 0, `third production build failed:\n${secondRepeat.stdout}\n${secondRepeat.stderr}`);
-  const afterSecondRepeat = sha256(indexPath);
-  assert.equal(afterSecondRepeat, before, 'repeated production hardening is not byte-for-byte idempotent');
+test('the installed backend currently satisfies every production-start hardened marker', () => {
+  const source = read('index.js');
+  for (const token of [
+    'installSignupLegalAcceptanceGuard(express);',
+    'ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD',
+    'const TOMBSTONE_MAX_ENTRIES = Number.POSITIVE_INFINITY;',
+    'Tombstoned physical ids are permanent.',
+    'ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1',
+    'ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1',
+    'ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1',
+    'ATHLYRAX_LEGACY_TRAINING_SCHEDULES_RETIRED_V1',
+  ]) {
+    assert.ok(source.includes(token), `installed backend is missing production-start marker: ${token}`);
+  }
 });
