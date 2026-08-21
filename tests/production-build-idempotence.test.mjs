@@ -42,3 +42,25 @@ test('the installed backend currently satisfies every production-start hardened 
     assert.ok(source.includes(token), `installed backend is missing production-start marker: ${token}`);
   }
 });
+
+test('safe-start validates the actual legacy trainingSchedules retirement invariant used by the installed backend', () => {
+  const safeStart = read('scripts/safe-start.mjs');
+  assert.match(safeStart, /ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1/);
+  assert.match(safeStart, /body\.trainingSchedules = \[\];/);
+  assert.match(safeStart, /parsedDatabase\.trainingSchedules = \[\];/);
+  assert.match(safeStart, /persistedShape\.trainingSchedules = \[\];/);
+  assert.doesNotMatch(
+    safeStart,
+    /source\.includes\('trainingSchedules: \[\]'\)/,
+    'safe-start must not reject the transformed backend for an unrelated object-literal spelling',
+  );
+
+  const installed = read('index.js');
+  assert.ok(installed.includes('ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1'));
+  assert.ok(installed.includes('body.trainingSchedules = [];'));
+  assert.ok(
+    installed.includes('parsedDatabase.trainingSchedules = [];')
+      || installed.includes('persistedShape.trainingSchedules = [];'),
+    'installed backend must retire the legacy mirror on GET /db',
+  );
+});
