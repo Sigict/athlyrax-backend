@@ -57,6 +57,9 @@ run('bulk-delete tombstone capacity guard', ['scripts/patch-bulk-delete-tombston
 if (!fs.existsSync(path.join(root, 'scripts/patch-server-authoritative-schedule-delete.mjs'))) throw new Error('Required server-authoritative schedule deletion guard is missing.');
 run('server-authoritative schedule deletion guard', ['scripts/patch-server-authoritative-schedule-delete.mjs']);
 
+if (!fs.existsSync(path.join(root, 'scripts/patch-schedule-delete-block-integrity.mjs'))) throw new Error('Required Schedule delete block-integrity guard is missing.');
+run('Schedule delete block-integrity guard', ['scripts/patch-schedule-delete-block-integrity.mjs']);
+
 if (!fs.existsSync(path.join(root, 'scripts/patch-server-authoritative-schedule-delete-verification.mjs'))) throw new Error('Required server-authoritative schedule deletion match verification is missing.');
 run('server-authoritative schedule deletion match verification', ['scripts/patch-server-authoritative-schedule-delete-verification.mjs']);
 
@@ -85,6 +88,7 @@ for (const relative of [
   'scripts/patch-request-body-limits.mjs',
   'scripts/patch-bulk-delete-tombstone-capacity.mjs',
   'scripts/patch-server-authoritative-schedule-delete.mjs',
+  'scripts/patch-schedule-delete-block-integrity.mjs',
   'scripts/patch-server-authoritative-schedule-delete-verification.mjs',
   'scripts/patch-retire-legacy-training-schedules.mjs',
 ]) {

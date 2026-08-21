@@ -47,6 +47,12 @@ test('production startup refuses to boot if permanent deletion runtime invariant
     'Safe-start must require the authoritative Scheduled Session deletion endpoint.');
   assert.match(safeStart, /Server-authoritative schedule deletion verification failed after persistence reread/,
     'Safe-start must require persisted reread verification.');
+  assert.match(safeStart, /ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1/,
+    'Safe-start must require the shared Training Set Block preservation guard.');
+  assert.match(safeStart, /staleBlockSetReferences/,
+    'Safe-start must require persisted verification that deleted set ids do not survive inside blocks.');
+  assert.match(safeStart, /trainingSetBlocks: blockRows\.filter\(\(row\) => !linkedBlockIds\.has/,
+    'Safe-start must explicitly reject the old whole-block deletion implementation.');
   assert.match(safeStart, /trainingSchedules: \[\]/,
     'Safe-start must require retirement of the legacy Schedule mirror at the persistence boundary.');
 });

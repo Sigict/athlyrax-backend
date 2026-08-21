@@ -50,6 +50,18 @@ function assertPermanentDeletionRuntimeContract(source) {
   if (!source.includes('Server-authoritative schedule deletion verification failed after persistence reread.')) {
     failures.push('post-write physical deletion reread verification is missing');
   }
+  if (!source.includes('ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1')) {
+    failures.push('Scheduled Session linked-block integrity guard is missing');
+  }
+  if (!source.includes('const nextBlocks = blockRows.flatMap((row) => {')) {
+    failures.push('Scheduled Session delete cannot preserve unrelated training-set block data');
+  }
+  if (source.includes('trainingSetBlocks: blockRows.filter((row) => !linkedBlockIds.has(textId(row?.id)))')) {
+    failures.push('unsafe whole-block deletion is still present');
+  }
+  if (!source.includes('staleBlockSetReferences')) {
+    failures.push('persisted linked-block deletion verification is missing');
+  }
   if (!source.includes('trainingSchedules: []')) {
     failures.push('legacy trainingSchedules persistence retirement is missing');
   }
@@ -66,7 +78,8 @@ if (String(process.env.NODE_ENV || '').trim().toLowerCase() !== 'production') {
 
 // Build/install transforms harden index.js before Render starts it. Production
 // startup independently verifies the exact transformed runtime source and fails
-// closed if any resurrection escape hatch or legacy Schedule store reappears.
+// closed if any resurrection escape hatch, collateral block-delete path, or
+// legacy Schedule store reappears.
 assertPermanentDeletionRuntimeContract(indexSource);
 
 const configuration = resolveStorageConfiguration(process.env, repoRoot);
