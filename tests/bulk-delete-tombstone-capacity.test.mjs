@@ -55,6 +55,10 @@ test('production startup refuses to boot if permanent deletion runtime invariant
     'Safe-start must require persisted verification that surviving blocks do not point at deleted Training Sessions.');
   assert.match(safeStart, /trainingSetBlocks: blockRows\.filter\(\(row\) => !linkedBlockIds\.has/,
     'Safe-start must explicitly reject the old whole-block deletion implementation.');
-  assert.match(safeStart, /trainingSchedules: \[\]/,
-    'Safe-start must require retirement of the legacy Schedule mirror at the persistence boundary.');
+  assert.match(safeStart, /ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1/,
+    'Safe-start must require the installed legacy trainingSchedules retirement marker.');
+  assert.match(safeStart, /body\.trainingSchedules = \[\];/,
+    'Safe-start must require retirement of incoming legacy trainingSchedules at the persistence boundary.');
+  assert.match(safeStart, /parsedDatabase\.trainingSchedules = \[\];|persistedShape\.trainingSchedules = \[\];/,
+    'Safe-start must require retirement of persisted legacy trainingSchedules on reads.');
 });

@@ -44,7 +44,15 @@ function assertPermanentDeletionRuntimeContract(source) {
   if (!source.includes('ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1')) failures.push('semantic suppression shared-block owner repair is missing');
   if (!source.includes('next.trainingSetBlocks = sourceBlocks.flatMap((blockRow) => {')) failures.push('semantic suppression cannot safely repair shared blocks');
   if (!source.includes('ownerDeleted && remainingOwnerIds.length === 1')) failures.push('semantic suppression cannot reassign one surviving block owner');
-  if (!source.includes('trainingSchedules: []')) failures.push('legacy trainingSchedules persistence retirement is missing');
+
+  const legacyTrainingSchedulesRetired = source.includes('ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1')
+    && source.includes('body.trainingSchedules = [];')
+    && (
+      source.includes('parsedDatabase.trainingSchedules = [];')
+      || source.includes('persistedShape.trainingSchedules = [];')
+    );
+  if (!legacyTrainingSchedulesRetired) failures.push('legacy trainingSchedules persistence retirement is missing');
+
   if (failures.length > 0) {
     const error = new Error(`Unsafe production deletion runtime:\n- ${failures.join('\n- ')}`);
     error.code = 'ATHLYRAX_PERMANENT_DELETE_GUARD_MISSING';
