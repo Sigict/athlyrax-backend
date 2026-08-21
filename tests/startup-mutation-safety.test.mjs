@@ -69,6 +69,21 @@ test('storage validator covers every store loaded during production bootstrap an
   ]) assert.ok(source.includes(token), `startup storage validation is missing ${token}`);
 });
 
+test('production wrapper applies the complete runtime hardening build before storage handling and safe-start', () => {
+  const source = read('scripts/production-start.mjs');
+  assert.match(source, /ATHLYRAX_PRODUCTION_START_APPLIES_RUNTIME_BUILD/);
+  assert.match(source, /Production runtime hardening build/);
+  assert.match(source, /build-production-backend\.mjs/);
+  const buildIndex = source.indexOf("'Production runtime hardening build'");
+  const approvalIndex = source.indexOf('if (approval && approval !== APPROVAL)');
+  const runtimeStorageIndex = source.indexOf('const runtimeConfiguration = resolveStorageConfiguration');
+  const safeStartIndex = source.indexOf("safe-start.mjs");
+  assert.ok(buildIndex >= 0);
+  assert.ok(approvalIndex > buildIndex, 'runtime build must happen before migration/storage handling');
+  assert.ok(runtimeStorageIndex > buildIndex, 'runtime build must happen before ordinary runtime storage access');
+  assert.ok(safeStartIndex > buildIndex, 'safe-start must inspect the runtime after deterministic transformation');
+});
+
 test('production wrapper gives interrupted migration recovery precedence and refuses stale approval after completion', () => {
   const source = read('scripts/production-start.mjs');
   assert.match(source, /ATHLYRAX_STORAGE_MIGRATION_APPROVAL/);
@@ -195,7 +210,7 @@ test('package postinstall uses one verified production build orchestrator and on
   for (const transform of [
     'patch-index-signup-legal.mjs', 'patch-logout-csrf.mjs', 'patch-canonical-storage-contract.mjs',
     'patch-persistence-integrity.mjs', 'patch-durable-storage-writes.mjs', 'patch-coach-link-suite.mjs',
-    'patch-production-error-redaction.mjs',
+    'patch-production-error-redaction.mjs', 'patch-schedule-delete-block-integrity.mjs',
   ]) assert.ok(build.includes(transform));
   for (const internalCoachStep of [
     'patch-swimmer-coach-authority.mjs', 'patch-parent-notification-semantics.mjs',

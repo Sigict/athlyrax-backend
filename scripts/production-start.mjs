@@ -54,6 +54,18 @@ function runChecked(label, args) {
   if (result.status !== 0) throw new Error(`${label} failed with exit code ${result.status}.`);
 }
 
+// ATHLYRAX_PRODUCTION_START_APPLIES_RUNTIME_BUILD
+// Do not depend on a hosting provider rerunning npm postinstall. Cached installs,
+// prebuilt deploys and provider-specific build commands can all legitimately skip
+// that lifecycle hook. The production entrypoint therefore applies the verified,
+// idempotent source-hardening chain itself before safe-start inspects index.js.
+// This mutates only the ephemeral application checkout; persistent customer
+// storage is not touched by the transformation chain.
+runChecked(
+  'Production runtime hardening build',
+  [path.join(sourceRoot, 'scripts', 'build-production-backend.mjs')],
+);
+
 if (approval && approval !== APPROVAL) {
   throw new Error(`ATHLYRAX_STORAGE_MIGRATION_APPROVAL has an invalid value. Expected ${APPROVAL} or leave it unset.`);
 }
