@@ -32,3 +32,21 @@ test('production build permanently applies the no-resurrection guard', () => {
   assert.match(patchSource, /tombstonesForCollection\.delete\(rowId\)/,
     'The production patch must explicitly guard against the old timestamp-based retirement path.');
 });
+
+test('production startup refuses to boot if permanent deletion runtime invariants are absent', () => {
+  const safeStart = fs.readFileSync('scripts/safe-start.mjs', 'utf8');
+  assert.match(safeStart, /assertPermanentDeletionRuntimeContract\(indexSource\)/,
+    'Safe-start must validate the transformed runtime instead of trusting postinstall implicitly.');
+  assert.match(safeStart, /ATHLYRAX_PERMANENT_DELETE_GUARD_MISSING/);
+  assert.match(safeStart, /TOMBSTONE_MAX_ENTRIES = Number\.POSITIVE_INFINITY/);
+  assert.match(safeStart, /tombstonesForCollection\.delete\(rowId\)/,
+    'Safe-start must explicitly reject the old same-id tombstone-retirement path.');
+  assert.match(safeStart, /if \(rowMs > tombstoneMs\)/,
+    'Safe-start must explicitly reject timestamp-based resurrection.');
+  assert.match(safeStart, /app\.post\('\/db\/schedule-delete'/,
+    'Safe-start must require the authoritative Scheduled Session deletion endpoint.');
+  assert.match(safeStart, /Server-authoritative schedule deletion verification failed after persistence reread/,
+    'Safe-start must require persisted reread verification.');
+  assert.match(safeStart, /trainingSchedules: \[\]/,
+    'Safe-start must require retirement of the legacy Schedule mirror at the persistence boundary.');
+});
