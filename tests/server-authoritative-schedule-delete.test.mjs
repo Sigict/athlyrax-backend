@@ -9,10 +9,11 @@ test('production backend exposes one authenticated server-authoritative Schedule
   const routeToken = "app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWriteAccess";
   assert.equal(source.split(routeToken).length - 1, 1);
   assert.ok(source.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1'));
+  assert.ok(source.includes('// ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1'));
   assert.ok(source.includes("if (scheduleIds.length > 20000)"));
 });
 
-test('authoritative delete removes Schedule and linked Planner rows inside the backend write queue', () => {
+test('authoritative delete removes selected Schedule rows while preserving unrelated data inside shared Training Set Blocks', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   assert.ok(routeStart >= 0 && putStart > routeStart);
@@ -21,25 +22,35 @@ test('authoritative delete removes Schedule and linked Planner rows inside the b
   assert.ok(route.includes("schedule: scheduleRows.filter((row) => !targetIds.has(textId(row?.id)))"));
   assert.ok(route.includes("trainingSessions: sessionRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))"));
   assert.ok(route.includes('trainingSessionSets: setRows.filter('));
-  assert.ok(route.includes('trainingSetBlocks: blockRows.filter('));
+  assert.ok(route.includes('const removedBlockIds = new Set();'));
+  assert.ok(route.includes('const nextBlocks = blockRows.flatMap((row) => {'));
+  assert.ok(route.includes('const remainingSetIds = originalSetIds.filter((id) => !linkedSetIds.has(id));'));
+  assert.ok(route.includes('trainingSetBlocks: nextBlocks,'));
   assert.ok(route.includes("deletedBy: 'server-authoritative-schedule-delete'"));
+  assert.ok(route.includes("...Array.from(removedBlockIds).map((id) => ({ collection: 'trainingSetBlocks'"));
+  assert.equal(route.includes('trainingSetBlocks: blockRows.filter((row) => !linkedBlockIds.has(textId(row?.id)))'), false,
+    'Backend must not delete an entire shared Training Set Block because one contained set was deleted.');
   assert.ok(route.includes('mergeTombstoneLists('));
   assert.ok(route.includes('mergeScheduleOccurrenceSuppressionLists('));
   assert.ok(route.includes('applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions)'));
 });
 
-test('authoritative delete rereads persisted tenant DB and refuses success if any target survived', () => {
+test('authoritative delete rereads persisted tenant DB and verifies deleted set references are absent from surviving blocks', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
   const writeIndex = route.indexOf('writeAtomicJsonFile(storagePaths.dbPath, nextDb);');
   const rereadIndex = route.indexOf('const persisted = readJsonFile(storagePaths.dbPath);');
+  const blockVerificationIndex = route.indexOf('staleBlockSetReferences');
   const verificationIndex = route.indexOf('Server-authoritative schedule deletion verification failed after persistence reread.');
   const successIndex = route.indexOf('verified: true');
   assert.ok(writeIndex >= 0);
   assert.ok(rereadIndex > writeIndex);
-  assert.ok(verificationIndex > rereadIndex);
+  assert.ok(blockVerificationIndex > rereadIndex);
+  assert.ok(verificationIndex > blockVerificationIndex);
   assert.ok(successIndex > verificationIndex);
+  assert.ok(route.includes('remainingBlockIds'));
+  assert.ok(route.includes('staleBlockSetReferences'));
   assert.ok(route.includes("res.setHeader('X-AthlyraX-DB-Revision', String(result.storageRevision));"));
 });
 
@@ -57,15 +68,18 @@ test('authoritative delete cannot report verified success when zero persisted ro
   assert.ok(successIndex > refusalIndex);
 });
 
-test('production build permanently installs the authoritative deletion route and match verification after canonical transforms', () => {
+test('production build permanently installs block-integrity hardening before authoritative match verification', () => {
   const capacityIndex = buildSource.indexOf("run('bulk-delete tombstone capacity guard'");
   const authoritativeIndex = buildSource.indexOf("run('server-authoritative schedule deletion guard'");
+  const blockIntegrityIndex = buildSource.indexOf("run('Schedule delete block-integrity guard'");
   const verificationIndex = buildSource.indexOf("run('server-authoritative schedule deletion match verification'");
   const demoIndex = buildSource.indexOf("run('public demo read-only guard'");
   assert.ok(capacityIndex >= 0);
   assert.ok(authoritativeIndex > capacityIndex);
-  assert.ok(verificationIndex > authoritativeIndex);
+  assert.ok(blockIntegrityIndex > authoritativeIndex);
+  assert.ok(verificationIndex > blockIntegrityIndex);
   assert.ok(demoIndex > verificationIndex);
   assert.ok(buildSource.includes("'scripts/patch-server-authoritative-schedule-delete.mjs',"));
+  assert.ok(buildSource.includes("'scripts/patch-schedule-delete-block-integrity.mjs',"));
   assert.ok(buildSource.includes("'scripts/patch-server-authoritative-schedule-delete-verification.mjs',"));
 });
