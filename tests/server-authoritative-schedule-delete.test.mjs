@@ -35,23 +35,41 @@ test('authoritative delete removes selected Schedule rows while preserving unrel
   assert.ok(route.includes('applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions)'));
 });
 
-test('authoritative delete rereads persisted tenant DB and verifies deleted set and owner references are absent from surviving blocks', () => {
+test('authoritative delete always removes and tombstones attendance linked to the requested Schedule IDs', () => {
+  const routeStart = source.indexOf("app.post('/db/schedule-delete'");
+  const putStart = source.indexOf("app.put('/db'", routeStart);
+  const route = source.slice(routeStart, putStart);
+  assert.ok(route.includes('const attendanceRows = Array.isArray(currentDb.attendance) ? currentDb.attendance : [];'));
+  assert.ok(route.includes('const linkedAttendanceIds = new Set('));
+  assert.ok(route.includes("targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId))"));
+  assert.ok(route.includes("...Array.from(linkedAttendanceIds).map((id) => ({ collection: 'attendance'"));
+  assert.ok(route.includes("attendance: attendanceRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))"));
+  assert.ok(route.includes('const persistedAttendance = Array.isArray(persisted?.attendance) ? persisted.attendance : [];'));
+  assert.ok(route.includes('const remainingAttendanceIds = persistedAttendance.map((row) => textId(row?.id)).filter((id) => linkedAttendanceIds.has(id));'));
+  assert.ok(route.includes('remainingAttendanceIds.length'));
+  assert.ok(route.includes('removedAttendanceCount: linkedAttendanceIds.size'));
+});
+
+test('authoritative delete rereads persisted tenant DB and verifies deleted set, attendance, and owner references are absent', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
   const writeIndex = route.indexOf('writeAtomicJsonFile(storagePaths.dbPath, nextDb);');
   const rereadIndex = route.indexOf('const persisted = readJsonFile(storagePaths.dbPath);');
+  const attendanceVerificationIndex = route.indexOf('remainingAttendanceIds');
   const setVerificationIndex = route.indexOf('staleBlockSetReferences');
   const ownerVerificationIndex = route.indexOf('staleBlockOwnerReferences');
   const verificationIndex = route.indexOf('Server-authoritative schedule deletion verification failed after persistence reread.');
   const successIndex = route.indexOf('verified: true');
   assert.ok(writeIndex >= 0);
   assert.ok(rereadIndex > writeIndex);
+  assert.ok(attendanceVerificationIndex > rereadIndex);
   assert.ok(setVerificationIndex > rereadIndex);
   assert.ok(ownerVerificationIndex > setVerificationIndex);
   assert.ok(verificationIndex > ownerVerificationIndex);
   assert.ok(successIndex > verificationIndex);
   assert.ok(route.includes('remainingBlockIds'));
+  assert.ok(route.includes('remainingAttendanceIds'));
   assert.ok(route.includes('staleBlockSetReferences'));
   assert.ok(route.includes('staleBlockOwnerReferences'));
   assert.ok(route.includes("linkedSessionIds.has(textId(row?.sessionId || row?.trainingSessionId))"));
