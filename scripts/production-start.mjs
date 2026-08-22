@@ -66,17 +66,15 @@ function runtimeAlreadyHardened() {
   ].every((token) => source.includes(token));
 }
 
-// ATHLYRAX_PRODUCTION_START_APPLIES_RUNTIME_BUILD
-// postinstall normally prepares index.js. Some hosts can legitimately skip
-// lifecycle hooks, so production start verifies the installed runtime and only
-// runs the one-shot transform chain when the hardened markers are absent.
-// Never re-run the chain over an already transformed backend: several historic
-// source transforms are intentionally one-shot and a second pass can fail before
-// the new instance becomes healthy, leaving the previous Render deploy serving.
+// ATHLYRAX_PRODUCTION_START_REQUIRES_PREBUILT_RUNTIME
+// Production source hardening has exactly one owner: package postinstall ->
+// scripts/build-production-backend.mjs. Startup is read/verify/run only. It must
+// never execute the one-shot source-transform chain again, because a second
+// transform path can diverge from the installed artifact or fail halfway and
+// keep an older Render instance serving.
 if (!runtimeAlreadyHardened()) {
-  runChecked(
-    'Production runtime hardening build',
-    [path.join(sourceRoot, 'scripts', 'build-production-backend.mjs')],
+  throw new Error(
+    'Production backend runtime is not fully hardened. Refusing startup instead of mutating source. Rebuild/redeploy so package postinstall runs scripts/build-production-backend.mjs.',
   );
 }
 
