@@ -9,22 +9,20 @@ function read(relative) {
   return fs.readFileSync(path.join(root, relative), 'utf8');
 }
 
-test('production start does not rerun one-shot transforms over an already hardened backend', () => {
+test('production start never reruns source transforms and fails closed when hardening is missing', () => {
   const start = read('scripts/production-start.mjs');
   assert.match(start, /function runtimeAlreadyHardened\(\)/);
   assert.match(start, /if \(!runtimeAlreadyHardened\(\)\)/);
-  assert.match(start, /Production runtime hardening build/);
-  assert.match(start, /build-production-backend\.mjs/);
+  assert.match(start, /ATHLYRAX_PRODUCTION_START_REQUIRES_PREBUILT_RUNTIME/);
+  assert.match(start, /Refusing startup instead of mutating source/);
+  assert.match(start, /package postinstall runs scripts\/build-production-backend\.mjs/);
+  assert.doesNotMatch(start, /'Production runtime hardening build'/);
+  assert.doesNotMatch(start, /\[path\.join\(sourceRoot, 'scripts', 'build-production-backend\.mjs'\)\]/);
   assert.match(start, /ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1/);
   assert.match(start, /ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1/);
   assert.match(start, /ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1/);
   assert.match(start, /ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1/);
   assert.match(start, /const TOMBSTONE_MAX_ENTRIES = Number\.POSITIVE_INFINITY;/);
-
-  const conditionIndex = start.indexOf('if (!runtimeAlreadyHardened())');
-  const buildIndex = start.indexOf("'Production runtime hardening build'");
-  assert.ok(conditionIndex >= 0 && buildIndex > conditionIndex,
-    'the one-shot build must execute only when hardened runtime markers are absent');
 });
 
 test('the installed backend currently satisfies every production-start hardened marker', () => {
