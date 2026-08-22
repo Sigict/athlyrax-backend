@@ -13,6 +13,25 @@ test('production backend exposes one authenticated server-authoritative Schedule
   assert.ok(source.includes("if (scheduleIds.length > 20000)"));
 });
 
+test('authoritative delete derives permanent occurrence identity from persisted server data and never trusts client suppression metadata', () => {
+  const routeStart = source.indexOf("app.post('/db/schedule-delete'");
+  const putStart = source.indexOf("app.put('/db'", routeStart);
+  const route = source.slice(routeStart, putStart);
+  assert.ok(route.includes('const requestedScheduleRows = scheduleRows.filter((row) => targetIds.has(textId(row?.id)));'));
+  assert.ok(route.includes('const serverDerivedSuppressions = [];'));
+  assert.ok(route.includes('getScheduleOccurrenceIdentityParts(evidenceRow)'));
+  assert.ok(route.includes('getScheduleOccurrenceFingerprint(evidenceRow)'));
+  assert.ok(route.includes("deletedBy: 'server-authoritative-schedule-delete'"));
+  assert.ok(route.includes('const unresolvedPermanentScheduleIds = [];'));
+  assert.ok(route.includes('Could not establish a safe permanent identity for one or more Scheduled Sessions. Refusing partial deletion.'));
+  assert.ok(route.indexOf('unresolvedPermanentScheduleIds.length > 0') < route.indexOf('writeAtomicJsonFile(storagePaths.dbPath, nextDb);'),
+    'Unsafe generated/legacy deletion must fail before any destructive write.');
+  assert.equal(route.includes('req.body?.scheduleOccurrenceSuppressions'), false,
+    'Client-supplied semantic suppressions must not be an authority in the destructive route.');
+  assert.equal(route.includes('incomingSuppressions'), false,
+    'The destructive route must not preserve a shadow client suppression path.');
+});
+
 test('authoritative delete removes selected Schedule rows while preserving unrelated data inside shared Training Set Blocks', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
@@ -26,7 +45,6 @@ test('authoritative delete removes selected Schedule rows while preserving unrel
   assert.ok(route.includes('const nextBlocks = blockRows.flatMap((row) => {'));
   assert.ok(route.includes('const remainingSetIds = originalSetIds.filter((id) => !linkedSetIds.has(id));'));
   assert.ok(route.includes('trainingSetBlocks: nextBlocks,'));
-  assert.ok(route.includes("deletedBy: 'server-authoritative-schedule-delete'"));
   assert.ok(route.includes("...Array.from(removedBlockIds).map((id) => ({ collection: 'trainingSetBlocks'"));
   assert.equal(route.includes('trainingSetBlocks: blockRows.filter((row) => !linkedBlockIds.has(textId(row?.id)))'), false,
     'Backend must not delete an entire shared Training Set Block because one contained set was deleted.');
@@ -84,6 +102,8 @@ test('authoritative delete cannot report verified success when zero persisted ro
   assert.ok(route.includes('removedPersistedScheduleCount'));
   assert.ok(route.includes('removedPersistedTrainingSessionCount'));
   assert.ok(route.includes('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.'));
+  assert.ok(route.includes('serverDerivedScheduleOccurrenceSuppressions: serverDerivedSuppressions.length'));
+  assert.equal(route.includes('incomingScheduleOccurrenceSuppressions'), false);
   const refusalIndex = route.indexOf('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.');
   const successIndex = route.indexOf('verified: true');
   assert.ok(refusalIndex > route.indexOf('const persisted = readJsonFile(storagePaths.dbPath);'));
