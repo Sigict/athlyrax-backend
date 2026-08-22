@@ -17,7 +17,7 @@ if (!source.includes(verificationMarker)) {
     throw new Error('Could not locate persisted Schedule delete verification anchor.');
   }
 
-  const injected = `${anchor}\t\t${verificationMarker}\n\t\tconst removedPersistedScheduleCount = scheduleRows.length - persistedSchedule.length;\n\t\tconst removedPersistedLegacyScheduleCount = legacyScheduleRows.length - persistedLegacySchedule.length;\n\t\tconst removedPersistedTrainingSessionCount = sessionRows.length - persistedSessions.length;\n\t\tconst removedPersistedTrainingSetCount = setRows.length - persistedSets.length;\n\t\tif (removedPersistedScheduleCount + removedPersistedLegacyScheduleCount + removedPersistedTrainingSessionCount <= 0) {\n\t\t\tconst err = new Error('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.');\n\t\t\terr.status = 409;\n\t\t\terr.details = {\n\t\t\t\trequestedScheduleIds: scheduleIds,\n\t\t\t\tincomingScheduleOccurrenceSuppressions: incomingSuppressions.length,\n\t\t\t};\n\t\t\tthrow err;\n\t\t}\n`;
+  const injected = `${anchor}\t\t${verificationMarker}\n\t\tconst removedPersistedScheduleCount = scheduleRows.length - persistedSchedule.length;\n\t\tconst removedPersistedLegacyScheduleCount = legacyScheduleRows.length - persistedLegacySchedule.length;\n\t\tconst removedPersistedTrainingSessionCount = sessionRows.length - persistedSessions.length;\n\t\tconst removedPersistedTrainingSetCount = setRows.length - persistedSets.length;\n\t\tif (removedPersistedScheduleCount + removedPersistedLegacyScheduleCount + removedPersistedTrainingSessionCount <= 0) {\n\t\t\tconst err = new Error('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.');\n\t\t\terr.status = 409;\n\t\t\terr.details = {\n\t\t\t\trequestedScheduleIds: scheduleIds,\n\t\t\t\tserverDerivedScheduleOccurrenceSuppressions: serverDerivedSuppressions.length,\n\t\t\t};\n\t\t\tthrow err;\n\t\t}\n`;
   source = source.replace(anchor, injected);
 
   source = source.replace(
@@ -42,8 +42,13 @@ for (const required of [
   verificationMarker,
   'No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.',
   'removedPersistedScheduleCount',
+  'serverDerivedScheduleOccurrenceSuppressions: serverDerivedSuppressions.length',
 ]) {
   if (!source.includes(required)) throw new Error(`Authoritative Schedule delete match verification missing invariant: ${required}`);
+}
+
+if (source.includes('incomingScheduleOccurrenceSuppressions: incomingSuppressions.length')) {
+  throw new Error('Authoritative Schedule delete verification must not depend on client-supplied semantic suppression data.');
 }
 
 fs.writeFileSync(indexPath, source, 'utf8');
