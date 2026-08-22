@@ -4,14 +4,24 @@ import fs from 'node:fs';
 
 const source = fs.readFileSync('index.js', 'utf8').replace(/\r\n/g, '\n');
 
-test('PUT /db unions and enforces semantic Schedule occurrence suppressions before persistence', () => {
+test('PUT /db preserves and enforces only server-owned semantic Schedule occurrence suppressions', () => {
   assert.ok(source.includes('const mergedScheduleOccurrenceSuppressions = mergeScheduleOccurrenceSuppressionLists('));
   assert.ok(source.includes('Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : []'));
-  assert.ok(source.includes('Array.isArray(body?.__meta?.scheduleOccurrenceSuppressions) ? body.__meta.scheduleOccurrenceSuppressions : []'));
+  assert.ok(source.includes('[],'), 'generic PUT must not merge new Schedule suppressions supplied by the client');
+  assert.equal(
+    source.includes('Array.isArray(body?.__meta?.scheduleOccurrenceSuppressions) ? body.__meta.scheduleOccurrenceSuppressions : []'),
+    false,
+    'generic PUT must never accept client-supplied Schedule suppression authority',
+  );
   assert.ok(source.includes('const occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape('));
   assert.ok(source.includes('...occurrenceFiltered.dbShape,'));
   assert.ok(source.includes('scheduleOccurrenceSuppressions: mergedScheduleOccurrenceSuppressions,'));
   assert.ok(source.indexOf('const occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape(') < source.indexOf('writeAtomicJsonFile(storagePaths.dbPath, ownershipStampedBody);'));
+});
+
+test('generic PUT cannot create Schedule tombstones that bypass the authoritative delete route', () => {
+  assert.ok(source.includes('// ATHLYRAX_SCHEDULE_DELETION_AUTHORITY_V1'));
+  assert.ok(source.includes("filter((row) => String(row?.collection || '').trim() !== 'schedule')"));
 });
 
 test('server semantic guard covers canonical Schedule and stale trainingSchedules mirror', () => {
