@@ -44,13 +44,15 @@ const transforms = [
   'scripts/patch-production-error-redaction.mjs',
   'scripts/patch-production-cors-origins.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
-  'scripts/patch-schedule-deletion-authority.mjs',
 ];
 
 for (const relative of transforms) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required production transform is missing: ${relative}`);
   run(relative, [relative]);
 }
+
+if (!fs.existsSync(path.join(root, 'scripts/patch-schedule-deletion-authority.mjs'))) throw new Error('Required Schedule deletion authority guard is missing.');
+run('Schedule deletion authority guard', ['scripts/patch-schedule-deletion-authority.mjs']);
 
 if (!fs.existsSync(path.join(root, 'scripts/patch-bulk-delete-tombstone-capacity.mjs'))) throw new Error('Required bulk-delete tombstone capacity guard is missing.');
 run('bulk-delete tombstone capacity guard', ['scripts/patch-bulk-delete-tombstone-capacity.mjs']);
