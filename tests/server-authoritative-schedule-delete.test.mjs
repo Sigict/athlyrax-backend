@@ -13,6 +13,21 @@ test('production backend exposes one authenticated server-authoritative Schedule
   assert.ok(source.includes("if (scheduleIds.length > 20000)"));
 });
 
+test('authoritative delete resolves rendered training-session IDs to their persisted Schedule IDs before deletion', () => {
+  const routeStart = source.indexOf("app.post('/db/schedule-delete'");
+  const putStart = source.indexOf("app.put('/db'", routeStart);
+  const route = source.slice(routeStart, putStart);
+  assert.ok(route.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_SESSION_ALIAS_V1'));
+  assert.ok(route.includes('const requestedDeleteIds = new Set(scheduleIds.map(textId).filter(Boolean));'));
+  assert.ok(route.includes('requestedDeleteIds.has(sessionId)'));
+  assert.ok(route.includes('const linkedScheduleId = textId(sessionRow?.scheduleId || sessionRow?.trainingScheduleId);'));
+  assert.ok(route.includes('if (linkedScheduleId) targetIds.add(linkedScheduleId);'));
+  assert.ok(route.includes('const resolvedScheduleIds = Array.from(targetIds).filter((id) => persistedScheduleIds.has(id));'));
+  assert.ok(route.includes('No persisted Schedule could be resolved from the selected Scheduled Session rows.'));
+  assert.ok(route.includes('deletedScheduleIds: Array.from(targetIds)'));
+  assert.ok(route.includes('requestedScheduleIds: scheduleIds'));
+});
+
 test('authoritative delete removes selected Schedule rows while preserving unrelated data inside shared Training Set Blocks', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
