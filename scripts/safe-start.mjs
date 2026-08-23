@@ -35,6 +35,10 @@ function assertPermanentDeletionRuntimeContract(source) {
   if (source.includes('if (rowMs > tombstoneMs)')) failures.push('row timestamps can still override deletion tombstones');
   if (!source.includes("app.post('/db/schedule-delete'")) failures.push('server-authoritative Scheduled Session delete route is missing');
   if (!source.includes('ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1')) failures.push('server-authoritative Scheduled Session delete marker is missing');
+  if (!source.includes('ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1')) failures.push('canonical Scheduled Session occurrence deletion is missing');
+  if (!source.includes('resolveCanonicalScheduleDeleteTargets({')) failures.push('canonical Scheduled Session occurrence resolver is not wired into the runtime route');
+  if (!source.includes('serverDerivedScheduleOccurrenceSuppressionCount')) failures.push('server-derived Scheduled Session occurrence suppression is missing');
+  if (!source.includes('Refusing a deletion that could regenerate.')) failures.push('unsafe regenerating Schedule deletion refusal is missing');
   if (!source.includes('Server-authoritative schedule deletion verification failed after persistence reread.')) failures.push('post-write physical deletion reread verification is missing');
   if (!source.includes('ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1')) failures.push('Scheduled Session linked-block integrity guard is missing');
   if (!source.includes('const nextBlocks = blockRows.flatMap((row) => {')) failures.push('Scheduled Session delete cannot preserve unrelated training-set block data');
