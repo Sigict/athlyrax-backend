@@ -14,10 +14,12 @@ test('PUT /db unions and enforces semantic Schedule occurrence suppressions befo
   assert.ok(source.indexOf('const occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape(') < source.indexOf('writeAtomicJsonFile(storagePaths.dbPath, ownershipStampedBody);'));
 });
 
-test('server semantic guard covers canonical Schedule and stale trainingSchedules mirror', () => {
-  assert.ok(source.includes("for (const collection of ['schedule', 'trainingSchedules'])"));
-  assert.ok(source.includes('if (rowId) blockedScheduleIds.add(rowId);'), 'a stale legacy mirror id must also cascade-delete linked Planner rows');
-  assert.ok(!source.includes("if (collection === 'schedule' && rowId) blockedScheduleIds.add(rowId);"));
+test('server semantic guard filters canonical Schedule and permanently retires the obsolete mirror', () => {
+  assert.ok(source.includes("for (const collection of ['schedule'])"));
+  assert.equal(source.includes("for (const collection of ['schedule', 'trainingSchedules'])"), false);
+  assert.ok(source.includes('next.trainingSchedules = [];'));
+  assert.ok(source.includes("dbShape: { ...dbShape, trainingSchedules: [] }"));
+  assert.ok(source.includes('if (rowId) blockedScheduleIds.add(rowId);'));
 });
 
 test('installed GET /db validates stored data then filters already-persisted suppressed occurrences before returning them', () => {
