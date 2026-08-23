@@ -10,22 +10,34 @@ test('production backend exposes one authenticated server-authoritative Schedule
   assert.equal(source.split(routeToken).length - 1, 1);
   assert.ok(source.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1'));
   assert.ok(source.includes('// ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1'));
+  assert.ok(source.includes('// ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1'));
   assert.ok(source.includes("if (scheduleIds.length > 20000)"));
 });
 
-test('authoritative delete resolves rendered training-session IDs to their persisted Schedule IDs before deletion', () => {
+test('authoritative delete resolves rendered ids to a canonical persisted occurrence cluster before deletion', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
   assert.ok(route.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_SESSION_ALIAS_V1'));
+  assert.ok(route.includes('// ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1'));
   assert.ok(route.includes('const requestedDeleteIds = new Set(scheduleIds.map(textId).filter(Boolean));'));
-  assert.ok(route.includes('requestedDeleteIds.has(sessionId)'));
-  assert.ok(route.includes('const linkedScheduleId = textId(sessionRow?.scheduleId || sessionRow?.trainingScheduleId);'));
-  assert.ok(route.includes('if (linkedScheduleId) targetIds.add(linkedScheduleId);'));
-  assert.ok(route.includes('const resolvedScheduleIds = Array.from(targetIds).filter((id) => persistedScheduleIds.has(id));'));
+  assert.ok(route.includes('resolveCanonicalScheduleDeleteTargets({'));
+  assert.ok(route.includes('requestedIds: scheduleIds'));
+  assert.ok(route.includes('const targetIds = new Set(canonicalDeleteResolution.targetScheduleIds);'));
+  assert.ok(route.includes('const serverDerivedSuppressions = canonicalDeleteResolution.suppressions;'));
   assert.ok(route.includes('No persisted Schedule could be resolved from the selected Scheduled Session rows.'));
+  assert.ok(route.includes('Refusing a deletion that could regenerate.'));
   assert.ok(route.includes('deletedScheduleIds: Array.from(targetIds)'));
   assert.ok(route.includes('requestedScheduleIds: scheduleIds'));
+});
+
+test('authoritative delete derives permanent occurrence suppression on the server instead of trusting the frontend', () => {
+  const routeStart = source.indexOf("app.post('/db/schedule-delete'");
+  const putStart = source.indexOf("app.put('/db'", routeStart);
+  const route = source.slice(routeStart, putStart);
+  assert.ok(route.includes('[...incomingSuppressions, ...serverDerivedSuppressions]'));
+  assert.ok(route.includes('serverDerivedScheduleOccurrenceSuppressionCount: serverDerivedSuppressions.length'));
+  assert.ok(route.includes('applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions)'));
 });
 
 test('authoritative delete removes selected Schedule rows while preserving unrelated data inside shared Training Set Blocks', () => {
@@ -87,18 +99,22 @@ test('authoritative delete cannot report verified success when zero persisted ro
   assert.ok(successIndex > refusalIndex);
 });
 
-test('production build permanently installs block-integrity hardening before authoritative match verification', () => {
+test('production build permanently installs canonical occurrence deletion after physical-id verification', () => {
   const capacityIndex = buildSource.indexOf("run('bulk-delete tombstone capacity guard'");
   const authoritativeIndex = buildSource.indexOf("run('server-authoritative schedule deletion guard'");
   const blockIntegrityIndex = buildSource.indexOf("run('Schedule delete block-integrity guard'");
   const verificationIndex = buildSource.indexOf("run('server-authoritative schedule deletion match verification'");
+  const canonicalOccurrenceIndex = buildSource.indexOf("run('canonical Schedule occurrence deletion guard'");
   const demoIndex = buildSource.indexOf("run('public demo read-only guard'");
   assert.ok(capacityIndex >= 0);
   assert.ok(authoritativeIndex > capacityIndex);
   assert.ok(blockIntegrityIndex > authoritativeIndex);
   assert.ok(verificationIndex > blockIntegrityIndex);
-  assert.ok(demoIndex > verificationIndex);
+  assert.ok(canonicalOccurrenceIndex > verificationIndex);
+  assert.ok(demoIndex > canonicalOccurrenceIndex);
   assert.ok(buildSource.includes("'scripts/patch-server-authoritative-schedule-delete.mjs',"));
   assert.ok(buildSource.includes("'scripts/patch-schedule-delete-block-integrity.mjs',"));
   assert.ok(buildSource.includes("'scripts/patch-server-authoritative-schedule-delete-verification.mjs',"));
+  assert.ok(buildSource.includes("'scripts/patch-canonical-schedule-delete-occurrence.mjs',"));
+  assert.ok(buildSource.includes("'scripts/schedule-delete-occurrence-identity.mjs',"));
 });
