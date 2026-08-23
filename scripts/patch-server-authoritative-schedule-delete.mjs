@@ -121,7 +121,7 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 			__meta: {
 				...(currentDb.__meta && typeof currentDb.__meta === 'object' ? currentDb.__meta : {}),
 				scheduleOccurrenceSuppressions: mergedSuppressions,
-				storageRevision: currentRevision + 1,
+				storageRevision: currentRevision,
 				updatedAt: now,
 			},
 		};
@@ -135,7 +135,7 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 					? suppressionFiltered.dbShape.__meta
 					: {}),
 				scheduleOccurrenceSuppressions: mergedSuppressions,
-				storageRevision: currentRevision + 1,
+				storageRevision: currentRevision,
 				updatedAt: now,
 			},
 		};
