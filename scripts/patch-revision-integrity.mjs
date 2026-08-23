@@ -25,6 +25,16 @@ safetySource = safetySource.replace(
   '',
 );
 
+// The primary database commit is authoritative. A protected secondary planner
+// backup may legitimately refuse a destructive refresh; preserve that backup
+// without reporting the already-committed DB write as failed.
+const backupWrite = '\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);';
+const guardedBackupWrite = `\t\ttry {\n\t\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);\n\t\t} catch (backupError) {\n\t\t\tconsole.warn(\`Planner target backup refresh was preserved after the primary database committed: \${backupError instanceof Error ? backupError.message : String(backupError)}\`);\n\t\t}`;
+if (source.includes(backupWrite)) source = source.replace(backupWrite, guardedBackupWrite);
+if (!source.includes('Planner target backup refresh was preserved after the primary database committed:')) {
+  throw new Error('Primary database response still depends on the secondary planner backup refresh.');
+}
+
 for (const forbidden of [
   'const isStaleWrite =',
   'staleWriteIgnored: true',
