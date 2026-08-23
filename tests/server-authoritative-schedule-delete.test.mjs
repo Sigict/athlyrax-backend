@@ -11,24 +11,28 @@ test('production backend exposes one authenticated server-authoritative Schedule
   assert.ok(source.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1'));
   assert.ok(source.includes('// ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1'));
   assert.ok(source.includes('// ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1'));
+  assert.ok(source.includes('// ATHLYRAX_SPARSE_LEGACY_SCHEDULE_PHYSICAL_DELETE_V1'));
   assert.ok(source.includes("if (scheduleIds.length > 20000)"));
 });
 
-test('authoritative delete resolves rendered ids to a canonical persisted occurrence cluster before deletion', () => {
+test('authoritative delete resolves rendered ids and permits exact physical deletion when legacy semantic identity is incomplete', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
   assert.ok(route.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_SESSION_ALIAS_V1'));
   assert.ok(route.includes('// ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1'));
+  assert.ok(route.includes('// ATHLYRAX_SPARSE_LEGACY_SCHEDULE_PHYSICAL_DELETE_V1'));
   assert.ok(route.includes('const requestedDeleteIds = new Set(scheduleIds.map(textId).filter(Boolean));'));
   assert.ok(route.includes('resolveCanonicalScheduleDeleteTargets({'));
   assert.ok(route.includes('requestedIds: scheduleIds'));
   assert.ok(route.includes('const targetIds = new Set(canonicalDeleteResolution.targetScheduleIds);'));
   assert.ok(route.includes('const serverDerivedSuppressions = canonicalDeleteResolution.suppressions;'));
+  assert.ok(route.includes('const physicalOnlyScheduleIds = canonicalDeleteResolution.unresolvedGeneratedScheduleIds;'));
   assert.ok(route.includes('No persisted Schedule could be resolved from the selected Scheduled Session rows.'));
-  assert.ok(route.includes('Refusing a deletion that could regenerate.'));
+  assert.equal(route.includes('Refusing a deletion that could regenerate.'), false);
   assert.ok(route.includes('deletedScheduleIds: Array.from(targetIds)'));
   assert.ok(route.includes('requestedScheduleIds: scheduleIds'));
+  assert.ok(route.includes('physicalOnlyScheduleIds'));
 });
 
 test('authoritative delete derives permanent occurrence suppression on the server instead of trusting the frontend', () => {
