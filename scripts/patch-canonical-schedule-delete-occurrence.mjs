@@ -5,6 +5,7 @@ const indexPath = path.resolve('index.js');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const marker = '// ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1';
+const sparseLegacyMarker = '// ATHLYRAX_SPARSE_LEGACY_SCHEDULE_PHYSICAL_DELETE_V1';
 const aliasMarker = '// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_SESSION_ALIAS_V1';
 const importLine = "import { resolveCanonicalScheduleDeleteTargets } from './scripts/schedule-delete-occurrence-identity.mjs';";
 
@@ -58,15 +59,13 @@ if (!source.includes(marker)) {
 			err.details = { requestedScheduleIds: Array.from(requestedDeleteIds) };
 			throw err;
 		}
-		if (canonicalDeleteResolution.unresolvedGeneratedScheduleIds.length > 0) {
-			const err = new Error('Could not establish a safe permanent occurrence identity for one or more Scheduled Sessions. Refusing a deletion that could regenerate.');
-			err.status = 409;
-			err.details = {
-				requestedScheduleIds: Array.from(requestedDeleteIds),
-				unresolvedGeneratedScheduleIds: canonicalDeleteResolution.unresolvedGeneratedScheduleIds,
-			};
-			throw err;
-		}
+		${sparseLegacyMarker}
+		// A sparse legacy/generated row may not contain enough date/time/source metadata
+		// to derive a semantic occurrence suppression. It is still the user's persisted
+		// data and must remain deletable. Exact physical Schedule IDs are permanently
+		// tombstoned by the authoritative route, so stale clients cannot restore them.
+		// Semantic suppressions remain an additional protection whenever identity exists.
+		const physicalOnlyScheduleIds = canonicalDeleteResolution.unresolvedGeneratedScheduleIds;
 		const targetIds = new Set(canonicalDeleteResolution.targetScheduleIds);
 		const serverDerivedSuppressions = canonicalDeleteResolution.suppressions;
 `;
@@ -87,21 +86,27 @@ if (!source.includes(marker)) {
   const responseAnchor = `			scheduleOccurrenceSuppressionCount: mergedSuppressions.length,`;
   if (!source.includes(responseAnchor)) throw new Error('Could not locate Schedule deletion response suppression count.');
   source = source.replace(responseAnchor, `${responseAnchor}
-			serverDerivedScheduleOccurrenceSuppressionCount: serverDerivedSuppressions.length,`);
+			serverDerivedScheduleOccurrenceSuppressionCount: serverDerivedSuppressions.length,
+			physicalOnlyScheduleIds,`);
 }
 
 for (const required of [
   importLine,
   marker,
+  sparseLegacyMarker,
   'resolveCanonicalScheduleDeleteTargets({',
   'canonicalDeleteResolution.targetScheduleIds',
   'canonicalDeleteResolution.unresolvedGeneratedScheduleIds',
+  'physicalOnlyScheduleIds',
   'serverDerivedSuppressions',
   '[...incomingSuppressions, ...serverDerivedSuppressions]',
   'serverDerivedScheduleOccurrenceSuppressionCount',
-  'Refusing a deletion that could regenerate.',
 ]) {
   if (!source.includes(required)) throw new Error(`Canonical Schedule delete occurrence transform missing invariant: ${required}`);
+}
+
+if (source.includes('Refusing a deletion that could regenerate.')) {
+  throw new Error('Sparse legacy Schedule rows are still blocked by the obsolete semantic-identity refusal.');
 }
 
 fs.writeFileSync(indexPath, source, 'utf8');
