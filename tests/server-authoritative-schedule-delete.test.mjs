@@ -35,11 +35,13 @@ test('authoritative delete resolves rendered ids and permits exact physical dele
   assert.ok(route.includes('physicalOnlyScheduleIds'));
 });
 
-test('authoritative delete derives permanent occurrence suppression on the server instead of trusting the frontend', () => {
+test('authoritative delete derives permanent occurrence suppression only from persisted server data', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
-  assert.ok(route.includes('[...incomingSuppressions, ...serverDerivedSuppressions]'));
+  assert.ok(route.includes('serverDerivedSuppressions,'));
+  assert.equal(route.includes('incomingSuppressions'), false);
+  assert.equal(route.includes('req.body?.scheduleOccurrenceSuppressions'), false);
   assert.ok(route.includes('serverDerivedScheduleOccurrenceSuppressionCount: serverDerivedSuppressions.length'));
   assert.ok(route.includes('applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions)'));
 });
@@ -64,6 +66,17 @@ test('authoritative delete removes selected Schedule rows while preserving unrel
   assert.ok(route.includes('mergeTombstoneLists('));
   assert.ok(route.includes('mergeScheduleOccurrenceSuppressionLists('));
   assert.ok(route.includes('applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions)'));
+});
+
+test('authoritative delete removes, tombstones, and verifies linked attendance', () => {
+  const routeStart = source.indexOf("app.post('/db/schedule-delete'");
+  const putStart = source.indexOf("app.put('/db'", routeStart);
+  const route = source.slice(routeStart, putStart);
+  assert.ok(route.includes('const linkedAttendanceIds = new Set('));
+  assert.ok(route.includes("...Array.from(linkedAttendanceIds).map((id) => ({ collection: 'attendance'"));
+  assert.ok(route.includes("attendance: attendanceRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))"));
+  assert.ok(route.includes('remainingAttendanceIds'));
+  assert.ok(route.includes('removedAttendanceCount: linkedAttendanceIds.size'));
 });
 
 test('authoritative delete rereads persisted tenant DB and verifies deleted set and owner references are absent from surviving blocks', () => {
@@ -97,6 +110,8 @@ test('authoritative delete cannot report verified success when zero persisted ro
   assert.ok(route.includes('removedPersistedScheduleCount'));
   assert.ok(route.includes('removedPersistedTrainingSessionCount'));
   assert.ok(route.includes('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.'));
+  assert.ok(route.includes('serverDerivedScheduleOccurrenceSuppressions: serverDerivedSuppressions.length'));
+  assert.equal(route.includes('incomingScheduleOccurrenceSuppressions'), false);
   const refusalIndex = route.indexOf('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.');
   const successIndex = route.indexOf('verified: true');
   assert.ok(refusalIndex > route.indexOf('const persisted = readJsonFile(storagePaths.dbPath);'));

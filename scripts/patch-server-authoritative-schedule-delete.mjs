@@ -55,6 +55,7 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 		const sessionRows = Array.isArray(currentDb.trainingSessions) ? currentDb.trainingSessions : [];
 		const setRows = Array.isArray(currentDb.trainingSessionSets) ? currentDb.trainingSessionSets : [];
 		const blockRows = Array.isArray(currentDb.trainingSetBlocks) ? currentDb.trainingSetBlocks : [];
+		const attendanceRows = Array.isArray(currentDb.attendance) ? currentDb.attendance : [];
 
 		const linkedSessionIds = new Set(
 			sessionRows
@@ -78,12 +79,19 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 				.map((row) => textId(row?.id))
 				.filter(Boolean),
 		);
+		const linkedAttendanceIds = new Set(
+			attendanceRows
+				.filter((row) => targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))
+				.map((row) => textId(row?.id))
+				.filter(Boolean),
+		);
 
 		const deletionTombstones = [
 			...scheduleIds.map((id) => ({ collection: 'schedule', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
 			...Array.from(linkedSessionIds).map((id) => ({ collection: 'trainingSessions', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
 			...Array.from(linkedSetIds).map((id) => ({ collection: 'trainingSessionSets', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
 			...Array.from(linkedBlockIds).map((id) => ({ collection: 'trainingSetBlocks', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
+			...Array.from(linkedAttendanceIds).map((id) => ({ collection: 'attendance', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
 		];
 		const mergedTombstones = mergeTombstoneLists(
 			Array.isArray(currentDb.__tombstones) ? currentDb.__tombstones : [],
@@ -108,11 +116,12 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 			trainingSessions: sessionRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId))),
 			trainingSessionSets: setRows.filter((row) => !linkedSessionIds.has(textId(row?.sessionId || row?.trainingSessionId)) && !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId))),
 			trainingSetBlocks: blockRows.filter((row) => !linkedBlockIds.has(textId(row?.id))),
+			attendance: attendanceRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId))),
 			__tombstones: mergedTombstones,
 			__meta: {
 				...(currentDb.__meta && typeof currentDb.__meta === 'object' ? currentDb.__meta : {}),
 				scheduleOccurrenceSuppressions: mergedSuppressions,
-				storageRevision: currentRevision + 1,
+				storageRevision: currentRevision,
 				updatedAt: now,
 			},
 		};
@@ -126,7 +135,7 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 					? suppressionFiltered.dbShape.__meta
 					: {}),
 				scheduleOccurrenceSuppressions: mergedSuppressions,
-				storageRevision: currentRevision + 1,
+				storageRevision: currentRevision,
 				updatedAt: now,
 			},
 		};
@@ -139,11 +148,13 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 		const persistedLegacySchedule = Array.isArray(persisted?.trainingSchedules) ? persisted.trainingSchedules : [];
 		const persistedSessions = Array.isArray(persisted?.trainingSessions) ? persisted.trainingSessions : [];
 		const persistedSets = Array.isArray(persisted?.trainingSessionSets) ? persisted.trainingSessionSets : [];
+		const persistedAttendance = Array.isArray(persisted?.attendance) ? persisted.attendance : [];
 		const remainingScheduleIds = persistedSchedule.map((row) => textId(row?.id)).filter((id) => targetIds.has(id));
 		const remainingLegacyIds = persistedLegacySchedule.map((row) => textId(row?.id)).filter((id) => targetIds.has(id));
 		const remainingSessionIds = persistedSessions.map((row) => textId(row?.id)).filter((id) => linkedSessionIds.has(id));
 		const remainingSetIds = persistedSets.map((row) => textId(row?.id)).filter((id) => linkedSetIds.has(id));
-		if (remainingScheduleIds.length || remainingLegacyIds.length || remainingSessionIds.length || remainingSetIds.length) {
+		const remainingAttendanceIds = persistedAttendance.map((row) => textId(row?.id)).filter((id) => linkedAttendanceIds.has(id));
+		if (remainingScheduleIds.length || remainingLegacyIds.length || remainingSessionIds.length || remainingSetIds.length || remainingAttendanceIds.length) {
 			const err = new Error('Server-authoritative schedule deletion verification failed after persistence reread.');
 			err.status = 500;
 			err.details = {
@@ -151,6 +162,7 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 				remainingLegacyIds,
 				remainingSessionIds,
 				remainingSetIds,
+				remainingAttendanceIds,
 			};
 			throw err;
 		}
@@ -162,6 +174,7 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 			removedTrainingSessionCount: linkedSessionIds.size,
 			removedTrainingSetCount: linkedSetIds.size,
 			removedTrainingSetBlockCount: linkedBlockIds.size,
+			removedAttendanceCount: linkedAttendanceIds.size,
 			tombstoneCount: mergedTombstones.length,
 			scheduleOccurrenceSuppressionCount: mergedSuppressions.length,
 			storageRevision: currentRevision + 1,
@@ -195,6 +208,10 @@ for (const required of [
   "verified: true",
   "Server-authoritative schedule deletion verification failed after persistence reread.",
   "X-AthlyraX-DB-Revision",
+  "const linkedAttendanceIds = new Set(",
+  "attendance: attendanceRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))",
+  "remainingAttendanceIds",
+  "removedAttendanceCount: linkedAttendanceIds.size",
 ]) {
   if (!source.includes(required)) throw new Error(`Server-authoritative schedule deletion route missing invariant: ${required}`);
 }

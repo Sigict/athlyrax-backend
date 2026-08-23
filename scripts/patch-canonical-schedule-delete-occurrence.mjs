@@ -71,6 +71,12 @@ if (!source.includes(marker)) {
 `;
   source = source.replace(oldResolution, canonicalResolution);
 
+  const incomingSuppressionDefinition = `		const incomingSuppressions = Array.isArray(req.body?.scheduleOccurrenceSuppressions)
+			? req.body.scheduleOccurrenceSuppressions
+			: [];
+`;
+  source = source.replace(incomingSuppressionDefinition, '');
+
   const suppressionAnchor = `		const mergedSuppressions = mergeScheduleOccurrenceSuppressionLists(
 			Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : [],
 			incomingSuppressions,
@@ -80,7 +86,7 @@ if (!source.includes(marker)) {
   }
   source = source.replace(suppressionAnchor, `		const mergedSuppressions = mergeScheduleOccurrenceSuppressionLists(
 			Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : [],
-			[...incomingSuppressions, ...serverDerivedSuppressions],
+			serverDerivedSuppressions,
 		);`);
 
   const responseAnchor = `			scheduleOccurrenceSuppressionCount: mergedSuppressions.length,`;
@@ -99,10 +105,14 @@ for (const required of [
   'canonicalDeleteResolution.unresolvedGeneratedScheduleIds',
   'physicalOnlyScheduleIds',
   'serverDerivedSuppressions',
-  '[...incomingSuppressions, ...serverDerivedSuppressions]',
+  'serverDerivedSuppressions,',
   'serverDerivedScheduleOccurrenceSuppressionCount',
 ]) {
   if (!source.includes(required)) throw new Error(`Canonical Schedule delete occurrence transform missing invariant: ${required}`);
+}
+
+if (source.includes('req.body?.scheduleOccurrenceSuppressions') || source.includes('incomingSuppressions')) {
+  throw new Error('Authoritative Schedule deletion still accepts client-supplied suppression authority.');
 }
 
 if (source.includes('Refusing a deletion that could regenerate.')) {

@@ -51,6 +51,9 @@ for (const relative of transforms) {
   run(relative, [relative]);
 }
 
+if (!fs.existsSync(path.join(root, 'scripts/patch-schedule-deletion-authority.mjs'))) throw new Error('Required Schedule deletion authority guard is missing.');
+run('Schedule deletion authority guard', ['scripts/patch-schedule-deletion-authority.mjs']);
+
 if (!fs.existsSync(path.join(root, 'scripts/patch-bulk-delete-tombstone-capacity.mjs'))) throw new Error('Required bulk-delete tombstone capacity guard is missing.');
 run('bulk-delete tombstone capacity guard', ['scripts/patch-bulk-delete-tombstone-capacity.mjs']);
 
@@ -90,6 +93,7 @@ for (const relative of [
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
+  'scripts/patch-schedule-deletion-authority.mjs',
   'scripts/patch-bulk-delete-tombstone-capacity.mjs',
   'scripts/patch-server-authoritative-schedule-delete.mjs',
   'scripts/patch-schedule-delete-block-integrity.mjs',
