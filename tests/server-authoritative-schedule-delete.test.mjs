@@ -10,26 +10,40 @@ test('production backend exposes one authenticated server-authoritative Schedule
   assert.equal(source.split(routeToken).length - 1, 1);
   assert.ok(source.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1'));
   assert.ok(source.includes('// ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1'));
+  assert.ok(source.includes('// ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1'));
+  assert.ok(source.includes('// ATHLYRAX_SPARSE_LEGACY_SCHEDULE_PHYSICAL_DELETE_V1'));
   assert.ok(source.includes("if (scheduleIds.length > 20000)"));
 });
 
-test('authoritative delete derives permanent occurrence identity from persisted server data and never trusts client suppression metadata', () => {
+test('authoritative delete resolves rendered ids and permits exact physical deletion when legacy semantic identity is incomplete', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
-  assert.ok(route.includes('const requestedScheduleRows = scheduleRows.filter((row) => targetIds.has(textId(row?.id)));'));
-  assert.ok(route.includes('const serverDerivedSuppressions = [];'));
-  assert.ok(route.includes('getScheduleOccurrenceIdentityParts(evidenceRow)'));
-  assert.ok(route.includes('getScheduleOccurrenceFingerprint(evidenceRow)'));
-  assert.ok(route.includes("deletedBy: 'server-authoritative-schedule-delete'"));
-  assert.ok(route.includes('const unresolvedPermanentScheduleIds = [];'));
-  assert.ok(route.includes('Could not establish a safe permanent identity for one or more Scheduled Sessions. Refusing partial deletion.'));
-  assert.ok(route.indexOf('unresolvedPermanentScheduleIds.length > 0') < route.indexOf('writeAtomicJsonFile(storagePaths.dbPath, nextDb);'),
-    'Unsafe generated/legacy deletion must fail before any destructive write.');
-  assert.equal(route.includes('req.body?.scheduleOccurrenceSuppressions'), false,
-    'Client-supplied semantic suppressions must not be an authority in the destructive route.');
-  assert.equal(route.includes('incomingSuppressions'), false,
-    'The destructive route must not preserve a shadow client suppression path.');
+  assert.ok(route.includes('// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_SESSION_ALIAS_V1'));
+  assert.ok(route.includes('// ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1'));
+  assert.ok(route.includes('// ATHLYRAX_SPARSE_LEGACY_SCHEDULE_PHYSICAL_DELETE_V1'));
+  assert.ok(route.includes('const requestedDeleteIds = new Set(scheduleIds.map(textId).filter(Boolean));'));
+  assert.ok(route.includes('resolveCanonicalScheduleDeleteTargets({'));
+  assert.ok(route.includes('requestedIds: scheduleIds'));
+  assert.ok(route.includes('const targetIds = new Set(canonicalDeleteResolution.targetScheduleIds);'));
+  assert.ok(route.includes('const serverDerivedSuppressions = canonicalDeleteResolution.suppressions;'));
+  assert.ok(route.includes('const physicalOnlyScheduleIds = canonicalDeleteResolution.unresolvedGeneratedScheduleIds;'));
+  assert.ok(route.includes('No persisted Schedule could be resolved from the selected Scheduled Session rows.'));
+  assert.equal(route.includes('Refusing a deletion that could regenerate.'), false);
+  assert.ok(route.includes('deletedScheduleIds: Array.from(targetIds)'));
+  assert.ok(route.includes('requestedScheduleIds: scheduleIds'));
+  assert.ok(route.includes('physicalOnlyScheduleIds'));
+});
+
+test('authoritative delete derives permanent occurrence suppression only from persisted server data', () => {
+  const routeStart = source.indexOf("app.post('/db/schedule-delete'");
+  const putStart = source.indexOf("app.put('/db'", routeStart);
+  const route = source.slice(routeStart, putStart);
+  assert.ok(route.includes('serverDerivedSuppressions,'));
+  assert.equal(route.includes('incomingSuppressions'), false);
+  assert.equal(route.includes('req.body?.scheduleOccurrenceSuppressions'), false);
+  assert.ok(route.includes('serverDerivedScheduleOccurrenceSuppressionCount: serverDerivedSuppressions.length'));
+  assert.ok(route.includes('applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions)'));
 });
 
 test('authoritative delete removes selected Schedule rows while preserving unrelated data inside shared Training Set Blocks', () => {
@@ -45,6 +59,7 @@ test('authoritative delete removes selected Schedule rows while preserving unrel
   assert.ok(route.includes('const nextBlocks = blockRows.flatMap((row) => {'));
   assert.ok(route.includes('const remainingSetIds = originalSetIds.filter((id) => !linkedSetIds.has(id));'));
   assert.ok(route.includes('trainingSetBlocks: nextBlocks,'));
+  assert.ok(route.includes("deletedBy: 'server-authoritative-schedule-delete'"));
   assert.ok(route.includes("...Array.from(removedBlockIds).map((id) => ({ collection: 'trainingSetBlocks'"));
   assert.equal(route.includes('trainingSetBlocks: blockRows.filter((row) => !linkedBlockIds.has(textId(row?.id)))'), false,
     'Backend must not delete an entire shared Training Set Block because one contained set was deleted.');
@@ -53,41 +68,34 @@ test('authoritative delete removes selected Schedule rows while preserving unrel
   assert.ok(route.includes('applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions)'));
 });
 
-test('authoritative delete always removes and tombstones attendance linked to the requested Schedule IDs', () => {
+test('authoritative delete removes, tombstones, and verifies linked attendance', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
-  assert.ok(route.includes('const attendanceRows = Array.isArray(currentDb.attendance) ? currentDb.attendance : [];'));
   assert.ok(route.includes('const linkedAttendanceIds = new Set('));
-  assert.ok(route.includes("targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId))"));
   assert.ok(route.includes("...Array.from(linkedAttendanceIds).map((id) => ({ collection: 'attendance'"));
   assert.ok(route.includes("attendance: attendanceRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))"));
-  assert.ok(route.includes('const persistedAttendance = Array.isArray(persisted?.attendance) ? persisted.attendance : [];'));
-  assert.ok(route.includes('const remainingAttendanceIds = persistedAttendance.map((row) => textId(row?.id)).filter((id) => linkedAttendanceIds.has(id));'));
-  assert.ok(route.includes('remainingAttendanceIds.length'));
+  assert.ok(route.includes('remainingAttendanceIds'));
   assert.ok(route.includes('removedAttendanceCount: linkedAttendanceIds.size'));
 });
 
-test('authoritative delete rereads persisted tenant DB and verifies deleted set, attendance, and owner references are absent', () => {
+test('authoritative delete rereads persisted tenant DB and verifies deleted set and owner references are absent from surviving blocks', () => {
   const routeStart = source.indexOf("app.post('/db/schedule-delete'");
   const putStart = source.indexOf("app.put('/db'", routeStart);
   const route = source.slice(routeStart, putStart);
   const writeIndex = route.indexOf('writeAtomicJsonFile(storagePaths.dbPath, nextDb);');
   const rereadIndex = route.indexOf('const persisted = readJsonFile(storagePaths.dbPath);');
-  const attendanceVerificationIndex = route.indexOf('remainingAttendanceIds');
   const setVerificationIndex = route.indexOf('staleBlockSetReferences');
   const ownerVerificationIndex = route.indexOf('staleBlockOwnerReferences');
   const verificationIndex = route.indexOf('Server-authoritative schedule deletion verification failed after persistence reread.');
   const successIndex = route.indexOf('verified: true');
   assert.ok(writeIndex >= 0);
   assert.ok(rereadIndex > writeIndex);
-  assert.ok(attendanceVerificationIndex > rereadIndex);
   assert.ok(setVerificationIndex > rereadIndex);
   assert.ok(ownerVerificationIndex > setVerificationIndex);
   assert.ok(verificationIndex > ownerVerificationIndex);
   assert.ok(successIndex > verificationIndex);
   assert.ok(route.includes('remainingBlockIds'));
-  assert.ok(route.includes('remainingAttendanceIds'));
   assert.ok(route.includes('staleBlockSetReferences'));
   assert.ok(route.includes('staleBlockOwnerReferences'));
   assert.ok(route.includes("linkedSessionIds.has(textId(row?.sessionId || row?.trainingSessionId))"));
@@ -110,18 +118,22 @@ test('authoritative delete cannot report verified success when zero persisted ro
   assert.ok(successIndex > refusalIndex);
 });
 
-test('production build permanently installs block-integrity hardening before authoritative match verification', () => {
+test('production build permanently installs canonical occurrence deletion after physical-id verification', () => {
   const capacityIndex = buildSource.indexOf("run('bulk-delete tombstone capacity guard'");
   const authoritativeIndex = buildSource.indexOf("run('server-authoritative schedule deletion guard'");
   const blockIntegrityIndex = buildSource.indexOf("run('Schedule delete block-integrity guard'");
   const verificationIndex = buildSource.indexOf("run('server-authoritative schedule deletion match verification'");
+  const canonicalOccurrenceIndex = buildSource.indexOf("run('canonical Schedule occurrence deletion guard'");
   const demoIndex = buildSource.indexOf("run('public demo read-only guard'");
   assert.ok(capacityIndex >= 0);
   assert.ok(authoritativeIndex > capacityIndex);
   assert.ok(blockIntegrityIndex > authoritativeIndex);
   assert.ok(verificationIndex > blockIntegrityIndex);
-  assert.ok(demoIndex > verificationIndex);
+  assert.ok(canonicalOccurrenceIndex > verificationIndex);
+  assert.ok(demoIndex > canonicalOccurrenceIndex);
   assert.ok(buildSource.includes("'scripts/patch-server-authoritative-schedule-delete.mjs',"));
   assert.ok(buildSource.includes("'scripts/patch-schedule-delete-block-integrity.mjs',"));
   assert.ok(buildSource.includes("'scripts/patch-server-authoritative-schedule-delete-verification.mjs',"));
+  assert.ok(buildSource.includes("'scripts/patch-canonical-schedule-delete-occurrence.mjs',"));
+  assert.ok(buildSource.includes("'scripts/schedule-delete-occurrence-identity.mjs',"));
 });

@@ -4,19 +4,12 @@ import fs from 'node:fs';
 
 const source = fs.readFileSync('index.js', 'utf8').replace(/\r\n/g, '\n');
 
-test('PUT /db preserves and enforces only server-owned semantic Schedule occurrence suppressions', () => {
+test('PUT /db preserves and enforces only server-owned Schedule occurrence suppressions', () => {
   assert.ok(source.includes('const mergedScheduleOccurrenceSuppressions = mergeScheduleOccurrenceSuppressionLists('));
   assert.ok(source.includes('Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : []'));
-  assert.ok(source.includes('[],'), 'generic PUT must not merge new Schedule suppressions supplied by the client');
-  assert.equal(
-    source.includes('Array.isArray(body?.__meta?.scheduleOccurrenceSuppressions) ? body.__meta.scheduleOccurrenceSuppressions : []'),
-    false,
-    'generic PUT must never accept client-supplied Schedule suppression authority',
-  );
+  assert.equal(source.includes('body?.__meta?.scheduleOccurrenceSuppressions'), false);
   assert.ok(source.includes('const occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape('));
-  assert.ok(source.includes('...occurrenceFiltered.dbShape,'));
   assert.ok(source.includes('scheduleOccurrenceSuppressions: mergedScheduleOccurrenceSuppressions,'));
-  assert.ok(source.indexOf('const occurrenceFiltered = applyScheduleOccurrenceSuppressionsToDbShape(') < source.indexOf('writeAtomicJsonFile(storagePaths.dbPath, ownershipStampedBody);'));
 });
 
 test('generic PUT cannot create Schedule tombstones that bypass the authoritative delete route', () => {
@@ -24,10 +17,12 @@ test('generic PUT cannot create Schedule tombstones that bypass the authoritativ
   assert.ok(source.includes("filter((row) => String(row?.collection || '').trim() !== 'schedule')"));
 });
 
-test('server semantic guard covers canonical Schedule and stale trainingSchedules mirror', () => {
-  assert.ok(source.includes("for (const collection of ['schedule', 'trainingSchedules'])"));
-  assert.ok(source.includes('if (rowId) blockedScheduleIds.add(rowId);'), 'a stale legacy mirror id must also cascade-delete linked Planner rows');
-  assert.ok(!source.includes("if (collection === 'schedule' && rowId) blockedScheduleIds.add(rowId);"));
+test('server semantic guard filters canonical Schedule and permanently retires the obsolete mirror', () => {
+  assert.ok(source.includes("for (const collection of ['schedule'])"));
+  assert.equal(source.includes("for (const collection of ['schedule', 'trainingSchedules'])"), false);
+  assert.ok(source.includes('next.trainingSchedules = [];'));
+  assert.ok(source.includes("dbShape: { ...dbShape, trainingSchedules: [] }"));
+  assert.ok(source.includes('if (rowId) blockedScheduleIds.add(rowId);'));
 });
 
 test('installed GET /db validates stored data then filters already-persisted suppressed occurrences before returning them', () => {

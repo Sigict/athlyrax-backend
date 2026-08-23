@@ -38,7 +38,7 @@
     "approve:storage-layout": "node scripts/approve-storage-layout.mjs",
     "smoke:prod": "node scripts/prod-isolation-smoke.mjs",
     "test:stripe-webhook-processing-availability": "node --test tests/stripe-webhook-processing-availability.test.mjs",
-    "test:planning-deletion-protection": "node --test tests/planning-deletion-protection.test.mjs tests/schedule-occurrence-server-route-contract.test.mjs tests/schedule-occurrence-legacy-protection.test.mjs tests/schedule-suppression-block-owner-integrity.test.mjs tests/bulk-delete-tombstone-capacity.test.mjs tests/server-authoritative-schedule-delete.test.mjs tests/legacy-training-schedules-retirement.test.mjs",
+    "test:planning-deletion-protection": "node --test tests/planning-deletion-protection.test.mjs tests/schedule-occurrence-server-route-contract.test.mjs tests/schedule-occurrence-legacy-protection.test.mjs tests/schedule-suppression-block-owner-integrity.test.mjs tests/bulk-delete-tombstone-capacity.test.mjs tests/server-authoritative-schedule-delete.test.mjs tests/schedule-delete-canonical-occurrence.test.mjs tests/schedule-delete-production-route.integration.test.mjs tests/schedule-delete-sparse-legacy-live-route.integration.test.mjs tests/schedule-delete-software-owner-live-route.integration.test.mjs tests/legacy-training-schedules-retirement.test.mjs",
     "audit:planning-data-shape": "node scripts/audit-planning-data-shape.mjs storage/db.json",
     "test:timetable-legacy-lock": "node --test tests/timetable-legacy-lock.test.mjs"
   },

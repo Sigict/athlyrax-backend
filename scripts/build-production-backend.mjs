@@ -66,6 +66,10 @@ run('Schedule delete block-integrity guard', ['scripts/patch-schedule-delete-blo
 if (!fs.existsSync(path.join(root, 'scripts/patch-server-authoritative-schedule-delete-verification.mjs'))) throw new Error('Required server-authoritative schedule deletion match verification is missing.');
 run('server-authoritative schedule deletion match verification', ['scripts/patch-server-authoritative-schedule-delete-verification.mjs']);
 
+if (!fs.existsSync(path.join(root, 'scripts/schedule-delete-occurrence-identity.mjs'))) throw new Error('Required canonical Schedule occurrence resolver is missing.');
+if (!fs.existsSync(path.join(root, 'scripts/patch-canonical-schedule-delete-occurrence.mjs'))) throw new Error('Required canonical Schedule occurrence deletion guard is missing.');
+run('canonical Schedule occurrence deletion guard', ['scripts/patch-canonical-schedule-delete-occurrence.mjs']);
+
 if (!fs.existsSync(path.join(root, 'scripts/patch-retire-legacy-training-schedules.mjs'))) throw new Error('Required legacy trainingSchedules retirement guard is missing.');
 run('legacy trainingSchedules retirement guard', ['scripts/patch-retire-legacy-training-schedules.mjs']);
 
@@ -94,6 +98,8 @@ for (const relative of [
   'scripts/patch-server-authoritative-schedule-delete.mjs',
   'scripts/patch-schedule-delete-block-integrity.mjs',
   'scripts/patch-server-authoritative-schedule-delete-verification.mjs',
+  'scripts/schedule-delete-occurrence-identity.mjs',
+  'scripts/patch-canonical-schedule-delete-occurrence.mjs',
   'scripts/patch-retire-legacy-training-schedules.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);

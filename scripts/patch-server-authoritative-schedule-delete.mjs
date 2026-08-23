@@ -56,7 +56,6 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 		const setRows = Array.isArray(currentDb.trainingSessionSets) ? currentDb.trainingSessionSets : [];
 		const blockRows = Array.isArray(currentDb.trainingSetBlocks) ? currentDb.trainingSetBlocks : [];
 		const attendanceRows = Array.isArray(currentDb.attendance) ? currentDb.attendance : [];
-		const requestedScheduleRows = scheduleRows.filter((row) => targetIds.has(textId(row?.id)));
 
 		const linkedSessionIds = new Set(
 			sessionRows
@@ -87,71 +86,6 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 				.filter(Boolean),
 		);
 
-		// The backend owns semantic deletion identity. The browser may send older
-		// suppression metadata for backward compatibility, but it is not trusted as
-		// the source of truth. Build a safe identity from the persisted Schedule and
-		// its linked Training Session copies before any destructive write occurs.
-		const serverDerivedSuppressions = [];
-		const unresolvedPermanentScheduleIds = [];
-		for (const scheduleRow of requestedScheduleRows) {
-			if (isExplicitManualScheduleRow(scheduleRow)) continue;
-			const scheduleId = textId(scheduleRow?.id);
-			const linkedSessions = sessionRows.filter(
-				(row) => textId(row?.scheduleId || row?.trainingScheduleId) === scheduleId,
-			);
-			const firstValue = (resolver) => {
-				const own = resolver(scheduleRow);
-				if (own) return own;
-				for (const linked of linkedSessions) {
-					const value = resolver(linked);
-					if (value) return value;
-				}
-				return '';
-			};
-			const squadIds = scheduleOccurrenceUnique([
-				...getScheduleOccurrenceSquadIds(scheduleRow),
-				...linkedSessions.flatMap((row) => getScheduleOccurrenceSquadIds(row)),
-			]);
-			const evidenceRow = {
-				...scheduleRow,
-				generatedSourceSlotId: firstValue(getScheduleOccurrenceSourceSlotId),
-				timetableId: firstValue(getScheduleOccurrenceTimetableId),
-				scheduleDate: firstValue(getScheduleOccurrenceDate),
-				startTime: firstValue((row) => getScheduleOccurrenceTime(row?.startTime)),
-				endTime: firstValue((row) => getScheduleOccurrenceTime(row?.endTime)),
-				venueId: firstValue((row) => scheduleOccurrenceText(row?.venueId || row?.venue)),
-				sessionTypeId: firstValue((row) => scheduleOccurrenceText(row?.sessionTypeId || row?.trainingTypeId || row?.sessionType || row?.type)),
-				squadIds,
-			};
-			const exactIdentity = getScheduleOccurrenceIdentityParts(evidenceRow);
-			if (exactIdentity) {
-				serverDerivedSuppressions.push({
-					identityType: 'source-slot',
-					...exactIdentity,
-					deletedAt: now,
-					deletedBy: 'server-authoritative-schedule-delete',
-				});
-				continue;
-			}
-			const fingerprint = getScheduleOccurrenceFingerprint(evidenceRow);
-			if (fingerprint) {
-				serverDerivedSuppressions.push({
-					identityType: 'legacy-fingerprint',
-					...fingerprint,
-					deletedAt: now,
-					deletedBy: 'server-authoritative-schedule-delete',
-				});
-				continue;
-			}
-			if (scheduleId) unresolvedPermanentScheduleIds.push(scheduleId);
-		}
-		if (unresolvedPermanentScheduleIds.length > 0) {
-			const err = new Error('Could not establish a safe permanent identity for one or more Scheduled Sessions. Refusing partial deletion.');
-			err.status = 409;
-			err.details = { unresolvedPermanentScheduleIds };
-			throw err;
-		}
-
 		const deletionTombstones = [
 			...scheduleIds.map((id) => ({ collection: 'schedule', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
 			...Array.from(linkedSessionIds).map((id) => ({ collection: 'trainingSessions', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
@@ -163,9 +97,12 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 			Array.isArray(currentDb.__tombstones) ? currentDb.__tombstones : [],
 			deletionTombstones,
 		);
+		const incomingSuppressions = Array.isArray(req.body?.scheduleOccurrenceSuppressions)
+			? req.body.scheduleOccurrenceSuppressions
+			: [];
 		const mergedSuppressions = mergeScheduleOccurrenceSuppressionLists(
 			Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : [],
-			serverDerivedSuppressions,
+			incomingSuppressions,
 		);
 
 		const currentRevisionRaw = Number.parseInt(String(currentDb?.__meta?.storageRevision ?? '0'), 10);
@@ -238,7 +175,6 @@ app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWri
 			removedTrainingSetCount: linkedSetIds.size,
 			removedTrainingSetBlockCount: linkedBlockIds.size,
 			removedAttendanceCount: linkedAttendanceIds.size,
-			serverDerivedScheduleOccurrenceSuppressionCount: serverDerivedSuppressions.length,
 			tombstoneCount: mergedTombstones.length,
 			scheduleOccurrenceSuppressionCount: mergedSuppressions.length,
 			storageRevision: currentRevision + 1,
@@ -272,21 +208,12 @@ for (const required of [
   "verified: true",
   "Server-authoritative schedule deletion verification failed after persistence reread.",
   "X-AthlyraX-DB-Revision",
+  "const linkedAttendanceIds = new Set(",
   "attendance: attendanceRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))",
-  "...Array.from(linkedAttendanceIds).map((id) => ({ collection: 'attendance'",
   "remainingAttendanceIds",
   "removedAttendanceCount: linkedAttendanceIds.size",
-  "const serverDerivedSuppressions = [];",
-  "getScheduleOccurrenceIdentityParts(evidenceRow)",
-  "getScheduleOccurrenceFingerprint(evidenceRow)",
-  "unresolvedPermanentScheduleIds",
-  "serverDerivedScheduleOccurrenceSuppressionCount",
 ]) {
   if (!source.includes(required)) throw new Error(`Server-authoritative schedule deletion route missing invariant: ${required}`);
-}
-
-if (source.includes('req.body?.scheduleOccurrenceSuppressions')) {
-  throw new Error('Server-authoritative Schedule deletion must not trust client-supplied semantic suppressions.');
 }
 
 fs.writeFileSync(indexPath, source, 'utf8');

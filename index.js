@@ -3289,13 +3289,13 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 		return { dbShape, blockedResurrections: [] };
 	}
 	const normalizedSuppressions = mergeScheduleOccurrenceSuppressionLists([], suppressions);
-	if (normalizedSuppressions.length === 0) return { dbShape, blockedResurrections: [] };
+	if (normalizedSuppressions.length === 0) return { dbShape: { ...dbShape, trainingSchedules: [] }, blockedResurrections: [] };
 
 	const next = { ...dbShape };
 	const blockedResurrections = [];
 	const blockedScheduleIds = new Set();
 
-	for (const collection of ['schedule', 'trainingSchedules']) {
+	for (const collection of ['schedule']) {
 		const rows = Array.isArray(next[collection]) ? next[collection] : null;
 		if (!rows) continue;
 		const kept = [];
@@ -3377,6 +3377,7 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 		);
 	}
 
+	next.trainingSchedules = [];
 	return { dbShape: next, blockedResurrections };
 }
 
