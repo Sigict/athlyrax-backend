@@ -35,6 +35,17 @@ if (!source.includes('Planner target backup refresh was preserved after the prim
   throw new Error('Primary database response still depends on the secondary planner backup refresh.');
 }
 
+// Complete synchronous storage healing before the server accepts requests.
+// Otherwise the first GET can expose revision N while startup immediately
+// commits revision N+1 behind that client's back.
+source = source.replace(/\n\s*autoHealSwimmerBindingsAtStartup\(\);\n\}\);/, '\n});');
+if (!source.includes('autoHealSwimmerBindingsAtStartup();\nconst server = app.listen')) {
+  source = source.replace('\nconst server = app.listen', '\nautoHealSwimmerBindingsAtStartup();\nconst server = app.listen');
+}
+if (source.indexOf('autoHealSwimmerBindingsAtStartup();') > source.indexOf('const server = app.listen')) {
+  throw new Error('Startup storage healing must finish before the server begins accepting DB requests.');
+}
+
 for (const forbidden of [
   'const isStaleWrite =',
   'staleWriteIgnored: true',
