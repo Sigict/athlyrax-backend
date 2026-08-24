@@ -3291,6 +3291,15 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 	const normalizedSuppressions = mergeScheduleOccurrenceSuppressionLists([], suppressions);
 	if (normalizedSuppressions.length === 0) return { dbShape: { ...dbShape, trainingSchedules: [] }, blockedResurrections: [] };
 
+	// Bulk deletion can create thousands of permanent occurrence suppressions.
+	// Resolve each persisted Schedule row by its canonical suppression identity
+	// in O(1) instead of scanning every suppression for every row.
+	const normalizedSuppressionByKey = new Map(
+		normalizedSuppressions
+			.map((entry) => [getScheduleOccurrenceSuppressionKey(entry), entry])
+			.filter(([key]) => Boolean(key)),
+	);
+
 	const next = { ...dbShape };
 	const blockedResurrections = [];
 	const blockedScheduleIds = new Set();
@@ -3300,7 +3309,7 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 		if (!rows) continue;
 		const kept = [];
 		for (const row of rows) {
-			const matched = normalizedSuppressions.find((entry) => matchesScheduleOccurrenceSuppression(entry, row));
+			const matched = normalizedSuppressionByKey.get(getScheduleOccurrenceSuppressionKey(row));
 			if (!matched) {
 				kept.push(row);
 				continue;
