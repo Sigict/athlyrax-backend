@@ -109,3 +109,34 @@ test('same-day different-time occurrence is not pulled into the delete cluster',
   });
   assert.deepEqual(result.targetScheduleIds, ['target']);
 });
+
+test('whole-calendar resolution handles 3401 Scheduled Sessions without quadratic scans', () => {
+  const rowCount = 3401;
+  const scheduleRows = Array.from({ length: rowCount }, (_, index) => ({
+    ...baseOccurrence,
+    id: `bulk-schedule-${index}`,
+    generatedSourceSlotId: `bulk-slot-${index}`,
+    scheduleDate: `2026-09-${String((index % 28) + 1).padStart(2, '0')}`,
+  }));
+  const sessionRows = scheduleRows.map((row, index) => ({
+    id: `bulk-session-${index}`,
+    scheduleId: row.id,
+    startTime: row.startTime,
+    endTime: row.endTime,
+  }));
+
+  const startedAt = performance.now();
+  const result = resolveCanonicalScheduleDeleteTargets({
+    requestedIds: scheduleRows.map((row) => row.id),
+    scheduleRows,
+    legacyScheduleRows: [],
+    sessionRows,
+    deletedAt: '2026-08-24T16:00:00.000Z',
+  });
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.equal(result.directlyResolvedScheduleIds.length, rowCount);
+  assert.equal(result.targetScheduleIds.length, rowCount);
+  assert.equal(result.unresolvedGeneratedScheduleIds.length, 0);
+  assert.ok(elapsedMs < 2000, `3401-row Schedule resolution took ${elapsedMs.toFixed(1)}ms`);
+});
