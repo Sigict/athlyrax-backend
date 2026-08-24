@@ -3291,6 +3291,20 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 	const normalizedSuppressions = mergeScheduleOccurrenceSuppressionLists([], suppressions);
 	if (normalizedSuppressions.length === 0) return { dbShape: { ...dbShape, trainingSchedules: [] }, blockedResurrections: [] };
 
+	// Canonical planner-generated occurrences have complete source-slot identities,
+	// so bulk deletion can resolve thousands of them in O(1) per row. Legacy
+	// fingerprints intentionally support missing-field wildcards and must retain
+	// the compatibility matcher below.
+	const sourceSlotSuppressionByKey = new Map(
+		normalizedSuppressions
+			.filter((entry) => entry?.identityType === 'source-slot')
+			.map((entry) => [getScheduleOccurrenceSuppressionKey(entry), entry])
+			.filter(([key]) => Boolean(key)),
+	);
+	const legacyFingerprintSuppressions = normalizedSuppressions.filter(
+		(entry) => entry?.identityType === 'legacy-fingerprint',
+	);
+
 	const next = { ...dbShape };
 	const blockedResurrections = [];
 	const blockedScheduleIds = new Set();
@@ -3300,7 +3314,22 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 		if (!rows) continue;
 		const kept = [];
 		for (const row of rows) {
-			const matched = normalizedSuppressions.find((entry) => matchesScheduleOccurrenceSuppression(entry, row));
+			let matched = null;
+			if (!isExplicitManualScheduleRow(row)) {
+				const identity = getScheduleOccurrenceIdentityParts(row);
+				if (identity) {
+					matched = sourceSlotSuppressionByKey.get(JSON.stringify([
+						identity.sourceSlotId,
+						identity.scheduleDate,
+						identity.timetableId,
+					]));
+				}
+				if (!matched && legacyFingerprintSuppressions.length > 0) {
+					matched = legacyFingerprintSuppressions.find(
+						(entry) => matchesScheduleOccurrenceSuppression(entry, row),
+					);
+				}
+			}
 			if (!matched) {
 				kept.push(row);
 				continue;
