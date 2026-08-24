@@ -3304,6 +3304,15 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 	const legacyFingerprintSuppressions = normalizedSuppressions.filter(
 		(entry) => entry?.identityType === 'legacy-fingerprint',
 	);
+	// Legacy fingerprints allow missing-field wildcards, but scheduleDate is
+	// always required. Bucket them by date so old generated rows preserve the
+	// exact compatibility semantics without scanning every suppression.
+	const legacyFingerprintSuppressionsByDate = new Map();
+	for (const entry of legacyFingerprintSuppressions) {
+		const entriesForDate = legacyFingerprintSuppressionsByDate.get(entry.scheduleDate) || [];
+		entriesForDate.push(entry);
+		legacyFingerprintSuppressionsByDate.set(entry.scheduleDate, entriesForDate);
+	}
 
 	const next = { ...dbShape };
 	const blockedResurrections = [];
@@ -3325,7 +3334,9 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 					]));
 				}
 				if (!matched && legacyFingerprintSuppressions.length > 0) {
-					matched = legacyFingerprintSuppressions.find(
+					const candidateDate = getScheduleOccurrenceDate(row);
+					const candidateSuppressions = legacyFingerprintSuppressionsByDate.get(candidateDate) || [];
+					matched = candidateSuppressions.find(
 						(entry) => matchesScheduleOccurrenceSuppression(entry, row),
 					);
 				}
