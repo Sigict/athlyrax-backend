@@ -53,12 +53,6 @@ function squadIds(row) {
   ]).sort();
 }
 
-function linkedSessionsForSchedule(sessionRows, scheduleId) {
-  const target = text(scheduleId);
-  if (!target) return [];
-  return asArray(sessionRows).filter((row) => text(row?.scheduleId || row?.trainingScheduleId) === target);
-}
-
 function firstValue(scheduleRow, linkedSessions, resolver) {
   const own = resolver(scheduleRow);
   if (own) return own;
@@ -69,11 +63,10 @@ function firstValue(scheduleRow, linkedSessions, resolver) {
   return '';
 }
 
-function buildOccurrenceIdentity(scheduleRow, sessionRows) {
+function buildOccurrenceIdentity(scheduleRow, linkedSessions) {
   if (!scheduleRow || typeof scheduleRow !== 'object') return null;
   const scheduleId = text(scheduleRow?.id);
   if (!scheduleId) return null;
-  const linkedSessions = linkedSessionsForSchedule(sessionRows, scheduleId);
   const date = firstValue(scheduleRow, linkedSessions, scheduleDate);
   const slot = firstValue(scheduleRow, linkedSessions, sourceSlotId);
   const timetable = firstValue(scheduleRow, linkedSessions, timetableId);
@@ -123,12 +116,13 @@ function buildOccurrenceIdentity(scheduleRow, sessionRows) {
   };
 }
 
-function identitiesMatch(a, b) {
-  if (!a || !b) return false;
-  if (a.manual !== b.manual) return false;
-  if (a.sourceKey && b.sourceKey && a.sourceKey === b.sourceKey) return true;
-  if (a.fingerprintKey && b.fingerprintKey && a.fingerprintKey === b.fingerprintKey) return true;
-  return false;
+function identityMatchKeys(identity) {
+  if (!identity) return [];
+  const kind = identity.manual ? 'manual' : 'generated';
+  const keys = [];
+  if (identity.sourceKey) keys.push(`${kind}|source|${identity.sourceKey}`);
+  if (identity.fingerprintKey) keys.push(`${kind}|fingerprint|${identity.fingerprintKey}`);
+  return keys;
 }
 
 function suppressionForIdentity(identity, deletedAt) {
@@ -183,36 +177,60 @@ export function resolveCanonicalScheduleDeleteTargets({
   const schedules = [...asArray(scheduleRows), ...asArray(legacyScheduleRows)];
   const sessions = asArray(sessionRows);
 
+  // Build the relation once. The old resolver filtered the entire session table once
+  // for every Schedule row, which made whole-calendar deletion quadratic.
+  const sessionsByScheduleId = new Map();
+  const scheduleIdBySessionId = new Map();
+  for (const row of sessions) {
+    const scheduleId = text(row?.scheduleId || row?.trainingScheduleId);
+    const sessionId = text(row?.id);
+    if (sessionId && scheduleId) scheduleIdBySessionId.set(sessionId, scheduleId);
+    if (!scheduleId) continue;
+    const linked = sessionsByScheduleId.get(scheduleId);
+    if (linked) linked.push(row);
+    else sessionsByScheduleId.set(scheduleId, [row]);
+  }
+
   const directlyResolvedScheduleIds = new Set();
   for (const row of schedules) {
     const id = text(row?.id);
     if (id && requested.has(id)) directlyResolvedScheduleIds.add(id);
   }
-  for (const row of sessions) {
-    const sessionId = text(row?.id);
-    if (!sessionId || !requested.has(sessionId)) continue;
-    const scheduleId = text(row?.scheduleId || row?.trainingScheduleId);
-    if (scheduleId) directlyResolvedScheduleIds.add(scheduleId);
+  for (const requestedId of requested) {
+    const linkedScheduleId = scheduleIdBySessionId.get(requestedId);
+    if (linkedScheduleId) directlyResolvedScheduleIds.add(linkedScheduleId);
   }
 
   const identitiesByScheduleId = new Map();
   for (const row of schedules) {
-    const identity = buildOccurrenceIdentity(row, sessions);
+    const scheduleId = text(row?.id);
+    const identity = buildOccurrenceIdentity(row, sessionsByScheduleId.get(scheduleId) || []);
     if (!identity) continue;
-    const existing = identitiesByScheduleId.get(identity.scheduleId) || [];
-    existing.push(identity);
-    identitiesByScheduleId.set(identity.scheduleId, existing);
+    const existing = identitiesByScheduleId.get(identity.scheduleId);
+    if (existing) existing.push(identity);
+    else identitiesByScheduleId.set(identity.scheduleId, [identity]);
   }
 
-  const selectedIdentities = [];
+  // Index selected semantic identities once. The old resolver ran nested .some()
+  // comparisons for every Schedule row against every selected identity.
+  const selectedMatchKeys = new Set();
   for (const scheduleId of directlyResolvedScheduleIds) {
-    selectedIdentities.push(...(identitiesByScheduleId.get(scheduleId) || []));
+    for (const identity of identitiesByScheduleId.get(scheduleId) || []) {
+      for (const key of identityMatchKeys(identity)) selectedMatchKeys.add(key);
+    }
   }
 
   const targetScheduleIds = new Set(directlyResolvedScheduleIds);
-  for (const [scheduleId, identities] of identitiesByScheduleId.entries()) {
-    if (selectedIdentities.some((selected) => identities.some((candidate) => identitiesMatch(selected, candidate)))) {
-      targetScheduleIds.add(scheduleId);
+  if (selectedMatchKeys.size > 0) {
+    for (const [scheduleId, identities] of identitiesByScheduleId.entries()) {
+      let matches = false;
+      for (const identity of identities) {
+        if (identityMatchKeys(identity).some((key) => selectedMatchKeys.has(key))) {
+          matches = true;
+          break;
+        }
+      }
+      if (matches) targetScheduleIds.add(scheduleId);
     }
   }
 
