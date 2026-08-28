@@ -59,6 +59,7 @@ function athleteClubValues(clubConnections = []) {
     row?.clubName,
     row?.club,
     row?.name,
+    row?.tenantId,
   ]).map(text).filter(Boolean));
 }
 
@@ -147,8 +148,9 @@ function safeSession(session = {}, linkedSets = []) {
 
 function safeClubConnection(connection = {}) {
   return {
-    connectionId: text(connection.connectionId || connection.id),
-    clubId: text(connection.clubId || connection.clubCode || connection.club),
+    connectionId: text(connection.connectionId || connection.id || (connection.tenantId ? `tenant:${connection.tenantId}` : '')),
+    tenantId: text(connection.tenantId),
+    clubId: text(connection.clubId || connection.clubCode || connection.club || connection.tenantId),
     clubName: text(connection.clubName || connection.club || connection.name),
     squadId: text(connection.squadId || connection.squadCode),
     squadName: text(connection.squadName || connection.squad),
@@ -161,6 +163,16 @@ function safeClubConnection(connection = {}) {
       : {},
     dataScopes: asArray(connection.dataScopes),
   };
+}
+
+function dedupeConnections(rows = []) {
+  const byKey = new Map();
+  for (const row of rows.map(safeClubConnection)) {
+    const key = text(row.connectionId || row.tenantId || row.clubId || row.clubName);
+    if (!key) continue;
+    byKey.set(key, { ...(byKey.get(key) || {}), ...row });
+  }
+  return [...byKey.values()];
 }
 
 function dedupeSessions(rows = []) {
@@ -187,7 +199,7 @@ function dedupeSessions(rows = []) {
   return [...byId.values()];
 }
 
-export function buildAthleteHomeProjection(db = {}, authUser = {}) {
+export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {}) {
   const authIds = identityValues(authUser);
   const athlete = asArray(db.swimmers).find((row) => rowMatchesIdentity(row, authIds));
   if (!athlete) return null;
@@ -201,8 +213,15 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}) {
     return Boolean(swimmerId && athleteIds.has(swimmerId));
   });
   const nestedClubConnections = asArray(athlete.clubConnections);
-  const rawClubConnections = [...topLevelClubConnections, ...nestedClubConnections];
-  const clubConnections = rawClubConnections.map(safeClubConnection);
+  const contextConnection = context?.connection && typeof context.connection === 'object'
+    ? { ...context.connection, tenantId: text(context.tenantId || context.connection.tenantId), status: 'active' }
+    : null;
+  const rawClubConnections = [
+    ...topLevelClubConnections,
+    ...nestedClubConnections,
+    ...(contextConnection ? [contextConnection] : []),
+  ];
+  const clubConnections = dedupeConnections(rawClubConnections);
   const squadIds = athleteSquadValues(athlete, rawClubConnections);
   const clubIds = athleteClubValues(rawClubConnections);
 
