@@ -52,7 +52,17 @@ function athleteSquadValues(athlete = {}, clubConnections = []) {
   ].map(text).filter(Boolean));
 }
 
-function sessionMatchesAthlete(session = {}, athleteIds = new Set(), squadIds = new Set()) {
+function athleteClubValues(clubConnections = []) {
+  return new Set(clubConnections.flatMap((row) => [
+    row?.clubId,
+    row?.clubCode,
+    row?.clubName,
+    row?.club,
+    row?.name,
+  ]).map(text).filter(Boolean));
+}
+
+function sessionMatchesAthlete(session = {}, athleteIds = new Set(), squadIds = new Set(), clubIds = new Set()) {
   const explicit = [session.swimmerId, session.athleteId, session.userId, session.memberId]
     .map(text)
     .filter(Boolean);
@@ -61,7 +71,13 @@ function sessionMatchesAthlete(session = {}, athleteIds = new Set(), squadIds = 
   const sessionSquads = [session.squadId, session.squadCode, session.squadName, session.squad]
     .map(text)
     .filter(Boolean);
-  return sessionSquads.some((value) => squadIds.has(value));
+  if (!sessionSquads.some((value) => squadIds.has(value))) return false;
+
+  const sessionClubs = [session.ownerClubId, session.clubId, session.clubCode, session.clubName, session.club]
+    .map(text)
+    .filter(Boolean);
+  if (sessionClubs.length === 0) return true;
+  return sessionClubs.some((value) => clubIds.has(value));
 }
 
 function setSessionId(set = {}) {
@@ -177,16 +193,18 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}) {
   if (!athlete) return null;
 
   const athleteIds = athleteIdentityValues(athlete, authIds);
-  const rawClubConnections = [
+  const topLevelClubConnections = [
     ...asArray(db.clubConnections),
     ...asArray(db.swimmerClubConnections),
-    ...asArray(athlete.clubConnections),
   ].filter((row) => {
     const swimmerId = text(row.swimmerId || row.athleteId || row.userId);
-    return !swimmerId || athleteIds.has(swimmerId);
+    return Boolean(swimmerId && athleteIds.has(swimmerId));
   });
+  const nestedClubConnections = asArray(athlete.clubConnections);
+  const rawClubConnections = [...topLevelClubConnections, ...nestedClubConnections];
   const clubConnections = rawClubConnections.map(safeClubConnection);
   const squadIds = athleteSquadValues(athlete, rawClubConnections);
+  const clubIds = athleteClubValues(rawClubConnections);
 
   const linkedSetRows = asArray(db.trainingSessionSets);
   const rawSessions = [
@@ -194,7 +212,7 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}) {
     ...asArray(db.sessions),
     ...asArray(db.schedule),
     ...asArray(db.scheduledSessions),
-  ].filter((row) => sessionMatchesAthlete(row, athleteIds, squadIds));
+  ].filter((row) => sessionMatchesAthlete(row, athleteIds, squadIds, clubIds));
 
   const sessions = dedupeSessions(rawSessions.map((row) => {
     const sessionId = canonicalSessionId(row);
