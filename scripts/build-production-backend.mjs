@@ -44,6 +44,7 @@ const transforms = [
   'scripts/patch-production-error-redaction.mjs',
   'scripts/patch-production-cors-origins.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
+  'scripts/patch-athlete-home-api.mjs',
 ];
 
 for (const relative of transforms) {
@@ -79,6 +80,7 @@ run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 for (const relative of [
   'scripts/data-safety-preload.mjs',
   'index.js',
+  'athlete-home-projection.mjs',
   'scripts/storage-path-contract.mjs',
   'scripts/migrate-storage-once.mjs',
   'scripts/approve-storage-layout.mjs',
@@ -93,6 +95,7 @@ for (const relative of [
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
+  'scripts/patch-athlete-home-api.mjs',
   'scripts/patch-schedule-deletion-authority.mjs',
   'scripts/patch-bulk-delete-tombstone-capacity.mjs',
   'scripts/patch-server-authoritative-schedule-delete.mjs',
