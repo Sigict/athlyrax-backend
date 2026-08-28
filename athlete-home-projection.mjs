@@ -157,7 +157,7 @@ function safeClubConnection(connection = {}) {
     status: text(connection.status || 'active'),
     startDate: text(connection.startDate),
     endDate: text(connection.endDate),
-    swimmingSessionPolicy: text(connection.swimmingSessionPolicy || 'coach_only'),
+    swimmingSessionPolicy: text(connection.swimmingSessionPolicy),
     sessionPolicies: connection.sessionPolicies && typeof connection.sessionPolicies === 'object'
       ? connection.sessionPolicies
       : {},
@@ -170,7 +170,23 @@ function dedupeConnections(rows = []) {
   for (const row of rows.map(safeClubConnection)) {
     const key = text(row.connectionId || row.tenantId || row.clubId || row.clubName);
     if (!key) continue;
-    byKey.set(key, { ...(byKey.get(key) || {}), ...row });
+    const previous = byKey.get(key);
+    if (!previous) {
+      byKey.set(key, row);
+      continue;
+    }
+    const nextPolicies = Object.keys(row.sessionPolicies || {}).length
+      ? row.sessionPolicies
+      : previous.sessionPolicies;
+    const nextSwimmingPolicy = row.swimmingSessionPolicy || previous.swimmingSessionPolicy;
+    const nextScopes = row.dataScopes.length ? row.dataScopes : previous.dataScopes;
+    byKey.set(key, {
+      ...previous,
+      ...row,
+      swimmingSessionPolicy: nextSwimmingPolicy,
+      sessionPolicies: nextPolicies,
+      dataScopes: nextScopes,
+    });
   }
   return [...byKey.values()];
 }
