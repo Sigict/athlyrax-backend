@@ -68,6 +68,23 @@ test('nested athlete-owned club connections may omit redundant swimmer id', () =
   assert.deepEqual(result.sessions.map((row) => row.id), ['nested-session']);
 });
 
+test('explicit authorised tenant context scopes a copied athlete to that club without opening other clubs', () => {
+  const copiedDb = {
+    swimmers: [{ id: 'athlete-1', swimmerAccountUsername: 'swimmer1', currentSquadId: 'shared-squad' }],
+    trainingSessions: [
+      { id: 'club-b-session', clubId: 'club-b', squadId: 'shared-squad' },
+      { id: 'club-secret-session', clubId: 'club-secret', squadId: 'shared-squad' },
+    ],
+  };
+  const result = buildAthleteHomeProjection(copiedDb, { username: 'swimmer1' }, {
+    tenantId: 'tenant-b',
+    connection: { tenantId: 'tenant-b', connectionId: 'tenant:tenant-b', clubId: 'club-b', clubName: 'Club B', squadId: 'shared-squad' },
+  });
+  assert.deepEqual(result.clubConnections.map((row) => row.clubId), ['club-b']);
+  assert.deepEqual(result.sessions.map((row) => row.id), ['club-b-session']);
+  assert.equal(JSON.stringify(result).includes('club-secret-session'), false);
+});
+
 test('projection does not expose unrelated tenant collections or private coach sets', () => {
   const result = buildAthleteHomeProjection(db, { username: 'swimmer1' });
   assert.equal(Object.hasOwn(result, 'billing'), false);
