@@ -20,7 +20,7 @@ function cookieHeader(response) {
   return rows.map((row) => String(row || '').split(';')[0].trim()).filter(Boolean).join('; ');
 }
 
-async function startAthleteServer() {
+async function startAthleteServer({ multiTenant = false } = {}) {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-athlete-home-route-'));
   const storageRoot = path.join(tempRoot, 'storage');
   const backupRoot = path.join(tempRoot, 'backup');
@@ -31,18 +31,26 @@ async function startAthleteServer() {
 
   fs.mkdirSync(storageRoot, { recursive: true });
   fs.mkdirSync(backupRoot, { recursive: true });
+  const swimmerUser = {
+    username: 'swimmer1',
+    password: 'Swimmer!Pass1234',
+    role: 'swimmer',
+    tenantId: 'tenant-a',
+    clubId: 'club-a',
+    createdVia: 'admin',
+    isApproved: true,
+    onboardingCompletedAt: now,
+    email: 'swimmer1@example.test',
+    ...(multiTenant ? {
+      athleteTenantConnections: [
+        { tenantId: 'tenant-a', connectionId: 'tenant-a-link', clubId: 'club-a', clubName: 'Club A', squadId: 'squad-a', status: 'active' },
+        { tenantId: 'tenant-b', connectionId: 'tenant-b-link', clubId: 'club-b', clubName: 'Club B', squadId: 'squad-b', status: 'active' },
+        { tenantId: 'tenant-disconnected', connectionId: 'tenant-old-link', clubId: 'club-old', clubName: 'Old Club', status: 'disconnected' },
+      ],
+    } : {}),
+  };
   const users = [
-    {
-      username: 'swimmer1',
-      password: 'Swimmer!Pass1234',
-      role: 'swimmer',
-      tenantId: 'tenant-a',
-      clubId: 'club-a',
-      createdVia: 'admin',
-      isApproved: true,
-      onboardingCompletedAt: now,
-      email: 'swimmer1@example.test',
-    },
+    swimmerUser,
     {
       username: 'coachA',
       password: 'CoachA!Pass1234',
@@ -91,6 +99,34 @@ async function startAthleteServer() {
     ],
     billing: [{ secret: 'must-not-leak' }],
   });
+
+  if (multiTenant) {
+    writeJson(path.join(storageRoot, 'tenants', 'tenant-b', 'db.json'), {
+      swimmers: [
+        {
+          id: 'athlete-1',
+          name: 'Athlete One',
+          swimmerAccountUsername: 'swimmer1',
+          swimmerAccountEmail: 'swimmer1@example.test',
+          currentSquadId: 'squad-b',
+          asaN: '123456',
+        },
+        { id: 'athlete-secret', swimmerAccountUsername: 'secret', currentSquadId: 'squad-b' },
+      ],
+      trainingSessions: [
+        { id: 'session-club-b', scheduleId: 'schedule-club-b', squadId: 'squad-b', clubId: 'club-b', title: 'Club B session', totalVolume: 1800 },
+        { id: 'session-secret', swimmerId: 'athlete-secret', squadId: 'squad-b', clubId: 'club-b', title: 'Other Club B athlete' },
+        { id: 'session-wrong-club', squadId: 'squad-b', clubId: 'club-secret', title: 'Wrong club collision' },
+      ],
+      trainingSessionSets: [
+        { id: 'set-club-b', trainingSessionId: 'session-club-b', reps: 12, distance: 50, stroke: 'Free' },
+        { id: 'set-club-b-private', trainingSessionId: 'session-club-b', coachPrivate: true, reps: 2, distance: 25 },
+        { id: 'set-secret', trainingSessionId: 'session-secret', reps: 4, distance: 100 },
+        { id: 'set-wrong-club', trainingSessionId: 'session-wrong-club', reps: 1, distance: 25 },
+      ],
+      privateCoachNotes: [{ swimmerId: 'athlete-1', note: 'must-never-leak' }],
+    });
+  }
 
   const port = String(4500 + Math.floor(Math.random() * 300));
   const child = spawn('node', ['index.js'], {
@@ -224,6 +260,30 @@ test('two independent sign-ins resolve to the same canonical athlete identity an
   }
 });
 
+test('explicit active tenant registry aggregates two clubs but excludes disconnected and private data', async () => {
+  const server = await startAthleteServer({ multiTenant: true });
+  try {
+    const session = await login(server.baseUrl);
+    const result = await athleteHome(server.baseUrl, session);
+    assert.equal(result.response.status, 200, JSON.stringify(result.payload));
+    assert.equal(result.payload?.athlete?.id, 'athlete-1');
+    assert.deepEqual(result.payload?.sessions?.map((row) => row.id).sort(), ['session-a', 'session-club-b']);
+    assert.ok(result.payload?.clubConnections?.some((row) => row.clubId === 'club-a'));
+    assert.ok(result.payload?.clubConnections?.some((row) => row.clubId === 'club-b'));
+    const clubB = result.payload.sessions.find((row) => row.id === 'session-club-b');
+    assert.deepEqual(clubB.sets.map((row) => row.id), ['set-club-b']);
+    const serialized = JSON.stringify(result.payload);
+    assert.equal(serialized.includes('tenant-old-link'), false);
+    assert.equal(serialized.includes('Old Club'), false);
+    assert.equal(serialized.includes('session-secret'), false);
+    assert.equal(serialized.includes('session-wrong-club'), false);
+    assert.equal(serialized.includes('set-club-b-private'), false);
+    assert.equal(serialized.includes('must-never-leak'), false);
+  } finally {
+    await server.stop();
+  }
+});
+
 test('coach-authoritative session write appears to the swimmer with the same session and set ids', async () => {
   const server = await startAthleteServer();
   try {
@@ -264,12 +324,12 @@ test('coach-authoritative session write appears to the swimmer with the same ses
     const swimmer = await login(server.baseUrl);
     const result = await athleteHome(server.baseUrl, swimmer);
     assert.equal(result.response.status, 200, JSON.stringify(result.payload));
-    const session = result.payload?.sessions?.find((row) => row.id === 'coach-created-session');
-    assert.ok(session, 'Coach-created session was not visible to the swimmer.');
-    assert.equal(session.title, 'Coach-created race pace');
-    assert.deepEqual(session.sets.map((row) => row.id), ['coach-created-set']);
-    assert.equal(session.sets[0].reps, 12);
-    assert.equal(session.sets[0].distance, 50);
+    const coachSession = result.payload?.sessions?.find((row) => row.id === 'coach-created-session');
+    assert.ok(coachSession, 'Coach-created session was not visible to the swimmer.');
+    assert.equal(coachSession.title, 'Coach-created race pace');
+    assert.deepEqual(coachSession.sets.map((row) => row.id), ['coach-created-set']);
+    assert.equal(coachSession.sets[0].reps, 12);
+    assert.equal(coachSession.sets[0].distance, 50);
   } finally {
     await server.stop();
   }
