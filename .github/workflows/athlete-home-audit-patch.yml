@@ -1,0 +1,54 @@
+name: Athlete home audit patch
+
+on:
+  push:
+    branches:
+      - feature/athlete-home-api
+
+permissions:
+  contents: write
+
+jobs:
+  patch-audit:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Align transform audit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/audit-production-transform-chain.mjs')
+          s = p.read_text()
+          old = "  'scripts/patch-runtime-db-read-integrity.mjs',\n];"
+          new = "  'scripts/patch-runtime-db-read-integrity.mjs',\n  'scripts/patch-athlete-home-api.mjs',\n];"
+          if "'scripts/patch-athlete-home-api.mjs'" not in s:
+              if old not in s:
+                  raise SystemExit('expectedTransforms marker not found')
+              s = s.replace(old, new, 1)
+          marker = "  'ATHLYRAX_PROXY_OBSERVED_CLIENT_IP','ATHLYRAX_LAYERED_AUTH_RATE_LIMIT','ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS','ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED','ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS',"
+          replacement = marker + "\n  'ATHLYRAX_SCOPED_ATHLETE_HOME_API_V1',"
+          if 'ATHLYRAX_SCOPED_ATHLETE_HOME_API_V1' not in s:
+              if marker not in s:
+                  raise SystemExit('transformed index marker list not found')
+              s = s.replace(marker, replacement, 1)
+          p.write_text(s)
+          PY
+      - name: Verify production build
+        run: npm ci
+      - name: Commit audit alignment
+        run: |
+          if git diff --quiet -- scripts/audit-production-transform-chain.mjs index.js; then
+            echo 'Audit already aligned.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/audit-production-transform-chain.mjs index.js
+          git commit -m 'Align athlete-home production transform audit [skip ci]'
+          git push origin HEAD:feature/athlete-home-api
