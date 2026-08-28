@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -72,4 +74,16 @@ test('projection merger refuses cross-tenant identity mismatch instead of combin
     { athlete: { id: 'athlete-1' }, sessions: [] },
     { athlete: { id: 'athlete-2' }, sessions: [] },
   ]), /identity mismatch/);
+});
+
+test('production index records accepted and disconnected coach tenants in the athlete registry', () => {
+  const source = fs.readFileSync(path.resolve('index.js'), 'utf8');
+  for (const token of [
+    'ATHLYRAX_ATHLETE_TENANT_REGISTRY_V1',
+    'upsertAthleteTenantConnection(previousAuthUser?.athleteTenantConnections',
+    'deactivateAthleteTenantConnection(',
+    'athleteTenantConnections: nextAthleteTenantConnections',
+    'activeAthleteTenantConnections(authUser, primaryTenantId)',
+    'mergeAthleteHomeProjections(projections)',
+  ]) assert.ok(source.includes(token), `missing production athlete tenant registry token: ${token}`);
 });
