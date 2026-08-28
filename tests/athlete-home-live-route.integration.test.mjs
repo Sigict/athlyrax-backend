@@ -85,7 +85,7 @@ async function startAthleteServer({ multiTenant = false } = {}) {
       },
     ],
     swimmerClubConnections: [
-      { connectionId: 'link-a', swimmerId: 'athlete-1', clubId: 'club-a', clubName: 'Club A', squadId: 'squad-a' },
+      { connectionId: 'link-a', swimmerId: 'athlete-1', clubId: 'club-a', clubName: 'Club A', squadId: 'squad-a', sessionPolicies: { swimming: 'coach_only' } },
       { connectionId: 'link-b', swimmerId: 'athlete-2', clubId: 'club-b', clubName: 'Club B', squadId: 'squad-b' },
     ],
     trainingSessions: [
@@ -110,6 +110,17 @@ async function startAthleteServer({ multiTenant = false } = {}) {
           swimmerAccountEmail: 'swimmer1@example.test',
           currentSquadId: 'squad-b',
           asaN: '123456',
+          clubConnections: [
+            {
+              connectionId: 'tenant-b-link',
+              tenantId: 'tenant-b',
+              clubId: 'club-b',
+              clubName: 'Club B',
+              squadId: 'squad-b',
+              status: 'active',
+              sessionPolicies: { swimming: 'approval_required', strength: 'athlete_extra' },
+            },
+          ],
         },
         { id: 'athlete-secret', swimmerAccountUsername: 'secret', currentSquadId: 'squad-b' },
       ],
@@ -174,6 +185,7 @@ async function startAthleteServer({ multiTenant = false } = {}) {
 
   return {
     baseUrl: `http://127.0.0.1:${port}`,
+    storageRoot,
     stop: async () => {
       if (!child.killed) child.kill('SIGTERM');
       await new Promise((resolve) => {
@@ -279,6 +291,99 @@ test('explicit active tenant registry aggregates two clubs but excludes disconne
     assert.equal(serialized.includes('session-wrong-club'), false);
     assert.equal(serialized.includes('set-club-b-private'), false);
     assert.equal(serialized.includes('must-never-leak'), false);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('athlete session write enforces CSRF and coach-only policy', async () => {
+  const server = await startAthleteServer({ multiTenant: true });
+  try {
+    const session = await login(server.baseUrl);
+    const withoutCsrf = await fetch(`${server.baseUrl}/swimmer/athlete-sessions`, {
+      method: 'POST',
+      headers: { Cookie: session.cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clubId: 'club-b', date: '2026-08-29', title: 'No CSRF' }),
+    });
+    assert.equal(withoutCsrf.status, 403);
+
+    const denied = await requestJson(server.baseUrl, '/swimmer/athlete-sessions', session, 'POST', {
+      clubId: 'club-a',
+      disciplineId: 'swimming',
+      date: '2026-08-29',
+      title: 'Club A athlete proposal',
+    });
+    assert.equal(denied.response.status, 403, JSON.stringify(denied.payload));
+    assert.match(String(denied.payload?.error || ''), /club controls/i);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('approval-required athlete proposal persists once in the authorised club tenant and returns through athlete-home', async () => {
+  const server = await startAthleteServer({ multiTenant: true });
+  try {
+    const session = await login(server.baseUrl);
+    const created = await requestJson(server.baseUrl, '/swimmer/athlete-sessions', session, 'POST', {
+      clubId: 'club-b',
+      disciplineId: 'swimming',
+      date: '2026-08-29',
+      title: 'Athlete extra aerobic swim',
+      volume: 1200,
+      sets: [
+        { title: 'Main', rounds: 2, reps: 6, distance: 100, stroke: 'Free', sendoff: '1:45' },
+      ],
+      approvalStatus: 'approved',
+      ownerClubId: 'club-a',
+      swimmerId: 'athlete-secret',
+    });
+    assert.equal(created.response.status, 201, JSON.stringify(created.payload));
+    assert.equal(created.payload?.approvalRequired, true);
+    assert.equal(created.payload?.policy, 'approval_required');
+    assert.equal(created.payload?.session?.approvalStatus, 'pending');
+    assert.equal(created.payload?.session?.ownerClubId, 'club-b');
+    assert.equal(created.payload?.session?.ownerTenantId, 'tenant-b');
+    assert.equal(created.payload?.session?.swimmerId, 'athlete-1');
+    assert.ok(String(created.payload?.session?.id || '').startsWith('athlete-session:'));
+    assert.equal(created.payload?.session?.sets?.length, 1);
+    assert.equal(created.payload.session.sets[0].trainingSessionId, created.payload.session.id);
+
+    const home = await athleteHome(server.baseUrl, session);
+    assert.equal(home.response.status, 200, JSON.stringify(home.payload));
+    const projected = home.payload?.sessions?.find((row) => row.id === created.payload.session.id);
+    assert.ok(projected, 'Persisted athlete proposal did not return through athlete-home.');
+    assert.equal(projected.approvalStatus, 'pending');
+    assert.deepEqual(projected.sets.map((row) => row.id), created.payload.session.sets.map((row) => row.id));
+
+    const targetDb = JSON.parse(fs.readFileSync(path.join(server.storageRoot, 'tenants', 'tenant-b', 'db.json'), 'utf8'));
+    const primaryDb = JSON.parse(fs.readFileSync(path.join(server.storageRoot, 'tenants', 'tenant-a', 'db.json'), 'utf8'));
+    assert.equal(targetDb.trainingSessions.filter((row) => row.id === created.payload.session.id).length, 1);
+    assert.equal(targetDb.trainingSessionSets.filter((row) => row.trainingSessionId === created.payload.session.id).length, 1);
+    assert.equal(primaryDb.trainingSessions.some((row) => row.id === created.payload.session.id), false);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('independent athlete session is server-owned, immediately approved and returns on the same canonical id', async () => {
+  const server = await startAthleteServer();
+  try {
+    const session = await login(server.baseUrl);
+    const created = await requestJson(server.baseUrl, '/swimmer/athlete-sessions', session, 'POST', {
+      disciplineId: 'running',
+      date: '2026-08-29',
+      title: 'Independent easy run',
+    });
+    assert.equal(created.response.status, 201, JSON.stringify(created.payload));
+    assert.equal(created.payload?.approvalRequired, false);
+    assert.equal(created.payload?.policy, 'independent');
+    assert.equal(created.payload?.session?.approvalStatus, 'approved');
+    assert.equal(created.payload?.session?.ownerClubId, '');
+    assert.equal(created.payload?.session?.ownerType, 'athlete');
+
+    const home = await athleteHome(server.baseUrl, session);
+    assert.equal(home.response.status, 200, JSON.stringify(home.payload));
+    assert.ok(home.payload?.sessions?.some((row) => row.id === created.payload.session.id));
   } finally {
     await server.stop();
   }
