@@ -17,17 +17,21 @@ if (!source.includes(importLine)) {
   source = source.replace(importMarker, `${importMarker}\n${importLine}`);
 }
 
-if (!source.includes("app.get('/swimmer/athlete-home'")) {
-  const dbMarker = '// Serve db.json at /db';
-  if (!source.includes(dbMarker)) throw new Error('Could not locate /db route marker for athlete-home insertion.');
-  const route = `// ${marker}\napp.get('/swimmer/athlete-home', requireStrictAuth, requireSwimmerRole, (req, res) => {\n\tconst paths = resolveStoragePathsForRequest(req);\n\tif (paths?.error) {\n\t\tres.status(Number(paths.errorStatus || 403)).json({ error: String(paths.error || 'Tenant scope denied.') });\n\t\treturn;\n\t}\n\tensureStorageLayout(paths);\n\tfs.readFile(paths.dbPath, 'utf8', (err, data) => {\n\t\tif (err) {\n\t\t\tres.status(500).json({ error: 'Could not read athlete data.' });\n\t\t\treturn;\n\t\t}\n\t\ttry {\n\t\t\tconst db = JSON.parse(String(data || '{}'));\n\t\t\tconst authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};\n\t\t\tconst projection = buildAthleteHomeProjection(db, authUser);\n\t\t\tif (!projection) {\n\t\t\t\tres.status(404).json({ error: 'Athlete profile not found.' });\n\t\t\t\treturn;\n\t\t\t}\n\t\t\tres.status(200).json({ ok: true, ...projection });\n\t\t} catch (error) {\n\t\t\tres.status(500).json({ error: 'Could not build athlete home.', details: error instanceof Error ? error.message : 'Unknown error' });\n\t\t}\n\t});\n});\n\n`;
-  source = source.replace(dbMarker, `${route}${dbMarker}`);
-}
+const dbMarker = '// Serve db.json at /db';
+if (!source.includes(dbMarker)) throw new Error('Could not locate /db route marker for athlete-home insertion.');
 
-if (!source.includes(marker)) {
-  const routeToken = "app.get('/swimmer/athlete-home', requireStrictAuth, requireSwimmerRole";
-  if (!source.includes(routeToken)) throw new Error('Athlete-home route exists but cannot be verified.');
-  source = source.replace(routeToken, `// ${marker}\n${routeToken}`);
+const route = `// ${marker}\napp.get('/swimmer/athlete-home', requireStrictAuth, requireSwimmerRole, (req, res) => {\n\tconst paths = resolveStoragePathsForRequest(req);\n\tif (paths?.error) {\n\t\tres.status(Number(paths.errorStatus || 403)).json({ error: String(paths.error || 'Tenant scope denied.') });\n\t\treturn;\n\t}\n\tensureStorageLayout(paths);\n\tconst db = readJsonFile(paths.dbPath);\n\tif (!db || typeof db !== 'object' || Array.isArray(db)) {\n\t\tres.status(503).json({ error: 'Athlete data is temporarily unavailable.' });\n\t\treturn;\n\t}\n\tconst authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};\n\tconst projection = buildAthleteHomeProjection(db, authUser);\n\tif (!projection) {\n\t\tres.status(404).json({ error: 'Athlete profile not found.' });\n\t\treturn;\n\t}\n\tres.status(200).json({ ok: true, ...projection });\n});\n\n`;
+
+const existingRouteStart = source.indexOf("app.get('/swimmer/athlete-home'");
+if (existingRouteStart >= 0) {
+  let replacementStart = existingRouteStart;
+  const markerStart = source.lastIndexOf(`// ${marker}`, existingRouteStart);
+  if (markerStart >= 0 && existingRouteStart - markerStart < 100) replacementStart = markerStart;
+  const dbMarkerIndex = source.indexOf(dbMarker, existingRouteStart);
+  if (dbMarkerIndex < 0) throw new Error('Existing athlete-home route has no following /db marker.');
+  source = source.slice(0, replacementStart) + route + source.slice(dbMarkerIndex);
+} else {
+  source = source.replace(dbMarker, `${route}${dbMarker}`);
 }
 
 for (const required of [
@@ -35,9 +39,13 @@ for (const required of [
   marker,
   "app.get('/swimmer/athlete-home', requireStrictAuth, requireSwimmerRole",
   'resolveStoragePathsForRequest(req)',
+  'const db = readJsonFile(paths.dbPath);',
   'buildAthleteHomeProjection(db, authUser)',
 ]) {
   if (!source.includes(required)) throw new Error(`Athlete-home production transform missing required token: ${required}`);
+}
+if (source.includes("fs.readFile(paths.dbPath, 'utf8'")) {
+  throw new Error('Legacy asynchronous athlete-home database read remains.');
 }
 
 fs.writeFileSync(indexPath, source, 'utf8');
