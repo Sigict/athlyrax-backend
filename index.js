@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import nodemailer from 'nodemailer';
 import helmet from 'helmet';
+import { buildAthleteHomeProjection } from './athlete-home-projection.mjs';
 import Stripe from 'stripe';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -6176,6 +6177,33 @@ app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (re
 			details: error instanceof Error ? error.message : 'Unknown error',
 		});
 	}
+});
+
+app.get('/swimmer/athlete-home', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const paths = resolveStoragePathsForRequest(req);
+	if (paths?.error) {
+		res.status(Number(paths.errorStatus || 403)).json({ error: String(paths.error || 'Tenant scope denied.') });
+		return;
+	}
+	ensureStorageLayout(paths);
+	fs.readFile(paths.dbPath, 'utf8', (err, data) => {
+		if (err) {
+			res.status(500).json({ error: 'Could not read athlete data.' });
+			return;
+		}
+		try {
+			const db = JSON.parse(String(data || '{}'));
+			const authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+			const projection = buildAthleteHomeProjection(db, authUser);
+			if (!projection) {
+				res.status(404).json({ error: 'Athlete profile not found.' });
+				return;
+			}
+			res.status(200).json({ ok: true, ...projection });
+		} catch (error) {
+			res.status(500).json({ error: 'Could not build athlete home.', details: error instanceof Error ? error.message : 'Unknown error' });
+		}
+	});
 });
 
 // Serve db.json at /db
