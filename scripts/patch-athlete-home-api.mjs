@@ -20,7 +20,7 @@ if (!source.includes(importLine)) {
 const dbMarker = '// Serve db.json at /db';
 if (!source.includes(dbMarker)) throw new Error('Could not locate /db route marker for athlete-home insertion.');
 
-const route = `// ${marker}\napp.get('/swimmer/athlete-home', requireStrictAuth, requireSwimmerRole, (req, res) => {\n\tconst paths = resolveStoragePathsForRequest(req);\n\tif (paths?.error) {\n\t\tres.status(Number(paths.errorStatus || 403)).json({ error: String(paths.error || 'Tenant scope denied.') });\n\t\treturn;\n\t}\n\tensureStorageLayout(paths);\n\tconst db = readJsonFile(paths.dbPath);\n\tif (!db || typeof db !== 'object' || Array.isArray(db)) {\n\t\tres.status(503).json({ error: 'Athlete data is temporarily unavailable.' });\n\t\treturn;\n\t}\n\tconst authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};\n\tconst projection = buildAthleteHomeProjection(db, authUser);\n\tif (!projection) {\n\t\tres.status(404).json({ error: 'Athlete profile not found.' });\n\t\treturn;\n\t}\n\tres.status(200).json({ ok: true, ...projection });\n});\n\n`;
+const route = `// ${marker}\napp.get('/swimmer/athlete-home', requireStrictAuth, requireSwimmerRole, (req, res) => {\n\tconst storageResolution = resolveStoragePathsForRequest(req);\n\tif (storageResolution?.ok !== true || !storageResolution?.storagePaths) {\n\t\tres.status(Number(storageResolution?.errorStatus || 403)).json({ error: String(storageResolution?.error || 'Tenant scope denied.') });\n\t\treturn;\n\t}\n\tconst paths = storageResolution.storagePaths;\n\tensureStorageLayout(paths);\n\tconst db = readJsonFile(paths.dbPath);\n\tif (!db || typeof db !== 'object' || Array.isArray(db)) {\n\t\tres.status(503).json({ error: 'Athlete data is temporarily unavailable.' });\n\t\treturn;\n\t}\n\tconst authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};\n\tconst projection = buildAthleteHomeProjection(db, authUser);\n\tif (!projection) {\n\t\tres.status(404).json({ error: 'Athlete profile not found.' });\n\t\treturn;\n\t}\n\tres.status(200).json({ ok: true, ...projection });\n});\n\n`;
 
 const existingRouteStart = source.indexOf("app.get('/swimmer/athlete-home'");
 if (existingRouteStart >= 0) {
@@ -38,7 +38,8 @@ for (const required of [
   importLine,
   marker,
   "app.get('/swimmer/athlete-home', requireStrictAuth, requireSwimmerRole",
-  'resolveStoragePathsForRequest(req)',
+  'const storageResolution = resolveStoragePathsForRequest(req);',
+  'const paths = storageResolution.storagePaths;',
   'const db = readJsonFile(paths.dbPath);',
   'buildAthleteHomeProjection(db, authUser)',
 ]) {
