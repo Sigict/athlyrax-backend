@@ -85,6 +85,7 @@ for (const relative of [
   'index.js',
   'athlete-home-projection.mjs',
   'athlete-tenant-registry.mjs',
+  'athlete-session-write.mjs',
   'scripts/storage-path-contract.mjs',
   'scripts/migrate-storage-once.mjs',
   'scripts/approve-storage-layout.mjs',
