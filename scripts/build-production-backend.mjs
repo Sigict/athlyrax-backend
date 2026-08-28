@@ -38,7 +38,6 @@ const transforms = [
   'scripts/patch-snapshot-cookie-session.mjs',
   'scripts/patch-production-auth-token-redaction.mjs',
   'scripts/patch-coach-link-suite.mjs',
-  'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
@@ -52,6 +51,9 @@ for (const relative of transforms) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required production transform is missing: ${relative}`);
   run(relative, [relative]);
 }
+
+if (!fs.existsSync(path.join(root, 'scripts/patch-athlete-tenant-registry.mjs'))) throw new Error('Required athlete tenant registry guard is missing.');
+run('athlete tenant registry guard', ['scripts/patch-athlete-tenant-registry.mjs']);
 
 if (!fs.existsSync(path.join(root, 'scripts/patch-schedule-deletion-authority.mjs'))) throw new Error('Required Schedule deletion authority guard is missing.');
 run('Schedule deletion authority guard', ['scripts/patch-schedule-deletion-authority.mjs']);
