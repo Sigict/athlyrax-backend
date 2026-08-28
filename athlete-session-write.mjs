@@ -49,17 +49,23 @@ export function selectAthleteSessionTarget(authorisedConnections = [], { clubId 
   const rows = asArray(authorisedConnections).filter((row) => row && row.status === 'active' && text(row.tenantId));
   const requestedClub = text(clubId);
   if (requestedClub) {
-    return rows.find((row) => [row.clubId, row.tenantId, row.connectionId].map(text).includes(requestedClub)) || null;
+    const match = rows.find((row) => [row.clubId, row.tenantId, row.connectionId].map(text).includes(requestedClub));
+    return match ? { ...match, independent: false } : null;
   }
 
   const personalSources = new Set(['coach-link-source', 'disconnect-restored-source']);
   const personal = rows.find((row) => personalSources.has(text(row.source)));
-  if (personal) return personal;
+  if (personal) return { ...personal, independent: true };
   const primary = rows.find((row) => text(row.tenantId) === text(primaryTenantId));
-  return primary || rows[0] || null;
+  const fallback = primary || rows[0] || null;
+  return fallback ? { ...fallback, independent: true } : null;
 }
 
 export function athleteSessionPolicyForProjection(projection = {}, target = {}, disciplineId = 'swimming') {
+  if (target.independent === true) {
+    return { policy: ATHLETE_SESSION_POLICIES.ATHLETE_EXTRA, connection: null, independent: true };
+  }
+
   const requestedDiscipline = text(disciplineId) || 'swimming';
   const targetKeys = new Set([target.clubId, target.tenantId, target.connectionId].map(text).filter(Boolean));
   const connection = asArray(projection.clubConnections).find((row) => [
@@ -69,9 +75,6 @@ export function athleteSessionPolicyForProjection(projection = {}, target = {}, 
   ].map(text).some((value) => targetKeys.has(value)));
 
   if (!connection) {
-    if (text(target.source) === 'coach-link-source' || text(target.source) === 'disconnect-restored-source') {
-      return { policy: ATHLETE_SESSION_POLICIES.ATHLETE_EXTRA, connection: null, independent: true };
-    }
     return { policy: ATHLETE_SESSION_POLICIES.COACH_ONLY, connection: null, independent: false };
   }
 
@@ -179,10 +182,9 @@ export function appendAthleteSessionWrite(db = {}, write = {}) {
     throw new Error('Athlete session identity collision.');
   }
   const currentSets = asArray(db.trainingSessionSets);
-  const next = {
+  return {
     ...db,
     trainingSessions: [...currentSessions, write.session],
     trainingSessionSets: [...currentSets, ...asArray(write.sets)],
   };
-  return next;
 }
