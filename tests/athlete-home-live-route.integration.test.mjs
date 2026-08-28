@@ -30,17 +30,30 @@ async function startAthleteServer() {
 
   fs.mkdirSync(storageRoot, { recursive: true });
   fs.mkdirSync(backupRoot, { recursive: true });
-  const users = [{
-    username: 'swimmer1',
-    password: 'Swimmer!Pass1234',
-    role: 'swimmer',
-    tenantId: 'tenant-a',
-    clubId: 'club-a',
-    createdVia: 'admin',
-    isApproved: true,
-    onboardingCompletedAt: now,
-    email: 'swimmer1@example.test',
-  }];
+  const users = [
+    {
+      username: 'swimmer1',
+      password: 'Swimmer!Pass1234',
+      role: 'swimmer',
+      tenantId: 'tenant-a',
+      clubId: 'club-a',
+      createdVia: 'admin',
+      isApproved: true,
+      onboardingCompletedAt: now,
+      email: 'swimmer1@example.test',
+    },
+    {
+      username: 'coachA',
+      password: 'CoachA!Pass1234',
+      role: 'head-coach',
+      tenantId: 'tenant-a',
+      clubId: 'club-a',
+      createdVia: 'admin',
+      isApproved: true,
+      onboardingCompletedAt: now,
+      email: 'coach@example.test',
+    },
+  ];
   writeJson(authUsersPath, users);
   writeJson(authUsersBackupPath, users);
   writeJson(path.join(storageRoot, 'auth-invites.json'), []);
@@ -135,30 +148,44 @@ async function startAthleteServer() {
   };
 }
 
-async function login(baseUrl) {
+async function login(baseUrl, username = 'swimmer1', password = 'Swimmer!Pass1234') {
   const response = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'swimmer1', password: 'Swimmer!Pass1234' }),
+    body: JSON.stringify({ username, password }),
   });
   const payload = await response.json().catch(() => ({}));
   assert.equal(response.status, 200, `Login failed: ${JSON.stringify(payload)}`);
-  return cookieHeader(response);
+  return {
+    cookie: cookieHeader(response),
+    csrfToken: String(payload?.csrfToken || ''),
+    csrfHeaderName: String(payload?.csrfHeaderName || 'x-csrf-token').toLowerCase(),
+  };
 }
 
-async function athleteHome(baseUrl, cookie) {
-  const response = await fetch(`${baseUrl}/swimmer/athlete-home`, {
-    headers: { Cookie: cookie },
+async function requestJson(baseUrl, route, session, method = 'GET', body) {
+  const headers = new Headers();
+  headers.set('Cookie', session.cookie);
+  if (body !== undefined) headers.set('Content-Type', 'application/json');
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set(session.csrfHeaderName, session.csrfToken);
+  const response = await fetch(`${baseUrl}${route}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   const payload = await response.json().catch(() => ({}));
   return { response, payload };
 }
 
+async function athleteHome(baseUrl, session) {
+  return requestJson(baseUrl, '/swimmer/athlete-home', session);
+}
+
 test('real authenticated athlete-home route returns exact athlete session/sets and no other tenant data', async () => {
   const server = await startAthleteServer();
   try {
-    const cookie = await login(server.baseUrl);
-    const result = await athleteHome(server.baseUrl, cookie);
+    const session = await login(server.baseUrl);
+    const result = await athleteHome(server.baseUrl, session);
     assert.equal(result.response.status, 200, JSON.stringify(result.payload));
     assert.equal(result.payload?.athlete?.id, 'athlete-1');
     assert.equal(result.payload?.athlete?.asn, '123456');
@@ -179,11 +206,11 @@ test('real authenticated athlete-home route returns exact athlete session/sets a
 test('two independent sign-ins resolve to the same canonical athlete identity and history', async () => {
   const server = await startAthleteServer();
   try {
-    const deviceOneCookie = await login(server.baseUrl);
-    const deviceTwoCookie = await login(server.baseUrl);
+    const deviceOneSession = await login(server.baseUrl);
+    const deviceTwoSession = await login(server.baseUrl);
     const [deviceOne, deviceTwo] = await Promise.all([
-      athleteHome(server.baseUrl, deviceOneCookie),
-      athleteHome(server.baseUrl, deviceTwoCookie),
+      athleteHome(server.baseUrl, deviceOneSession),
+      athleteHome(server.baseUrl, deviceTwoSession),
     ]);
     assert.equal(deviceOne.response.status, 200, JSON.stringify(deviceOne.payload));
     assert.equal(deviceTwo.response.status, 200, JSON.stringify(deviceTwo.payload));
@@ -191,6 +218,57 @@ test('two independent sign-ins resolve to the same canonical athlete identity an
     assert.equal(deviceTwo.payload?.athlete?.id, 'athlete-1');
     assert.deepEqual(deviceOne.payload?.sessions, deviceTwo.payload?.sessions);
     assert.deepEqual(deviceOne.payload?.clubConnections, deviceTwo.payload?.clubConnections);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('coach-authoritative session write appears to the swimmer with the same session and set ids', async () => {
+  const server = await startAthleteServer();
+  try {
+    const coach = await login(server.baseUrl, 'coachA', 'CoachA!Pass1234');
+    const before = await requestJson(server.baseUrl, '/db', coach);
+    assert.equal(before.response.status, 200, JSON.stringify(before.payload));
+
+    const nextDb = {
+      ...before.payload,
+      trainingSessions: [
+        ...(before.payload?.trainingSessions || []),
+        {
+          id: 'coach-created-session',
+          scheduleId: 'coach-created-schedule',
+          squadId: 'squad-a',
+          clubId: 'club-a',
+          title: 'Coach-created race pace',
+          coachName: 'Coach A',
+          totalVolume: 2400,
+        },
+      ],
+      trainingSessionSets: [
+        ...(before.payload?.trainingSessionSets || []),
+        {
+          id: 'coach-created-set',
+          trainingSessionId: 'coach-created-session',
+          order: 1,
+          reps: 12,
+          distance: 50,
+          stroke: 'Free',
+          sendoff: '0:50',
+        },
+      ],
+    };
+    const saved = await requestJson(server.baseUrl, '/db', coach, 'PUT', nextDb);
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.payload));
+
+    const swimmer = await login(server.baseUrl);
+    const result = await athleteHome(server.baseUrl, swimmer);
+    assert.equal(result.response.status, 200, JSON.stringify(result.payload));
+    const session = result.payload?.sessions?.find((row) => row.id === 'coach-created-session');
+    assert.ok(session, 'Coach-created session was not visible to the swimmer.');
+    assert.equal(session.title, 'Coach-created race pace');
+    assert.deepEqual(session.sets.map((row) => row.id), ['coach-created-set']);
+    assert.equal(session.sets[0].reps, 12);
+    assert.equal(session.sets[0].distance, 50);
   } finally {
     await server.stop();
   }
