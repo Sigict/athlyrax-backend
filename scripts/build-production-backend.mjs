@@ -45,6 +45,7 @@ const transforms = [
   'scripts/patch-production-cors-origins.mjs',
   'scripts/patch-runtime-db-read-integrity.mjs',
   'scripts/patch-athlete-home-api.mjs',
+  'scripts/patch-athlete-capability-home.mjs',
 ];
 
 for (const relative of transforms) {
@@ -84,6 +85,7 @@ for (const relative of [
   'scripts/data-safety-preload.mjs',
   'index.js',
   'athlete-home-projection.mjs',
+  'athlete-capability-projection.mjs',
   'athlete-tenant-registry.mjs',
   'athlete-session-write.mjs',
   'scripts/storage-path-contract.mjs',
@@ -102,6 +104,7 @@ for (const relative of [
   'scripts/patch-request-body-limits.mjs',
   'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-athlete-home-api.mjs',
+  'scripts/patch-athlete-capability-home.mjs',
   'scripts/patch-schedule-deletion-authority.mjs',
   'scripts/patch-bulk-delete-tombstone-capacity.mjs',
   'scripts/patch-server-authoritative-schedule-delete.mjs',
