@@ -41,5 +41,9 @@ jobs:
           node verify-closed-pilot-security.mjs
       - name: Guard demo planning cleanup
         run: node --test tests/demo-planning-storage-cleanup.test.mjs
+      - name: Verify scoped athlete-home projection
+        run: node --test tests/athlete-home-projection.test.mjs
+      - name: Verify authenticated athlete-home route and repeat-login persistence
+        run: node --test tests/athlete-home-live-route.integration.test.mjs
       - name: Full backend storage and security contract
         run: npm run test:storage-all

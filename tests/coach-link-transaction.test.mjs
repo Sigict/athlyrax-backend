@@ -21,6 +21,7 @@ test('coach-link lifecycle uses database-first auth-last commit ordering', () =>
     'ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST',
     'ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET',
     'ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST',
+    'ATHLYRAX_ATHLETE_TENANT_REGISTRY_V1',
   ]) assert.ok(source.includes(marker), `missing transaction marker ${marker}`);
 
   const acceptStart = source.indexOf("app.post('/coach/swimmer-links/:requestId/accept'");
@@ -29,10 +30,13 @@ test('coach-link lifecycle uses database-first auth-last commit ordering', () =>
   const accept = source.slice(acceptStart, rejectStart);
   const targetWrite = accept.indexOf('writeAtomicJsonFile(targetPaths.dbPath, nextTargetDb);');
   const sourceWrite = accept.indexOf('writeAtomicJsonFile(sourcePaths.dbPath, nextSourceDb);');
-  const authMove = accept.indexOf('authUsers[swimmerUserIndex] = { ...previousAuthUser, tenantId: actorTenantId };');
+  const authMove = accept.indexOf('authUsers[swimmerUserIndex] = {');
+  const registryPersist = accept.indexOf('athleteTenantConnections: nextAthleteTenantConnections');
   const authPersist = accept.indexOf('persistAuthUsers();');
   assert.ok(targetWrite >= 0 && sourceWrite > targetWrite, 'acceptance does not commit target then source');
-  assert.ok(authMove > sourceWrite && authPersist > authMove, 'acceptance changes auth before both database copies commit');
+  assert.ok(authMove > sourceWrite, 'acceptance changes auth before both database copies commit');
+  assert.ok(registryPersist > authMove && authPersist > registryPersist, 'athlete tenant registry must be committed with the auth move and persisted last');
+  assert.ok(accept.includes('tenantId: actorTenantId'), 'acceptance no longer routes the legacy primary tenant to the accepted club');
   assert.ok(accept.includes('writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);'), 'acceptance source rollback missing');
   assert.ok(accept.includes('writeAtomicJsonFile(targetPaths.dbPath, targetDb);'), 'acceptance target rollback missing');
   assert.equal(accept.includes("action: 'coach_link_source_archive_update_failed'"), false, 'acceptance still treats source update as best-effort');
@@ -56,10 +60,14 @@ test('approved disconnect commits source and coach archive before auth routing',
   const disconnect = source.slice(disconnectStart, dbStart);
   const sourceWrite = disconnect.indexOf('writeAtomicJsonFile(sourcePaths.dbPath, nextSourceDb);');
   const archiveWrite = disconnect.indexOf('writeAtomicJsonFile(currentPaths.dbPath, { ...currentDb, swimmers: archiveRows });');
-  const authMove = disconnect.indexOf('authUsers[authUserIndex] = { ...previousAuthUser, tenantId: sourceTenantId };');
+  const authMove = disconnect.indexOf('authUsers[authUserIndex] = {');
+  const registryPersist = disconnect.indexOf('athleteTenantConnections: nextAthleteTenantConnections');
   const authPersist = disconnect.indexOf('persistAuthUsers();');
   assert.ok(sourceWrite >= 0 && archiveWrite > sourceWrite, 'disconnect does not commit source then coach archive');
-  assert.ok(authMove > archiveWrite && authPersist > authMove, 'disconnect changes auth before both database copies commit');
+  assert.ok(authMove > archiveWrite, 'disconnect changes auth before both database copies commit');
+  assert.ok(registryPersist > authMove && authPersist > registryPersist, 'disconnect registry update must be part of the auth-last commit');
+  assert.ok(disconnect.includes('tenantId: sourceTenantId'), 'disconnect no longer restores the legacy primary tenant to the source club');
+  assert.ok(disconnect.includes('deactivateAthleteTenantConnection('), 'disconnect does not deactivate only the current tenant registry entry');
   assert.ok(disconnect.includes('writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);'), 'disconnect source rollback missing');
   assert.ok(disconnect.includes('writeAtomicJsonFile(currentPaths.dbPath, currentDb);'), 'disconnect coach rollback missing');
   assert.equal(disconnect.includes("action: 'coach_link_disconnect_archive_update_failed'"), false, 'disconnect still treats coach archive update as best-effort');

@@ -21,6 +21,7 @@ test('coach link workflow exists and is coach-authoritative', () => {
     'A valid registered coach email is required for AthlyraX coach connection.',
     'coachLinkSourceTenantId',
     'ATHLYRAX_COACH_LINK_PARENT_CONTACTS_PRIVATE',
+    'ATHLYRAX_ATHLETE_TENANT_REGISTRY_V1',
   ]) assert.ok(source.includes(token), `missing coach-link workflow token ${token}`);
 });
 
@@ -110,11 +111,15 @@ test('acceptance rejects stale requests, enforces billing/capacity, and copies b
   assert.ok(acceptSource.includes('active: true'));
 
   const targetWrite = acceptSource.indexOf('writeAtomicJsonFile(targetPaths.dbPath, nextTargetDb);');
-  const authTenantUpdate = acceptSource.indexOf('authUsers[swimmerUserIndex] = { ...previousAuthUser, tenantId: actorTenantId };');
+  const sourceWrite = acceptSource.indexOf('writeAtomicJsonFile(sourcePaths.dbPath, nextSourceDb);');
+  const authTenantUpdate = acceptSource.indexOf('authUsers[swimmerUserIndex] = {');
+  const registryPersist = acceptSource.indexOf('athleteTenantConnections: nextAthleteTenantConnections');
   const authPersist = acceptSource.indexOf('persistAuthUsers();');
   assert.ok(targetWrite >= 0, 'target DB write missing');
-  assert.ok(authTenantUpdate > targetWrite, 'swimmer tenant changes before safe target copy');
-  assert.ok(authPersist > authTenantUpdate, 'auth persistence must follow in-memory tenant update');
+  assert.ok(sourceWrite > targetWrite, 'source archive write must follow safe target copy');
+  assert.ok(authTenantUpdate > sourceWrite, 'swimmer tenant changes before both safe database copies');
+  assert.ok(registryPersist > authTenantUpdate, 'athlete tenant registry missing from auth move');
+  assert.ok(authPersist > registryPersist, 'auth persistence must follow in-memory tenant and registry update');
   assert.equal(acceptSource.includes('sourceRows.splice('), false, 'source swimmer data must not be deleted during acceptance');
   assert.equal(acceptSource.includes('fs.unlinkSync(sourcePaths.dbPath'), false, 'source swimmer DB must not be deleted during acceptance');
   assert.ok(acceptSource.includes('writeAtomicJsonFile(targetPaths.dbPath, targetDb);'), 'target rollback missing if auth persistence fails');
@@ -166,13 +171,18 @@ test('approved disconnect copies latest data back with original tenant ownership
   assert.ok(disconnectStart >= 0 && dbStart > disconnectStart, 'disconnect route bounds missing');
   const disconnectSource = source.slice(disconnectStart, dbStart);
   const sourceWrite = disconnectSource.indexOf('writeAtomicJsonFile(sourcePaths.dbPath, nextSourceDb);');
-  const authMove = disconnectSource.indexOf('authUsers[authUserIndex] = { ...previousAuthUser, tenantId: sourceTenantId };');
+  const archiveWrite = disconnectSource.indexOf('writeAtomicJsonFile(currentPaths.dbPath, { ...currentDb, swimmers: archiveRows });');
+  const authMove = disconnectSource.indexOf('authUsers[authUserIndex] = {');
+  const registryPersist = disconnectSource.indexOf('athleteTenantConnections: nextAthleteTenantConnections');
   const authPersist = disconnectSource.indexOf('persistAuthUsers();');
   assert.ok(disconnectSource.includes('tenantId: sourceTenantId'));
   assert.ok(disconnectSource.includes("coachLinkRequestId: ''"));
   assert.ok(sourceWrite >= 0, 'copy-back write missing');
-  assert.ok(authMove > sourceWrite, 'auth routing restored before safe copy-back');
-  assert.ok(authPersist > authMove, 'restored auth routing not persisted after copy-back');
+  assert.ok(archiveWrite > sourceWrite, 'coach archive must commit after source copy-back');
+  assert.ok(authMove > archiveWrite, 'auth routing restored before both safe database commits');
+  assert.ok(registryPersist > authMove, 'disconnect registry mutation missing from auth move');
+  assert.ok(authPersist > registryPersist, 'restored auth routing not persisted after copy-back and registry mutation');
+  assert.ok(disconnectSource.includes('deactivateAthleteTenantConnection('), 'disconnect must deactivate only the current tenant registry connection');
   assert.ok(disconnectSource.includes('writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);'), 'source rollback missing if auth persist fails');
   assert.equal(disconnectSource.includes('fs.unlinkSync('), false, 'disconnect must not delete either tenant database');
 });
