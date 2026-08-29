@@ -18,17 +18,19 @@ function getFreePort() {
   });
 }
 
-async function waitForServer(url, child) {
+async function waitForServer(url, child, stderrBuffer) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`backend exited early: ${child.exitCode}`);
+    if (child.exitCode !== null) {
+      throw new Error(`backend exited early: ${child.exitCode}\n${stderrBuffer.join('')}`);
+    }
     try {
       const response = await fetch(`${url}/auth/config`);
       if (response.ok) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error('backend did not become ready');
+  throw new Error(`backend did not become ready\n${stderrBuffer.join('')}`);
 }
 
 function cookieHeaderFrom(response) {
@@ -44,6 +46,7 @@ test('demo coach authority survives verification and logout cannot trap the brow
   const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-auth-session-'));
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
+  const stderrBuffer = [];
   const child = spawn(process.execPath, ['index.js'], {
     cwd: process.cwd(),
     env: {
@@ -53,14 +56,16 @@ test('demo coach authority survives verification and logout cannot trap the brow
       ATHLYRAX_STORAGE_ROOT: storageRoot,
       AUTH_SECRET: 'production-auth-session-regression-secret',
       AUTH_ENABLE_DEMO_SEED_USERS: 'false',
+      BILLING_STRICT_RECOVERY: 'false',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  child.stderr.on('data', (chunk) => stderrBuffer.push(String(chunk)));
   t.after(() => {
     child.kill('SIGTERM');
     fs.rmSync(storageRoot, { recursive: true, force: true });
   });
-  await waitForServer(baseUrl, child);
+  await waitForServer(baseUrl, child, stderrBuffer);
 
   const login = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
