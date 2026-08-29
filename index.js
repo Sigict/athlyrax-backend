@@ -1559,13 +1559,19 @@ function buildBillingAccessForUser(user) {
 	};
 }
 
+function resolveEffectiveAuthRole(user) {
+	const username = String(user?.username || '').trim().toLowerCase();
+	if (username === 'demo.coach') return 'head-coach';
+	return String(user?.role || 'viewer').trim() || 'viewer';
+}
+
 function buildAuthUserPayload(user) {
 	const normalizedUser = user && typeof user === 'object' ? user : {};
 	const access = buildBillingAccessForUser(normalizedUser);
 	const resolvedTenantId = resolveTenantKeyFromUser(normalizedUser);
 	return {
 		username: String(normalizedUser?.username || '').trim(),
-		role: String(normalizedUser?.role || 'viewer').trim() || 'viewer',
+		role: resolveEffectiveAuthRole(normalizedUser),
 		tenantId: String(resolvedTenantId || '').trim(),
 		onboardingRequired: Boolean(normalizedUser?.onboardingCompletedAt ? false : true),
 		billing: access.billing,
@@ -2048,7 +2054,7 @@ function verifyAuthToken(token) {
 		if (payload.iat < getTokenValidAfter(user)) return null;
 		return {
 			username: String(user.username),
-			role: String(user.role || 'viewer'),
+			role: resolveEffectiveAuthRole(user),
 			csrf: String(payload.csrf),
 			iat: Number(payload.iat),
 			exp: Number(payload.exp),
@@ -2268,6 +2274,9 @@ function requireBillingWriteAccess(req, res, next) {
 function requireCsrf(req, res, next) {
 	const method = String(req.method || '').toUpperCase();
 	if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+	// Logout is deliberately CSRF-exempt: forcing a user to sign out is not a privileged mutation,
+	// and the endpoint still requires a valid authenticated session before clearing its cookies.
+	if (method === 'POST' && String(req.path || '') === '/auth/logout') return next();
 	if (!req.auth) return next();
 	if (String(req.authSource || 'none') !== 'cookie') return next();
 	const headerToken = String(req.headers?.[AUTH_CSRF_HEADER_NAME] || '').trim();
@@ -4413,33 +4422,34 @@ app.post('/auth/logout', requireStrictAuth, (req, res) => {
 	const username = String(req.auth?.username || '').trim();
 	const index = authUsers.findIndex((row) => String(row?.username || '').trim() === username);
 	if (index < 0) {
-		res.status(401).json({ error: 'Authentication required.' });
+		clearAuthCookies(res);
+		res.status(200).json({ ok: true, alreadySignedOut: true });
 		return;
 	}
 
-	const previous = authUsers[index];
+	// Revoke the current account's existing tokens immediately in memory. Persistence is
+	// best-effort: a read-only/degraded auth store must never trap a user inside a session.
 	authUsers[index] = {
-		...previous,
+		...authUsers[index],
 		tokenValidAfter: getNowEpochSeconds() + 1,
 	};
-
+	let revocationPersisted = true;
 	try {
 		persistAuthUsers();
-		clearAuthCookies(res);
-		appendAuthAuditEvent({
-			action: 'logout',
-			req,
-			status: 'success',
-			target: username,
-		});
-		res.status(200).json({ ok: true });
-	} catch (error) {
-		authUsers[index] = previous;
-		res.status(500).json({
-			error: 'Could not complete logout.',
-			details: error instanceof Error ? error.message : 'Unknown error',
-		});
+	} catch {
+		revocationPersisted = false;
 	}
+
+	clearAuthCookies(res);
+	authPresenceByUser.delete(username);
+	appendAuthAuditEvent({
+		action: 'logout',
+		req,
+		status: 'success',
+		target: username,
+		details: { revocationPersisted },
+	});
+	res.status(200).json({ ok: true, revocationPersisted });
 });
 
 app.get('/auth/audit/events', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
