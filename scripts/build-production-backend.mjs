@@ -76,6 +76,10 @@ run('legacy trainingSchedules retirement guard', ['scripts/patch-retire-legacy-t
 if (!fs.existsSync(path.join(root, 'scripts/patch-public-demo-readonly.mjs'))) throw new Error('Required public demo read-only guard is missing.');
 run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 
+// Final persistence authority pass. Later transforms must never reintroduce timestamp-based
+// stale-write rejection after storageRevision has been established as the sole concurrency authority.
+run('final revision integrity guard', ['scripts/patch-revision-integrity.mjs']);
+
 for (const relative of [
   'scripts/data-safety-preload.mjs',
   'index.js',
@@ -101,6 +105,7 @@ for (const relative of [
   'scripts/schedule-delete-occurrence-identity.mjs',
   'scripts/patch-canonical-schedule-delete-occurrence.mjs',
   'scripts/patch-retire-legacy-training-schedules.mjs',
+  'scripts/patch-revision-integrity.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
