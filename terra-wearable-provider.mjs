@@ -11,6 +11,20 @@ function positiveNumber(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function base64url(value) {
+  return Buffer.from(String(value ?? ''), 'utf8').toString('base64url');
+}
+
+function unbase64url(value) {
+  return Buffer.from(String(value ?? ''), 'base64url').toString('utf8');
+}
+
+function secureEqualText(a, b) {
+  const left = Buffer.from(text(a));
+  const right = Buffer.from(text(b));
+  return left.length === right.length && left.length > 0 && crypto.timingSafeEqual(left, right);
+}
+
 function setDistanceMeters(set = {}) {
   const distance = positiveNumber(set.distance);
   const reps = positiveNumber(set.reps) || 1;
@@ -113,6 +127,75 @@ export function buildTerraWidgetRequest({ referenceId, apiKey, devId, successUrl
       }),
     },
   };
+}
+
+export function createAthlyraxTerraReference({ username, tenantId, secret } = {}) {
+  const user = text(username).toLowerCase();
+  const tenant = text(tenantId);
+  const key = text(secret);
+  if (!user || !tenant || !key) throw new Error('Athlete username, tenant and reference secret are required.');
+  const payload = base64url(JSON.stringify({ u: user, t: tenant, v: 1 }));
+  const signature = crypto.createHmac('sha256', key).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+export function parseAthlyraxTerraReference(referenceId, secret) {
+  const reference = text(referenceId);
+  const key = text(secret);
+  const [payload, signature, extra] = reference.split('.');
+  if (!payload || !signature || extra || !key) return null;
+  const expected = crypto.createHmac('sha256', key).update(payload).digest('base64url');
+  if (!secureEqualText(signature, expected)) return null;
+  try {
+    const parsed = JSON.parse(unbase64url(payload));
+    const username = text(parsed?.u).toLowerCase();
+    const tenantId = text(parsed?.t);
+    if (!username || !tenantId || Number(parsed?.v) !== 1) return null;
+    return { username, tenantId };
+  } catch {
+    return null;
+  }
+}
+
+export function upsertTerraConnection(db = {}, { username, tenantId, terraUserId, provider, referenceId, active = true, updatedAt = '' } = {}) {
+  const user = text(username).toLowerCase();
+  const tenant = text(tenantId);
+  const terraId = text(terraUserId);
+  const resource = text(provider).toLowerCase();
+  if (!user || !tenant || !terraId || !resource) return { ok: false, error: 'Complete Terra connection identity is required.' };
+  const rows = asArray(db.athleteWearableConnections);
+  const key = `terra:${tenant}:${user}:${resource}`;
+  const previous = rows.find((row) => text(row?.key) === key) || {};
+  const connection = {
+    ...previous,
+    key,
+    gateway: TERRA_PROVIDER_ID,
+    provider: resource,
+    username: user,
+    tenantId: tenant,
+    terraUserId: terraId,
+    referenceId: text(referenceId),
+    active: active !== false,
+    updatedAt: text(updatedAt) || new Date().toISOString(),
+  };
+  return {
+    ok: true,
+    connection,
+    db: { ...db, athleteWearableConnections: [...rows.filter((row) => text(row?.key) !== key), connection] },
+  };
+}
+
+export function findTerraConnection(db = {}, { username, tenantId, provider = '' } = {}) {
+  const user = text(username).toLowerCase();
+  const tenant = text(tenantId);
+  const resource = text(provider).toLowerCase();
+  return asArray(db.athleteWearableConnections).find((row) => (
+    text(row?.gateway).toLowerCase() === TERRA_PROVIDER_ID
+    && text(row?.username).toLowerCase() === user
+    && text(row?.tenantId) === tenant
+    && row?.active !== false
+    && (!resource || text(row?.provider).toLowerCase() === resource)
+  )) || null;
 }
 
 export function verifyTerraSignature({ rawBody, signatureHeader, signingSecret, nowSeconds = Math.floor(Date.now() / 1000), toleranceSeconds = 300 } = {}) {
