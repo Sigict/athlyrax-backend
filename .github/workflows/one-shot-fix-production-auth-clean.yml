@@ -1,0 +1,45 @@
+name: One-shot clean production auth fix
+
+on:
+  push:
+    branches:
+      - fix/production-logout-clean
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/production-logout-clean
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply production auth patch
+        run: |
+          node scripts/one-shot-patch-production-auth.mjs
+          cp index.js /tmp/athlyrax-index-source.js
+          cp package.json /tmp/athlyrax-package-source.json
+      - name: Install dependencies and production transforms
+        run: npm ci
+      - name: Verify production auth session
+        run: npm run test:production-auth-session
+      - name: Verify complete storage and security suite
+        run: npm run test:storage-all
+      - name: Commit only clean source repair
+        shell: bash
+        run: |
+          git reset --hard "$GITHUB_SHA"
+          cp /tmp/athlyrax-index-source.js index.js
+          cp /tmp/athlyrax-package-source.json package.json
+          rm .github/workflows/one-shot-fix-production-auth-clean.yml
+          rm scripts/one-shot-patch-production-auth.mjs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Fix production logout and demo coach session authority"
+          git push origin HEAD:fix/production-logout-clean
