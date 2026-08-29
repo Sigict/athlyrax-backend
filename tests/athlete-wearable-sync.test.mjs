@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import test from 'node:test';
 import {
   beginWearableDelivery,
@@ -6,6 +7,14 @@ import {
   finishWearableDelivery,
   mergeWearableExecutionIntoDb,
 } from '../athlete-wearable-sync.mjs';
+import {
+  buildTerraPlannedWorkout,
+  buildTerraPlannedWorkoutRequest,
+  buildTerraWidgetRequest,
+  parseTerraAuthEvent,
+  parseTerraPlannedWorkoutResponse,
+  verifyTerraSignature,
+} from '../terra-wearable-provider.mjs';
 
 function fixture() {
   return {
@@ -81,4 +90,52 @@ test('pending athlete proposal cannot be sent to wearable', () => {
   const result = buildCanonicalWearableWorkout(db, 'session-1');
   assert.equal(result.ok, false);
   assert.equal(result.status, 409);
+});
+
+test('Terra planned workout preserves canonical session identity and swim distance', () => {
+  const canonical = buildCanonicalWearableWorkout(fixture(), 'session-1').workout;
+  const payload = buildTerraPlannedWorkout(canonical);
+  assert.equal(payload.data[0].metadata.summary_id, 'session-1');
+  assert.equal(payload.data[0].steps[0].exercise_type, 'SWIMMING');
+  assert.equal(payload.data[0].steps[0].durations[0].duration_type, 'DISTANCE');
+  assert.equal(payload.data[0].steps[0].durations[0].distance_meters, 800);
+});
+
+test('Terra provider keeps API credentials server-side and targets connected Terra user', () => {
+  const request = buildTerraPlannedWorkoutRequest({
+    workout: buildCanonicalWearableWorkout(fixture(), 'session-1').workout,
+    terraUserId: 'terra-user-1',
+    apiKey: 'secret-key',
+    devId: 'dev-1',
+  });
+  assert.match(request.url, /\/plannedWorkout\?user_id=terra-user-1$/);
+  assert.equal(request.init.headers['x-api-key'], 'secret-key');
+  assert.equal(request.init.headers['dev-id'], 'dev-1');
+});
+
+test('Terra widget binds provider authentication to AthlyraX reference id', () => {
+  const request = buildTerraWidgetRequest({ referenceId: 'wearable-ref-1', apiKey: 'secret-key', devId: 'dev-1' });
+  assert.equal(JSON.parse(request.init.body).reference_id, 'wearable-ref-1');
+  assert.match(request.url, /\/auth\/generateWidgetSession$/);
+});
+
+test('Terra webhook signature verification rejects tampered and stale events', () => {
+  const rawBody = JSON.stringify({ type: 'auth', status: 'success' });
+  const timestamp = 1723808700;
+  const secret = 'signing-secret';
+  const digest = crypto.createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
+  const header = `t=${timestamp},v1=${digest}`;
+  assert.equal(verifyTerraSignature({ rawBody, signatureHeader: header, signingSecret: secret, nowSeconds: timestamp }), true);
+  assert.equal(verifyTerraSignature({ rawBody: `${rawBody}x`, signatureHeader: header, signingSecret: secret, nowSeconds: timestamp }), false);
+  assert.equal(verifyTerraSignature({ rawBody, signatureHeader: header, signingSecret: secret, nowSeconds: timestamp + 301 }), false);
+});
+
+test('Terra successful auth and workout response map provider identity without duplicate authority', () => {
+  assert.deepEqual(parseTerraAuthEvent({
+    type: 'auth', status: 'success', reference_id: 'wearable-ref-1', user: { user_id: 'terra-user-1', provider: 'GARMIN', active: true },
+  }), { terraUserId: 'terra-user-1', referenceId: 'wearable-ref-1', provider: 'garmin', active: true });
+  assert.equal(parseTerraAuthEvent({ type: 'auth', status: 'failed' }), null);
+  const parsed = parseTerraPlannedWorkoutResponse({ log_ids: ['terra-log-1'] });
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.externalWorkoutId, 'terra-log-1');
 });
