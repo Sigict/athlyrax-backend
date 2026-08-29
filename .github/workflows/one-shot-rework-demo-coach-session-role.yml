@@ -17,84 +17,12 @@ jobs:
         with:
           ref: fix/demo-coach-canonical-role
           fetch-depth: 0
-      - name: Rework canonical role as read-only session authority
-        shell: bash
+      - name: Apply read-only session-role repair
+        run: node .ci/rework-demo-role.mjs
+      - name: Commit candidate before production build verification
         run: |
-          git show origin/main:index.js > index.js
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('index.js')
-          s = p.read_text()
-          old = """\tconst session = issueAuthToken(user);
-\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });
-\tappendAuthAuditEvent({
-\t\taction: 'login_success',
-\t\treq,
-\t\tstatus: 'success',
-\t\tactor: user.username,
-\t\tactorRole: String(user?.role || 'unknown'),
-\t\ttarget: user.username,
-\t\tdetails: {
-\t\t\trole: user.role,
-\t\t\tswimClub: String(user?.swimClub || '').trim(),
-\t\t\tteamName: String(user?.teamName || '').trim(),
-\t\t\temail: String(user?.email || '').trim(),
-\t\t},
-\t});
-\tres.status(200).json({
-\t\ttoken: session.token,
-\t\tcsrfToken: session.csrf,
-\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,
-\t\tuser: buildAuthUserPayload(user),
-\t});"""
-          new = """\tconst canonicalLoginUsername = String(user?.username || '').trim().toLowerCase();
-\tconst effectiveLoginUser = canonicalLoginUsername === 'demo.coach'
-\t\t? { ...user, role: 'head-coach' }
-\t\t: user;
-\tconst session = issueAuthToken(effectiveLoginUser);
-\tsetAuthCookies(res, { token: session.token, csrfToken: session.csrf });
-\tappendAuthAuditEvent({
-\t\taction: 'login_success',
-\t\treq,
-\t\tstatus: 'success',
-\t\tactor: effectiveLoginUser.username,
-\t\tactorRole: String(effectiveLoginUser?.role || 'unknown'),
-\t\ttarget: effectiveLoginUser.username,
-\t\tdetails: {
-\t\t\trole: effectiveLoginUser.role,
-\t\t\tswimClub: String(effectiveLoginUser?.swimClub || '').trim(),
-\t\t\tteamName: String(effectiveLoginUser?.teamName || '').trim(),
-\t\t\temail: String(effectiveLoginUser?.email || '').trim(),
-\t\t},
-\t});
-\tres.status(200).json({
-\t\ttoken: session.token,
-\t\tcsrfToken: session.csrf,
-\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,
-\t\tuser: buildAuthUserPayload(effectiveLoginUser),
-\t});"""
-          if old not in s:
-              raise SystemExit('login session response block not found exactly')
-          p.write_text(s.replace(old, new, 1))
-          Path('tests/demo-coach-canonical-role.test.mjs').write_text("""import test from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-
-const source = fs.readFileSync('index.js', 'utf8');
-
-test('demo.coach receives canonical head-coach authority without mutating its stored auth row', () => {
-  assert.match(source, /const canonicalLoginUsername = String\(user\?\.username \|\| ''\)\.trim\(\)\.toLowerCase\(\);/);
-  assert.match(source, /canonicalLoginUsername === 'demo\.coach'[\s\S]{0,80}role: 'head-coach'/);
-  assert.match(source, /const session = issueAuthToken\(effectiveLoginUser\);/);
-  assert.match(source, /user: buildAuthUserPayload\(effectiveLoginUser\)/);
-  const sessionBlockStart = source.indexOf("const canonicalLoginUsername = String(user?.username || '').trim().toLowerCase();");
-  const sessionBlockEnd = source.indexOf("app.post('/auth/password-reset/request'", sessionBlockStart);
-  const block = source.slice(sessionBlockStart, sessionBlockEnd);
-  assert.doesNotMatch(block, /persistAuthUsers\(\)/);
-});
-""")
-          PY
           rm .github/workflows/one-shot-rework-demo-coach-session-role.yml
+          rm .ci/rework-demo-role.mjs
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
