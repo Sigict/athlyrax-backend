@@ -4,9 +4,12 @@ import fs from 'node:fs';
 
 const source = fs.readFileSync('index.js', 'utf8');
 
-test('demo.coach login repair restores both canonical tenant and coach role', () => {
-  assert.match(source, /canonicalUsername === 'demo\.coach' \? 'head-coach' : ''/);
-  assert.match(source, /canonicalProfileDrifted = Boolean\(canonicalTenantId\)/);
-  assert.match(source, /canonicalRole && String\(user\?\.role \|\| ''\)\.trim\(\)\.toLowerCase\(\) !== canonicalRole/);
-  assert.match(source, /\.\.\.\(canonicalRole \? \{ role: canonicalRole \} : \{\}\)/);
+test('demo.coach receives canonical head-coach authority without mutating its stored auth row', () => {
+  assert.match(source, /const canonicalLoginUsername = String\(user\?\.username \|\| ''\)\.trim\(\)\.toLowerCase\(\);/);
+  assert.match(source, /canonicalLoginUsername === 'demo\.coach'[\s\S]{0,80}role: 'head-coach'/);
+  assert.match(source, /const session = issueAuthToken\(effectiveLoginUser\);/);
+  assert.match(source, /user: buildAuthUserPayload\(effectiveLoginUser\)/);
+  const start = source.indexOf("const canonicalLoginUsername = String(user?.username || '').trim().toLowerCase();");
+  const end = source.indexOf("app.post('/auth/password-reset/request'", start);
+  assert.doesNotMatch(source.slice(start, end), /persistAuthUsers\(\)/);
 });

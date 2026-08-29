@@ -3857,20 +3857,13 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	const canonicalUsername = String(user?.username || '').trim().toLowerCase();
-	const canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[canonicalUsername];
-	const canonicalRole = canonicalUsername === 'demo.coach' ? 'head-coach' : '';
-	const canonicalProfileDrifted = Boolean(canonicalTenantId) && (
-		normalizeTenantId(user?.tenantId) !== canonicalTenantId
-		|| (canonicalRole && String(user?.role || '').trim().toLowerCase() !== canonicalRole)
-	);
-	if (canonicalProfileDrifted) {
-		const userIndex = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === canonicalUsername);
+	const canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[String(user?.username || '').trim().toLowerCase()];
+	if (canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {
+		const userIndex = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === String(user?.username || '').trim().toLowerCase());
 		if (userIndex >= 0) {
 			authUsers[userIndex] = {
 				...authUsers[userIndex],
 				tenantId: canonicalTenantId,
-				...(canonicalRole ? { role: canonicalRole } : {}),
 			};
 			user = authUsers[userIndex];
 			try {
@@ -3889,27 +3882,31 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		}
 	}
 
-	const session = issueAuthToken(user);
+	const canonicalLoginUsername = String(user?.username || '').trim().toLowerCase();
+	const effectiveLoginUser = canonicalLoginUsername === 'demo.coach'
+		? { ...user, role: 'head-coach' }
+		: user;
+	const session = issueAuthToken(effectiveLoginUser);
 	setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
 	appendAuthAuditEvent({
 		action: 'login_success',
 		req,
 		status: 'success',
-		actor: user.username,
-		actorRole: String(user?.role || 'unknown'),
-		target: user.username,
+		actor: effectiveLoginUser.username,
+		actorRole: String(effectiveLoginUser?.role || 'unknown'),
+		target: effectiveLoginUser.username,
 		details: {
-			role: user.role,
-			swimClub: String(user?.swimClub || '').trim(),
-			teamName: String(user?.teamName || '').trim(),
-			email: String(user?.email || '').trim(),
+			role: effectiveLoginUser.role,
+			swimClub: String(effectiveLoginUser?.swimClub || '').trim(),
+			teamName: String(effectiveLoginUser?.teamName || '').trim(),
+			email: String(effectiveLoginUser?.email || '').trim(),
 		},
 	});
 	res.status(200).json({
 		token: session.token,
 		csrfToken: session.csrf,
 		csrfHeaderName: AUTH_CSRF_HEADER_NAME,
-		user: buildAuthUserPayload(user),
+		user: buildAuthUserPayload(effectiveLoginUser),
 	});
 });
 
