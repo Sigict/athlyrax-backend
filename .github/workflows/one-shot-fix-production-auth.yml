@@ -19,131 +19,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Patch production auth session authority and logout
+      - name: Apply production auth patch
+        run: node scripts/one-shot-patch-production-auth.mjs
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify production auth session
+        run: npm run test:production-auth-session
+      - name: Verify complete storage and security suite
+        run: npm run test:storage-all
+      - name: Commit verified repair
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import json
-
-          index_path = Path('index.js')
-          source = index_path.read_text()
-
-          anchor = "function buildAuthUserPayload(user) {\n\tconst normalizedUser = user && typeof user === 'object' ? user : {};"
-          replacement = "function resolveEffectiveAuthRole(user) {\n\tconst username = String(user?.username || '').trim().toLowerCase();\n\tif (username === 'demo.coach') return 'head-coach';\n\treturn String(user?.role || 'viewer').trim() || 'viewer';\n}\n\nfunction buildAuthUserPayload(user) {\n\tconst normalizedUser = user && typeof user === 'object' ? user : {};"
-          if anchor not in source:
-              raise SystemExit('buildAuthUserPayload anchor missing')
-          source = source.replace(anchor, replacement, 1)
-
-          old = "\t\trole: String(normalizedUser?.role || 'viewer').trim() || 'viewer',"
-          new = "\t\trole: resolveEffectiveAuthRole(normalizedUser),"
-          if old not in source:
-              raise SystemExit('buildAuthUserPayload role anchor missing')
-          source = source.replace(old, new, 1)
-
-          old = "\t\t\trole: String(user.role || 'viewer'),\n\t\t\tcsrf: String(payload.csrf),"
-          new = "\t\t\trole: resolveEffectiveAuthRole(user),\n\t\t\tcsrf: String(payload.csrf),"
-          if old not in source:
-              raise SystemExit('verifyAuthToken role anchor missing')
-          source = source.replace(old, new, 1)
-
-          old = "\tif (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();\n\tif (!req.auth) return next();"
-          new = "\tif (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();\n\t// Logout is deliberately CSRF-exempt: forcing a user to sign out is not a privileged mutation,\n\t// and the endpoint still requires a valid authenticated session before clearing its cookies.\n\tif (method === 'POST' && String(req.path || '') === '/auth/logout') return next();\n\tif (!req.auth) return next();"
-          if old not in source:
-              raise SystemExit('requireCsrf anchor missing')
-          source = source.replace(old, new, 1)
-
-          old = """app.post('/auth/logout', requireStrictAuth, (req, res) => {
-\tconst username = String(req.auth?.username || '').trim();
-\tconst index = authUsers.findIndex((row) => String(row?.username || '').trim() === username);
-\tif (index < 0) {
-\t\tres.status(401).json({ error: 'Authentication required.' });
-\t\treturn;
-\t}
-
-\tconst previous = authUsers[index];
-\tauthUsers[index] = {
-\t\t...previous,
-\t\ttokenValidAfter: getNowEpochSeconds() + 1,
-\t};
-
-\ttry {
-\t\tpersistAuthUsers();
-\t\tclearAuthCookies(res);
-\t\tappendAuthAuditEvent({
-\t\t\taction: 'logout',
-\t\t\treq,
-\t\t\tstatus: 'success',
-\t\t\ttarget: username,
-\t\t});
-\t\tres.status(200).json({ ok: true });
-\t} catch (error) {
-\t\tauthUsers[index] = previous;
-\t\tres.status(500).json({
-\t\t\terror: 'Could not complete logout.',
-\t\t\tdetails: error instanceof Error ? error.message : 'Unknown error',
-\t\t});
-\t}
-});"""
-          new = """app.post('/auth/logout', requireStrictAuth, (req, res) => {
-\tconst username = String(req.auth?.username || '').trim();
-\tconst index = authUsers.findIndex((row) => String(row?.username || '').trim() === username);
-\tif (index < 0) {
-\t\tclearAuthCookies(res);
-\t\tres.status(200).json({ ok: true, alreadySignedOut: true });
-\t\treturn;
-\t}
-
-\t// Revoke the current account's existing tokens immediately in memory. Persistence is
-\t// best-effort: a read-only/degraded auth store must never trap a user inside a session.
-\tauthUsers[index] = {
-\t\t...authUsers[index],
-\t\ttokenValidAfter: getNowEpochSeconds() + 1,
-\t};
-\tlet revocationPersisted = true;
-\ttry {
-\t\tpersistAuthUsers();
-\t} catch {
-\t\trevocationPersisted = false;
-\t}
-
-\tclearAuthCookies(res);
-\tauthPresenceByUser.delete(username);
-\tappendAuthAuditEvent({
-\t\taction: 'logout',
-\t\treq,
-\t\tstatus: 'success',
-\t\ttarget: username,
-\t\tdetails: { revocationPersisted },
-\t});
-\tres.status(200).json({ ok: true, revocationPersisted });
-});"""
-          if old not in source:
-              raise SystemExit('logout route anchor missing')
-          source = source.replace(old, new, 1)
-          index_path.write_text(source)
-
-          package_path = Path('package.json')
-          package = json.loads(package_path.read_text())
-          scripts = package.setdefault('scripts', {})
-          scripts['test:production-auth-session'] = 'node --test tests/production-auth-session-regression.test.mjs'
-          storage_all = scripts['test:storage-all']
-          marker = ' && npm run test:auth-enumeration-safety'
-          if 'test:production-auth-session' not in storage_all:
-              if marker not in storage_all:
-                  raise SystemExit('package test:storage-all anchor missing')
-              storage_all = storage_all.replace(marker, marker + ' && npm run test:production-auth-session', 1)
-          scripts['test:storage-all'] = storage_all
-          package_path.write_text(json.dumps(package, indent=2) + '\n')
-          PY
-
-          npm ci
-          npm run test:production-auth-session
-          npm run test:storage-all
-
           rm .github/workflows/one-shot-fix-production-auth.yml
+          rm scripts/one-shot-patch-production-auth.mjs
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add index.js package.json tests/production-auth-session-regression.test.mjs .github/workflows/one-shot-fix-production-auth.yml
+          git add -A
           git commit -m "Fix production logout and demo coach session authority"
           git push origin HEAD:fix/production-logout-and-demo-role
