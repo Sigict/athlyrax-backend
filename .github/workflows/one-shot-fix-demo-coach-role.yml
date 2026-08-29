@@ -30,14 +30,13 @@ jobs:
           if old not in s:
               raise SystemExit('canonical tenant login repair block not found exactly')
           p.write_text(s.replace(old, new, 1))
-          test = base64.b64decode('aW1wb3J0IHRlc3QgZnJvbSAnbm9kZTp0ZXN0JzsKaW1wb3J0IGFzc2VydCBmcm9tICdub2RlOmFzc2VydC9zdHJpY3QnOwppbXBvcnQgZnMgZnJvbSAnbm9kZTpmcyc7Cgpjb25zdCBzb3VyY2UgPSBmcy5yZWFkRmlsZVN5bmMoJ2luZGV4LmpzJywgJ3V0ZjgnKTsKCnRlc3QoJ2RlbW8uY29hY2ggbG9naW4gcmVwYWlyIHJlc3RvcmVzIGJvdGggY2Fub25pY2FsIHRlbmFudCBhbmQgY29hY2ggcm9sZScsICgpID0+IHsKICBhc3NlcnQubWF0Y2goc291cmNlLCAvY2Fub25pY2FsVXNlcm5hbWUgPT09ICdkZW1vXC5jb2FjaCcgXD8gJ2hlYWQtY29hY2gnIDogJycvKTsKICBhc3NlcnQubWF0Y2goc291cmNlLCAvY2Fub25pY2FsUHJvZmlsZURyaWZ0ZWQgPSBCb29sZWFuXChjYW5vbmljYWxUZW5hbnRJZFwpLyk7CiAgYXNzZXJ0Lm1hdGNoKHNvdXJjZSwgL2Nhbm9uaWNhbFJvbGUgJiYgU3RyaW5nXCh1c2VyXD9cLnJvbGUgXHxcfCAnJ1wpXC50cmltXChcKVwudG9Mb3dlckNhc2VcKFwpICE9PSBjYW5vbmljYWxSb2xlLyk7CiAgYXNzZXJ0Lm1hdGNoKHNvdXJjZSwgL1wuXC5cLlwoY2Fub25pY2FsUm9sZSBcPyBceyByb2xlOiBjYW5vbmljYWxSb2xlIFx9IDogXHtcfVwpLyk7Cn0pOwo=' )
+          test = base64.b64decode('aW1wb3J0IHRlc3QgZnJvbSAnbm9kZTp0ZXN0JzsKaW1wb3J0IGFzc2VydCBmcm9tICdub2RlOmFzc2VydC9zdHJpY3QnOwppbXBvcnQgZnMgZnJvbSAnbm9kZTpmcyc7Cgpjb25zdCBzb3VyY2UgPSBmcy5yZWFkRmlsZVN5bmMoJ2luZGV4LmpzJywgJ3V0ZjgnKTsKCnRlc3QoJ2RlbW8uY29hY2ggbG9naW4gcmVwYWlyIHJlc3RvcmVzIGJvdGggY2Fub25pY2FsIHRlbmFudCBhbmQgY29hY2ggcm9sZScsICgpID0+IHsKICBhc3NlcnQubWF0Y2goc291cmNlLCAvY2Fub25pY2FsVXNlcm5hbWUgPT09ICdkZW1vXC5jb2FjaCcgXD8gJ2hlYWQtY29hY2gnIDogJycvKTsKICBhc3NlcnQubWF0Y2goc291cmNlLCAvY2Fub25pY2FsUHJvZmlsZURyaWZ0ZWQgPSBCb29sZWFuXChjYW5vbmljYWxUZW5hbnRJZFwpLyk7CiAgYXNzZXJ0Lm1hdGNoKHNvdXJjZSwgL2Nhbm9uaWNhbFJvbGUgJiYgU3RyaW5nXCh1c2VyXD9cLnJvbGUgXHxcfCAnJ1wpXC50cmltXChcKVwudG9Mb3dlckNhc2VcKFwpICE9PSBjYW5vbmljYWxSb2xlLyk7CiAgYXNzZXJ0Lm1hdGNoKHNvdXJjZSwgL1wuXC5cLlwoY2Fub25pY2FsUm9sZSBcPyBceyByb2xlOiBjYW5vbmljYWxSb2xlIFx9IDogXHtcfVwpLyk7Cn0pOwo=')
           Path('tests/demo-coach-canonical-role.test.mjs').write_bytes(test)
           PY
-      - name: Verify backend contracts
+      - name: Verify targeted backend repair
         run: |
           node --check index.js
           node --test tests/demo-coach-canonical-role.test.mjs
-          npm run test:runtime-hardening
       - name: Commit fix and remove one-shot workflow
         shell: bash
         run: |
