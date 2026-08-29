@@ -100,7 +100,7 @@ function cookieHeader(response) {
   return rows.map((row) => String(row || '').split(';')[0].trim()).filter(Boolean).join('; ');
 }
 
-test('public demo credential is server-forced to viewer and cannot write or escape demo-company', async () => {
+test('public demo coach keeps coach UI authority but remains server read-only and tenant-isolated', async () => {
   const server = await startServer();
   try {
     const loginResponse = await fetch(`${server.baseUrl}/auth/login`, {
@@ -110,7 +110,7 @@ test('public demo credential is server-forced to viewer and cannot write or esca
     });
     const login = await loginResponse.json();
     assert.equal(loginResponse.status, 200, JSON.stringify(login));
-    assert.equal(login?.user?.role, 'viewer');
+    assert.equal(login?.user?.role, 'head-coach');
     assert.equal(login?.user?.tenantId, 'demo-company');
     const cookie = cookieHeader(loginResponse);
     assert.ok(cookie.includes('athlyrax_session='));
@@ -118,7 +118,7 @@ test('public demo credential is server-forced to viewer and cannot write or esca
     const meResponse = await fetch(`${server.baseUrl}/auth/me`, { headers: { Cookie: cookie } });
     const me = await meResponse.json();
     assert.equal(meResponse.status, 200);
-    assert.equal(me?.user?.role, 'viewer');
+    assert.equal(me?.user?.role, 'head-coach');
     assert.equal(me?.user?.tenantId, 'demo-company');
 
     const dbResponse = await fetch(`${server.baseUrl}/db`, { headers: { Cookie: cookie } });
@@ -141,7 +141,7 @@ test('public demo credential is server-forced to viewer and cannot write or esca
       },
       body: JSON.stringify({ swimmers: [{ id: 'forbidden-write' }] }),
     });
-    assert.equal(writeResponse.status, 403);
+    assert.equal(writeResponse.status, 403, 'public demo coach must remain server-side read-only even with head-coach UI authority');
   } finally {
     await server.stop();
   }
