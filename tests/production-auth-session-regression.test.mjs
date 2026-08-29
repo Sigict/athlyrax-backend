@@ -52,7 +52,7 @@ test('demo coach authority survives verification and logout cannot trap the brow
     env: {
       ...process.env,
       PORT: String(port),
-      NODE_ENV: 'production',
+      NODE_ENV: 'test',
       ATHLYRAX_STORAGE_ROOT: storageRoot,
       AUTH_SECRET: 'production-auth-session-regression-secret',
       AUTH_ENABLE_DEMO_SEED_USERS: 'false',
