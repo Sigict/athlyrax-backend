@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveStorageConfiguration, sha256File, writeStorageReadyMarker } from './storage-safety-lib.mjs';
 import { canonicalStoragePaths } from './storage-path-contract.mjs';
+import { validateAuthStoreSemanticIntegrity } from './auth-store-integrity.mjs';
+import { validateInviteStoreSemanticIntegrity } from './invite-store-integrity.mjs';
+import { validateTenantDatabaseSemanticIntegrity } from './tenant-db-integrity.mjs';
+import { validateBillingCatalogSemanticIntegrity } from './billing-catalog-store-integrity.mjs';
 import { assertNoSymlinkStorageLayout } from './storage-path-integrity.mjs';
 import { assertNoActiveMigrationTransaction } from './migration-transaction-state.mjs';
 
@@ -118,6 +122,15 @@ try {
     assertDbObject(dbPath, `Tenant database ${tenantId}`, tenantId);
     verified.push(verifiedFile(dbPath, { tenantId }));
   }
+
+  // ATHLYRAX_APPROVAL_SEMANTIC_VALIDATION
+  const semanticFailures = [
+    ...validateAuthStoreSemanticIntegrity(configuration, process.env, fs),
+    ...validateInviteStoreSemanticIntegrity(configuration, process.env, fs),
+    ...validateTenantDatabaseSemanticIntegrity(configuration, process.env, fs),
+    ...validateBillingCatalogSemanticIntegrity(configuration, process.env, fs),
+  ];
+  if (semanticFailures.length > 0) throw new Error(semanticFailures.join('\n'));
 
   const markerPath = writeStorageReadyMarker(storageRoot, { requiredTenants, verifiedFiles: verified });
   console.log('ATHLYRAX_STORAGE_READY_MARKER_CREATED');

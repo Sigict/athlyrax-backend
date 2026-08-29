@@ -34,6 +34,24 @@ function validMeaningfulDatabase(filePath) {
   const state = classifyDatabase(filePath);
   return state.state === 'meaningful' ? { filePath, ...state } : null;
 }
+const RECOGNIZED_TENANT_COLLECTIONS = Object.freeze([
+  'coaches', 'squads', 'swimmers', 'venues', 'sessionTypes', 'timetables', 'timetableSlots', 'schedule',
+  'trainingSessions', 'trainingSessionSets', 'templateSets', 'templateTests', 'trainingSetBlocks',
+  'seasonPlans', 'mesoCycles', 'microCycles', 'attendance', 'tests', 'competitions', 'fixtures', 'groups',
+  'seasons', 'trainingPlannerWeeks', 'conflictResolutions', 'changeLog', 'auditLog', 'notifications', 'documents',
+]);
+function hasRecognizedTenantShape(payload) {
+  return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload)
+    && RECOGNIZED_TENANT_COLLECTIONS.some((key) => Array.isArray(payload[key]));
+}
+function validUsableTenantDatabase(filePath) {
+  const candidate = validMeaningfulDatabase(filePath);
+  return candidate && hasRecognizedTenantShape(candidate.payload) ? candidate : null;
+}
+function validNonEmptyAuthStore(filePath) {
+  const candidate = validAuthStore(filePath);
+  return candidate && candidate.users.length > 0 ? candidate : null;
+}
 function assertTenantIdentity(payload, expectedTenantId, label) {
   const declaredRaw = String(payload?.__meta?.tenantId || '').trim();
   if (!declaredRaw) return;
@@ -140,18 +158,33 @@ export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRo
 
   const legacyAuthUsers = path.join(paths.storageRoot, 'auth-users.json');
   const legacyAuthBackup = path.join(paths.storageRoot, 'auth-users.backup.json');
-  if (fs.existsSync(paths.authUsers) && !validAuthStore(paths.authUsers)) throw new Error(`Canonical auth users store is unreadable or invalid: ${paths.authUsers}`);
-  if (fs.existsSync(paths.authUsersBackup) && !validAuthStore(paths.authUsersBackup)) throw new Error(`Canonical auth users backup is unreadable or invalid: ${paths.authUsersBackup}`);
+  const canonicalAuth = fs.existsSync(paths.authUsers) ? validAuthStore(paths.authUsers) : null;
+  const canonicalAuthBackup = fs.existsSync(paths.authUsersBackup) ? validAuthStore(paths.authUsersBackup) : null;
+  const legacyAuth = fs.existsSync(legacyAuthUsers) ? validNonEmptyAuthStore(legacyAuthUsers) : null;
+  const legacyBackup = fs.existsSync(legacyAuthBackup) ? validNonEmptyAuthStore(legacyAuthBackup) : null;
+  if (fs.existsSync(paths.authUsers) && !canonicalAuth) throw new Error(`Canonical auth users store is unreadable or invalid: ${paths.authUsers}`);
+  if (fs.existsSync(paths.authUsersBackup) && !canonicalAuthBackup) throw new Error(`Canonical auth users backup is unreadable or invalid: ${paths.authUsersBackup}`);
 
-  if (!fs.existsSync(paths.authUsers) && fs.existsSync(legacyAuthUsers)) {
-    if (!validAuthStore(legacyAuthUsers)) throw new Error(`Legacy auth users store is unreadable or invalid: ${legacyAuthUsers}`);
+  const canonicalAuthNeedsRecovery = !canonicalAuth || canonicalAuth.users.length === 0;
+  const canonicalBackupNeedsRecovery = !canonicalAuthBackup || canonicalAuthBackup.users.length === 0;
+  if (canonicalAuthNeedsRecovery && legacyAuth && canonicalBackupNeedsRecovery && !legacyBackup) {
+    // ATHLYRAX_AUTH_RECOVERY_BACKUP_PREFLIGHT
+    throw new Error('Authentication primary recovery is available but no independent authentication backup is available. Refusing to mutate canonical auth state.');
+  }
+  if (canonicalAuthNeedsRecovery && legacyAuth) {
+    if (fs.existsSync(paths.authUsers)) preserve(paths.authUsers, path.join('canonical-before-migration', 'auth', 'auth-users.json'));
     preserve(legacyAuthUsers, path.join('legacy-auth', 'auth-users.json'));
     migrated.push({ kind: 'auth-users', from: legacyAuthUsers, to: paths.authUsers, bytes: copyExact(legacyAuthUsers, paths.authUsers) });
+  } else if (!canonicalAuth && fs.existsSync(legacyAuthUsers)) {
+    throw new Error(`Legacy auth users store is unreadable, invalid or empty: ${legacyAuthUsers}`);
   }
-  if (!fs.existsSync(paths.authUsersBackup) && fs.existsSync(legacyAuthBackup)) {
-    if (!validAuthStore(legacyAuthBackup)) throw new Error(`Legacy auth users backup is unreadable or invalid: ${legacyAuthBackup}`);
+
+  if (canonicalBackupNeedsRecovery && legacyBackup) {
+    if (fs.existsSync(paths.authUsersBackup)) preserve(paths.authUsersBackup, path.join('canonical-before-migration', 'auth', 'auth-users.backup.json'));
     preserve(legacyAuthBackup, path.join('legacy-auth', 'auth-users.backup.json'));
     migrated.push({ kind: 'auth-users-backup', from: legacyAuthBackup, to: paths.authUsersBackup, bytes: copyExact(legacyAuthBackup, paths.authUsersBackup) });
+  } else if (!canonicalAuthBackup && fs.existsSync(legacyAuthBackup)) {
+    throw new Error(`Legacy auth users backup is unreadable, invalid or empty: ${legacyAuthBackup}`);
   }
   if (fs.existsSync(paths.authUsers) && !fs.existsSync(paths.authUsersBackup)) {
     throw new Error('Authentication primary exists but no independent authentication backup is available. Refusing to manufacture a backup baseline from the primary store.');
@@ -169,12 +202,13 @@ export function migrateLegacyStorageIfNeeded({ sourceRoot, storageRoot, backupRo
       const canonicalState = classifyDatabase(canonicalDb);
       if (canonicalState.state === 'invalid') throw new Error(`Canonical tenant database is unreadable or invalid JSON: ${canonicalDb}`);
       if (canonicalState.state === 'meaningful') assertTenantIdentity(canonicalState.payload, tenantId, `Canonical tenant database ${canonicalDb}`);
+      const canonicalUsable = canonicalState.state === 'meaningful' && hasRecognizedTenantShape(canonicalState.payload);
 
       const legacyFiles = listFilesRecursive(legacyTenantDir);
       for (const file of legacyFiles) preserve(file.full, path.join('legacy-tenants', tenantId, file.relative));
-      if (canonicalState.state !== 'meaningful' && fs.existsSync(legacyDb)) {
-        const legacyCandidate = validMeaningfulDatabase(legacyDb);
-        if (!legacyCandidate) throw new Error(`Legacy tenant database is unreadable, invalid or empty: ${legacyDb}`);
+      if (!canonicalUsable && fs.existsSync(legacyDb)) {
+        const legacyCandidate = validUsableTenantDatabase(legacyDb);
+        if (!legacyCandidate) throw new Error(`Legacy tenant database is unreadable, invalid, empty or structurally incomplete: ${legacyDb}`);
         assertTenantIdentity(legacyCandidate.payload, tenantId, `Legacy tenant database ${legacyDb}`);
         if (fs.existsSync(canonicalDb)) preserve(canonicalDb, path.join('canonical-before-migration', tenantId, 'db.json'));
         migrated.push({ kind: 'tenant-db', tenantId, from: legacyDb, to: canonicalDb, bytes: copyExact(legacyDb, canonicalDb) });

@@ -1,3 +1,12 @@
+// ATHLYRAX_PRODUCTION_ERROR_DETAILS_REDACTED
+// ATHLYRAX_COACH_LINK_TRANSACTIONAL_COMMIT_V1
+// ATHLYRAX_COACH_LINK_RECONNECT_V1
+// ATHLYRAX_COACH_LINK_UNAMBIGUOUS_ROUTING_V1
+// ATHLYRAX_COACH_LINK_TENANT_OWNERSHIP_V1
+// ATHLYRAX_COACH_LINK_INTEGRITY_V1
+// Dedicated coach-link routes are the sole lifecycle authority.
+// ATHLYRAX_PASSWORD_MINIMUM_10
+// ATHLYRAX_PASSWORD_RESET_ENUMERATION_SAFE
 /* global process, Buffer */
 import express from 'express';
 import path from 'path';
@@ -8,9 +17,22 @@ import { execFileSync } from 'child_process';
 import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
+import { resolveCanonicalScheduleDeleteTargets } from './scripts/schedule-delete-occurrence-identity.mjs';
+import { installSignupLegalAcceptanceGuard } from './scripts/signup-legal-acceptance-preload.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+installSignupLegalAcceptanceGuard(express);
+// ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD
+const athlyraxRuntimeIsProduction = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+const athlyraxSafeStartProof = globalThis[Symbol.for('athlyrax.safeStartEnforced')] === true;
+if (process.env.RENDER_SERVICE_ID && !athlyraxRuntimeIsProduction) {
+	throw new Error('Render runtime requires NODE_ENV=production. Refusing unsafe development/default mode.');
+}
+if (athlyraxRuntimeIsProduction && !athlyraxSafeStartProof) {
+	throw new Error('Production backend entrypoint must be launched through the guarded production-start/safe-start path. Direct index.js startup is refused.');
+}
 
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || '3001', 10) || 3001;
@@ -22,10 +44,10 @@ const STORAGE_ROOT = (() => {
 const DB_PATH = path.join(STORAGE_ROOT, 'db.json');
 const TARGET_BACKUP_PATH = path.join(STORAGE_ROOT, 'trainingPlannerTargets.backup.json');
 const DB_SNAPSHOT_DIR = path.join(STORAGE_ROOT, 'db-snapshots');
-const DB_TENANTS_DIR = path.join(STORAGE_ROOT, 'tenants', 'clubs');
+const DB_TENANTS_DIR = path.join(STORAGE_ROOT, 'tenants');
 const BILLING_CATALOG_PATH = path.join(STORAGE_ROOT, 'billing-catalog.json');
 const BILLING_CATALOG_BACKUP_DIR = path.join(STORAGE_ROOT, 'billing-catalog-backups');
-const SHARED_AUTH_USERS_PATH = path.join(STORAGE_ROOT, 'auth-users.json');
+const SHARED_AUTH_USERS_PATH = path.join(STORAGE_ROOT, 'auth', 'auth-users.json');
 const AUTH_USERS_PATH = (() => {
 	const overridePath = String(process.env.AUTH_USERS_PATH || '').trim();
 	if (overridePath) return path.resolve(overridePath);
@@ -56,6 +78,7 @@ const AUTH_SECRET = String(process.env.AUTH_SECRET || 'athlyrax-dev-secret-chang
 const AUTH_TOKEN_TTL_SECONDS = Math.max(300, Number.parseInt(process.env.AUTH_TOKEN_TTL_SECONDS || '43200', 10) || 43200);
 const AUTH_LOGIN_RATE_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.AUTH_LOGIN_RATE_WINDOW_MS || '60000', 10) || 60000);
 const AUTH_LOGIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUTH_LOGIN_RATE_MAX_ATTEMPTS || '8', 10) || 8);
+const AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS = Math.max(AUTH_LOGIN_RATE_MAX_ATTEMPTS, Number.parseInt(process.env.AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS || '40', 10) || 40);
 const AUTH_ADMIN_RATE_WINDOW_MS = Math.max(1000, Number.parseInt(process.env.AUTH_ADMIN_RATE_WINDOW_MS || '60000', 10) || 60000);
 const AUTH_ADMIN_RATE_MAX_ATTEMPTS = Math.max(1, Number.parseInt(process.env.AUTH_ADMIN_RATE_MAX_ATTEMPTS || '60', 10) || 60);
 const AUTH_ALLOW_COACH_SIGNUP = String(process.env.AUTH_ALLOW_COACH_SIGNUP || 'false').toLowerCase() === 'true';
@@ -71,6 +94,22 @@ const DEMO_AUTO_REALIGN_USERNAMES = new Set(['demo.coach', 'demo.swimmer', 'demo
 const CANONICAL_TENANT_BY_USERNAME = Object.freeze({
 	'demo.coach': 'demo-company',
 });
+// ATHLYRAX_PUBLIC_DEMO_READ_ONLY
+const PUBLIC_DEMO_USERNAME = 'demo.coach';
+const PUBLIC_DEMO_TENANT_ID = 'demo-company';
+function enforcePublicDemoReadOnlyIdentity(value) {
+	if (!value || typeof value !== 'object') return value;
+	const username = String(value?.username || value?.sub || '').trim().toLowerCase();
+	if (username !== PUBLIC_DEMO_USERNAME) return value;
+	return {
+		...value,
+		username: PUBLIC_DEMO_USERNAME,
+		sub: value?.sub ? PUBLIC_DEMO_USERNAME : value?.sub,
+		role: 'viewer',
+		tenantId: PUBLIC_DEMO_TENANT_ID,
+		clubId: PUBLIC_DEMO_TENANT_ID,
+	};
+}
 const AUTH_PREVENT_USER_SHRINK = String(process.env.AUTH_PREVENT_USER_SHRINK || 'true').toLowerCase() !== 'false';
 const AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME = String(process.env.AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME || 'softwareowner').trim().toLowerCase();
 const AUTH_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.AUTH_INVITE_TTL_HOURS || '168', 10) || 168);
@@ -151,7 +190,8 @@ const DEFAULT_BILLING_CATALOG = {
 		{ key: 'extra-50-swimmers', label: 'Extra 50 swimmers', swimmers: 50, amountMinor: 2500 },
 	],
 };
-const DEFAULT_AUTH_USERS = [
+const DEFAULT_AUTH_USERS = IS_PRODUCTION ? [] : [
+	// ATHLYRAX_PRODUCTION_DEFAULT_AUTH_USERS_DISABLED
 	{ username: 'softwareowner', password: 'softwareowner123', role: 'software-owner', createdVia: 'seed' },
 	{
 		username: 'demo.coach',
@@ -263,6 +303,11 @@ if (stripeClient && BILLING_ENFORCED) {
 
 app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
 	if (!stripeClient) {
+		// // ATHLYRAX_STRIPE_WEBHOOK_PROCESSING_AVAILABLE
+		if (IS_PRODUCTION) {
+			res.status(503).json({ error: 'Stripe webhook processing is temporarily unavailable.' });
+			return;
+		}
 		res.status(200).json({ ok: true, skipped: 'stripe_not_configured' });
 		return;
 	}
@@ -270,15 +315,24 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 	const signature = String(req.headers?.['stripe-signature'] || '').trim();
 	let event;
 
+// ATHLYRAX_STRIPE_WEBHOOK_SIGNATURE_REQUIRED
 	try {
-		if (BILLING_STRIPE_WEBHOOK_SECRET && signature) {
+		if (BILLING_STRIPE_WEBHOOK_SECRET) {
+			if (!signature) {
+				res.status(400).json({ error: 'Stripe webhook signature is required.' });
+				return;
+			}
 			event = stripeClient.webhooks.constructEvent(req.body, signature, BILLING_STRIPE_WEBHOOK_SECRET);
 		} else {
+			if (IS_PRODUCTION) {
+				res.status(503).json({ error: 'Stripe webhook verification is not configured.' });
+				return;
+			}
 			const rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body || '{}');
 			event = JSON.parse(rawBody);
 		}
 	} catch (error) {
-		res.status(400).json({ error: 'Invalid webhook payload.', details: error instanceof Error ? error.message : 'Unknown error' });
+		res.status(400).json({ error: 'Invalid webhook payload.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
 		return;
 	}
 
@@ -293,6 +347,8 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 						customerId,
 						checkoutSessionId: String(session?.id || '').trim(),
 						status: String(session?.status || 'active').trim() || 'active',
+						lastStripeEventCreated: Math.max(0, Number.parseInt(event?.created || '0', 10) || 0),
+						lastStripeEventId: String(event?.id || '').trim(),
 						updatedAt: new Date().toISOString(),
 					});
 				}
@@ -302,7 +358,7 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 			case 'customer.subscription.created':
 			case 'customer.subscription.updated':
 			case 'customer.subscription.deleted': {
-				await handleStripeSubscriptionEvent(event?.data?.object);
+				await handleStripeSubscriptionEvent(event?.data?.object, event);
 				break;
 			}
 			case 'invoice.payment_failed': {
@@ -311,6 +367,8 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 				if (customerId) {
 					upsertUserBillingByCustomerId(customerId, {
 						status: 'past_due',
+						lastStripeEventCreated: Math.max(0, Number.parseInt(event?.created || '0', 10) || 0),
+						lastStripeEventId: String(event?.id || '').trim(),
 						updatedAt: new Date().toISOString(),
 					});
 				}
@@ -328,11 +386,17 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 
 		res.status(200).json({ received: true });
 	} catch (error) {
-		res.status(500).json({ error: 'Webhook handling failed.', details: error instanceof Error ? error.message : 'Unknown error' });
+		res.status(500).json({ error: 'Webhook handling failed.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
 	}
 });
 
-app.use(express.json({ limit: '25mb' }));
+// ATHLYRAX_ROUTE_SCOPED_JSON_BODY_LIMITS
+// Full club database replacement and swimmer evidence sync can legitimately be
+// larger than ordinary authentication/settings/snapshot requests. Keep their
+// existing ceiling while reducing the anonymous/general parser attack surface.
+app.use('/db', express.json({ limit: '25mb' }));
+app.use('/swimmer/profile/sync', express.json({ limit: '25mb' }));
+app.use(express.json({ limit: '5mb' }));
 app.use(helmet());
 
 function readJsonFile(filePath) {
@@ -346,18 +410,36 @@ function readJsonFile(filePath) {
 }
 
 function loadOrCreateSnapshotSubmissions() {
-	const parsed = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);
-	if (Array.isArray(parsed)) return parsed;
-	try {
-		writeAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, []);
-	} catch {
-		// Keep boot resilient when first-write fails.
+// ATHLYRAX_SNAPSHOT_SUBMISSIONS_FAIL_CLOSED
+	if (fs.existsSync(SNAPSHOT_SUBMISSIONS_PATH)) {
+		const parsed = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);
+		if (!Array.isArray(parsed)) {
+			throw new Error('Snapshot submissions store is unreadable or invalid. Refusing to replace it with an empty file.');
+		}
+		return parsed;
 	}
+	if (IS_PRODUCTION) {
+		throw new Error('Snapshot submissions store is missing. Refusing startup-time creation.');
+	}
+	writeAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, []);
 	return [];
 }
 
 function persistSnapshotSubmissions() {
-	writeAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, Array.isArray(snapshotSubmissions) ? snapshotSubmissions : []);
+	if (!Array.isArray(snapshotSubmissions)) {
+		throw new Error('Snapshot submissions in-memory state is invalid. Refusing destructive persistence.');
+	}
+// ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED
+	if (IS_PRODUCTION && snapshotSubmissions.length === 0 && fs.existsSync(SNAPSHOT_SUBMISSIONS_PATH)) {
+		const current = readJsonFile(SNAPSHOT_SUBMISSIONS_PATH);
+		if (!Array.isArray(current)) throw new Error('Snapshot submissions store is unreadable or invalid. Refusing destructive persistence.');
+		if (current.length > 0) {
+			const error = new Error('Refusing to replace non-empty snapshot history with an empty history. Use an explicit controlled reset procedure.');
+			error.code = 'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED';
+			throw error;
+		}
+	}
+	writeAtomicJsonFile(SNAPSHOT_SUBMISSIONS_PATH, snapshotSubmissions);
 }
 
 function clampPercent(value) {
@@ -912,17 +994,7 @@ function hashPasswordResetCode(code) {
 	return crypto.createHash('sha256').update(String(code || ''), 'utf8').digest('hex');
 }
 
-function findAuthUserByIdentifier(identifier) {
-	const normalized = String(identifier || '').trim();
-	if (!normalized) return null;
-	const normalizedLower = normalized.toLowerCase();
-	return authUsers.find((row) => {
-		const username = String(row?.username || '').trim();
-		const email = String(row?.email || '').trim().toLowerCase();
-		return username.toLowerCase() === normalizedLower || (email && email === normalizedLower);
-	}) || null;
-}
-
+// ATHLYRAX_FIRST_MATCH_IDENTIFIER_HELPER_REMOVED
 function resolveLoginUserByIdentifier(identifier) {
 	const normalized = String(identifier || '').trim();
 	if (!normalized) {
@@ -995,6 +1067,10 @@ async function deliverPasswordResetCode({ user, resetCode }) {
 		return { mode: 'smtp' };
 	}
 
+// ATHLYRAX_PRODUCTION_PASSWORD_RESET_NO_CONSOLE
+	if (IS_PRODUCTION) {
+		throw new Error('Password reset email delivery is not configured. Refusing to expose reset code through server logs.');
+	}
 	console.log(`[auth] Password reset code for ${username}: ${resetCode} (expires in ${AUTH_PASSWORD_RESET_TTL_MINUTES} minutes)`);
 	return { mode: 'console' };
 }
@@ -1135,8 +1211,12 @@ function resolveStoragePathsForTenantKey(tenantKey) {
 
 function resolveStoragePathsForRequest(req) {
 	const baseTenantId = resolveAuthTenantId(req.auth);
-	const requestedTenantId = normalizeTenantId(req.headers?.['x-athlyrax-tenant']);
+	const requestedTenantRaw = String(req.headers?.['x-athlyrax-tenant'] || '').trim();
+	const requestedTenantId = normalizeTenantId(requestedTenantRaw);
 	const reason = String(req.headers?.['x-athlyrax-tenant-reason'] || '').trim();
+	if (requestedTenantRaw && (requestedTenantRaw !== requestedTenantId || !/^[a-z0-9_-]+$/.test(requestedTenantRaw))) {
+		return { ok: false, status: 400, body: { error: 'x-athlyrax-tenant must already be a canonical lowercase tenant ID.' } };
+	}
 
 	if (!requestedTenantId) {
 		return {
@@ -1352,29 +1432,57 @@ function normalizeBillingCatalog(rawCatalog) {
 	};
 }
 
+function isValidRawBillingCatalog(raw) {
+	return Boolean(raw)
+		&& typeof raw === 'object'
+		&& !Array.isArray(raw)
+		&& Array.isArray(raw.plans)
+		&& raw.plans.length > 0
+		&& raw.plans.every((plan) => plan && typeof plan === 'object' && String(plan.key || '').trim());
+}
+
+function loadLatestBillingCatalogBackupStrict() {
+	if (!fs.existsSync(BILLING_CATALOG_BACKUP_DIR)) return null;
+	const snapshots = fs.readdirSync(BILLING_CATALOG_BACKUP_DIR)
+		.filter((name) => name.startsWith('billing-catalog-') && name.endsWith('.json'))
+		.map((name) => ({ fullPath: path.join(BILLING_CATALOG_BACKUP_DIR, name), mtime: fs.statSync(path.join(BILLING_CATALOG_BACKUP_DIR, name)).mtimeMs }))
+		.sort((a, b) => b.mtime - a.mtime);
+	for (const snapshot of snapshots) {
+		const parsed = readJsonFile(snapshot.fullPath);
+		if (!isValidRawBillingCatalog(parsed)) continue;
+		return normalizeBillingCatalog(parsed);
+	}
+	return null;
+}
+
 function loadOrCreateBillingCatalog() {
+// ATHLYRAX_BILLING_CATALOG_FAIL_CLOSED
 	ensureStorageLayout();
-	const existing = readJsonFile(BILLING_CATALOG_PATH);
-	if (existing && typeof existing === 'object') {
+	const exists = fs.existsSync(BILLING_CATALOG_PATH);
+	const existing = exists ? readJsonFile(BILLING_CATALOG_PATH) : null;
+	if (isValidRawBillingCatalog(existing)) {
 		const normalized = normalizeBillingCatalog(existing);
-		writeAtomicJsonFile(BILLING_CATALOG_PATH, normalized);
-		backupBillingCatalogSnapshot(normalized, 'bootstrap-current');
+		if (!IS_PRODUCTION) {
+			writeAtomicJsonFile(BILLING_CATALOG_PATH, normalized);
+			backupBillingCatalogSnapshot(normalized, 'bootstrap-current');
+		}
 		return normalized;
 	}
 
-	const recovered = loadLatestBillingCatalogBackup();
+	if (IS_PRODUCTION || BILLING_STRICT_RECOVERY) {
+		const state = exists ? 'invalid' : 'missing';
+		throw new Error(`[billing] billing-catalog.json is ${state}. Refusing startup-time recovery, normalization or default bootstrap.`);
+	}
+
+	const recovered = loadLatestBillingCatalogBackupStrict();
 	if (recovered) {
-		console.warn('[billing] billing-catalog.json missing/invalid; restored latest backup snapshot.');
+		console.warn('[billing] billing-catalog.json missing/invalid; restored latest structurally valid backup snapshot outside production.');
 		writeAtomicJsonFile(BILLING_CATALOG_PATH, recovered);
 		return recovered;
 	}
 
-	if (BILLING_STRICT_RECOVERY) {
-		throw new Error('[billing] billing-catalog.json missing/invalid and no backup available. Refusing to bootstrap defaults in strict recovery mode.');
-	}
-
 	const normalized = normalizeBillingCatalog(null);
-	console.warn('[billing] No billing catalog or backup found; bootstrapping defaults (strict recovery disabled).');
+	console.warn('[billing] No billing catalog or valid backup found; bootstrapping defaults outside production.');
 	writeAtomicJsonFile(BILLING_CATALOG_PATH, normalized);
 	backupBillingCatalogSnapshot(normalized, 'bootstrap-default');
 	return normalized;
@@ -1526,6 +1634,8 @@ function normalizeBillingState(raw) {
 		trialEndsAt: String(raw?.trialEndsAt || '').trim(),
 		currentPeriodEnd: String(raw?.currentPeriodEnd || '').trim(),
 		cancelAtPeriodEnd: raw?.cancelAtPeriodEnd === true,
+		lastStripeEventCreated: Math.max(0, Number.parseInt(raw?.lastStripeEventCreated || '0', 10) || 0),
+		lastStripeEventId: String(raw?.lastStripeEventId || '').trim(),
 		updatedAt: String(raw?.updatedAt || fallback.updatedAt).trim() || fallback.updatedAt,
 	};
 }
@@ -1542,9 +1652,11 @@ function buildBillingAccessForUser(user) {
 		maxSquads: plan?.limits?.maxSquads ?? null,
 	};
 	const isBillingEnabled = Boolean(stripeClient);
-	const isBillingEnforced = isBillingEnabled && BILLING_ENFORCED;
+	// ATHLYRAX_BILLING_POLICY_SINGLE_SOURCE
+	const isBillingEnforced = isBillingEnabled && getBillingPolicy().enforceCharging;
 	const isPaidStatus = new Set(['active', 'trialing']);
-	const isPaid = isPrimarySoftwareOwner || isPaidStatus.has(String(billing?.status || '').trim().toLowerCase());
+	const recognizedPaidPlan = Boolean(plan) && String(billing?.planKey || '').trim() !== 'free';
+	const isPaid = isPrimarySoftwareOwner || (recognizedPaidPlan && isPaidStatus.has(String(billing?.status || '').trim().toLowerCase()));
 
 	return {
 		billingEnabled: isBillingEnabled,
@@ -1559,13 +1671,19 @@ function buildBillingAccessForUser(user) {
 	};
 }
 
+function resolveEffectiveAuthRole(user) {
+	const username = String(user?.username || '').trim().toLowerCase();
+	if (username === 'demo.coach') return 'head-coach';
+	return String(user?.role || 'viewer').trim() || 'viewer';
+}
+
 function buildAuthUserPayload(user) {
-	const normalizedUser = user && typeof user === 'object' ? user : {};
+	const normalizedUser = enforcePublicDemoReadOnlyIdentity(user && typeof user === 'object' ? user : {});
 	const access = buildBillingAccessForUser(normalizedUser);
 	const resolvedTenantId = resolveTenantKeyFromUser(normalizedUser);
 	return {
 		username: String(normalizedUser?.username || '').trim(),
-		role: String(normalizedUser?.role || 'viewer').trim() || 'viewer',
+		role: resolveEffectiveAuthRole(normalizedUser),
 		tenantId: String(resolvedTenantId || '').trim(),
 		onboardingRequired: Boolean(normalizedUser?.onboardingCompletedAt ? false : true),
 		billing: access.billing,
@@ -1585,10 +1703,8 @@ function resolveSubscriptionPlanFromStripe(subscription) {
 	if (linePriceId && byPrice.has(linePriceId)) {
 		return { planKey: byPrice.get(linePriceId), priceId: linePriceId };
 	}
-	if (String(subscription?.status || '').trim().toLowerCase() === 'active') {
-		return { planKey: 'tier-1', priceId: linePriceId };
-	}
-	return { planKey: 'free', priceId: linePriceId };
+	// ATHLYRAX_UNKNOWN_STRIPE_PRICE_FAIL_CLOSED
+	return { planKey: linePriceId ? 'unrecognized' : 'free', priceId: linePriceId };
 }
 
 function upsertUserBillingByUsername(username, partialBilling) {
@@ -1596,16 +1712,28 @@ function upsertUserBillingByUsername(username, partialBilling) {
 	if (!target) return null;
 	const index = authUsers.findIndex((row) => String(row?.username || '').trim() === target);
 	if (index < 0) return null;
-	const previous = normalizeBillingState(authUsers[index]?.billing);
+	const previousRow = authUsers[index];
+	const previous = normalizeBillingState(previousRow?.billing);
+	const incomingEventCreated = Math.max(0, Number.parseInt(partialBilling?.lastStripeEventCreated || '0', 10) || 0);
+	const incomingEventId = String(partialBilling?.lastStripeEventId || '').trim();
+	if (incomingEventId && previous.lastStripeEventId === incomingEventId) return previousRow;
+	if (incomingEventCreated > 0 && previous.lastStripeEventCreated > incomingEventCreated) return previousRow;
+	// ATHLYRAX_STRIPE_EVENT_ORDER_GUARD
 	authUsers[index] = {
-		...authUsers[index],
+		...previousRow,
 		billing: normalizeBillingState({
 			...previous,
 			...(partialBilling && typeof partialBilling === 'object' ? partialBilling : {}),
 			updatedAt: new Date().toISOString(),
 		}),
 	};
-	persistAuthUsers();
+	try {
+		// ATHLYRAX_BILLING_MEMORY_ROLLBACK
+		persistAuthUsers();
+	} catch (error) {
+		authUsers[index] = previousRow;
+		throw error;
+	}
 	return authUsers[index];
 }
 
@@ -1614,9 +1742,15 @@ function upsertUserBillingByCustomerId(customerId, partialBilling) {
 	if (!target) return null;
 	const index = authUsers.findIndex((row) => String(row?.billing?.customerId || '').trim() === target);
 	if (index < 0) return null;
-	const previous = normalizeBillingState(authUsers[index]?.billing);
+	const previousRow = authUsers[index];
+	const previous = normalizeBillingState(previousRow?.billing);
+	const incomingEventCreated = Math.max(0, Number.parseInt(partialBilling?.lastStripeEventCreated || '0', 10) || 0);
+	const incomingEventId = String(partialBilling?.lastStripeEventId || '').trim();
+	if (incomingEventId && previous.lastStripeEventId === incomingEventId) return previousRow;
+	if (incomingEventCreated > 0 && previous.lastStripeEventCreated > incomingEventCreated) return previousRow;
+	// ATHLYRAX_STRIPE_EVENT_ORDER_GUARD
 	authUsers[index] = {
-		...authUsers[index],
+		...previousRow,
 		billing: normalizeBillingState({
 			...previous,
 			...(partialBilling && typeof partialBilling === 'object' ? partialBilling : {}),
@@ -1624,11 +1758,17 @@ function upsertUserBillingByCustomerId(customerId, partialBilling) {
 			updatedAt: new Date().toISOString(),
 		}),
 	};
-	persistAuthUsers();
+	try {
+		// ATHLYRAX_BILLING_MEMORY_ROLLBACK
+		persistAuthUsers();
+	} catch (error) {
+		authUsers[index] = previousRow;
+		throw error;
+	}
 	return authUsers[index];
 }
 
-async function handleStripeSubscriptionEvent(subscriptionObject) {
+async function handleStripeSubscriptionEvent(subscriptionObject, stripeEvent = null) {
 	const subscription = subscriptionObject && typeof subscriptionObject === 'object' ? subscriptionObject : {};
 	const customerId = String(subscription?.customer || '').trim();
 	if (!customerId) return;
@@ -1643,6 +1783,8 @@ async function handleStripeSubscriptionEvent(subscriptionObject) {
 		trialEndsAt: parseEpochSecondsToIso(subscription?.trial_end),
 		currentPeriodEnd: parseEpochSecondsToIso(subscription?.current_period_end),
 		cancelAtPeriodEnd: subscription?.cancel_at_period_end === true,
+		lastStripeEventCreated: Math.max(0, Number.parseInt(stripeEvent?.created || '0', 10) || 0),
+		lastStripeEventId: String(stripeEvent?.id || '').trim(),
 		updatedAt: new Date().toISOString(),
 	};
 
@@ -1692,6 +1834,8 @@ async function deliverBillingEmail({ user, subject, lines }) {
 		const textBody = [`Hi ${greetingName},`, '', ...lines, '', 'AthlyraX Billing'].join('\n');
 
 		if (!AUTH_SMTP_HOST || !AUTH_SMTP_FROM) {
+// ATHLYRAX_PRODUCTION_BILLING_EMAIL_NO_CONSOLE
+			if (IS_PRODUCTION) return { mode: 'skipped', reason: 'smtp_not_configured' };
 			console.log(`[billing-email] ${email}\n${subject}\n${textBody}`);
 			return { mode: 'console' };
 		}
@@ -1797,7 +1941,10 @@ function normalizeAuthUserRows(rows) {
 			});
 			const passwordHash = fromHash || (fromPassword ? hashPassword(fromPassword) : '');
 			if (!username || !passwordHash) return null;
+			const { password: _discardedPlaintextPassword, ...preservedRow } = row;
 			return {
+				// ATHLYRAX_AUTH_ROW_METADATA_PRESERVED
+				...preservedRow,
 				username,
 				role,
 				passwordHash,
@@ -1851,6 +1998,8 @@ function normalizeInviteRows(rows) {
 			const disabled = row?.disabled === true;
 			if (!code || !expiresAt) return null;
 			return {
+				// ATHLYRAX_INVITE_ROW_METADATA_PRESERVED
+				...row,
 				code,
 				role,
 				createdBy,
@@ -1869,10 +2018,15 @@ function normalizeInviteRows(rows) {
 }
 
 function loadOrCreateAuthInvites() {
+// ATHLYRAX_AUTH_INVITES_FAIL_CLOSED
 	ensureStorageLayout();
-	const fromFile = normalizeInviteRows(readJsonFile(AUTH_INVITES_PATH));
-	if (fromFile.length > 0) return fromFile;
-	writeJsonFile(AUTH_INVITES_PATH, []);
+	if (fs.existsSync(AUTH_INVITES_PATH)) {
+		const raw = readJsonFile(AUTH_INVITES_PATH);
+		if (!Array.isArray(raw)) throw new Error('Authentication invite store is unreadable or invalid. Refusing to replace it with an empty file.');
+		return normalizeInviteRows(raw);
+	}
+	if (IS_PRODUCTION) throw new Error('Authentication invite store is missing. Refusing startup-time creation.');
+	writeAtomicJsonFile(AUTH_INVITES_PATH, []);
 	return [];
 }
 
@@ -1884,22 +2038,18 @@ function persistAuthInvites() {
 function makeInviteCode() {
 	const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 	let raw = '';
+	// ATHLYRAX_INVITE_CODE_CRYPTO_RNG
 	for (let index = 0; index < 12; index += 1) {
-		raw += alphabet[Math.floor(Math.random() * alphabet.length)];
+		raw += alphabet[crypto.randomInt(0, alphabet.length)];
 	}
 	return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
 }
 
 function cleanExpiredInvites() {
-	const now = Date.now();
-	for (let index = authInvites.length - 1; index >= 0; index -= 1) {
-		const invite = authInvites[index];
-		const expiresAtMs = Date.parse(String(invite?.expiresAt || ''));
-		const fullyUsed = Number(invite?.usedCount || 0) >= Number(invite?.maxUses || 1);
-		if (invite?.disabled || fullyUsed || !Number.isFinite(expiresAtMs) || expiresAtMs <= now) {
-			authInvites.splice(index, 1);
-		}
-	}
+	// ATHLYRAX_INVITE_HISTORY_PRESERVED
+	// Historical invite rows are retained. findUsableInvite/count helpers apply
+	// expiry, disabled and usage rules without destructive cleanup.
+	return;
 }
 
 function findUsableInvite(inviteCode, email) {
@@ -1933,6 +2083,7 @@ function getNowEpochSeconds() {
 }
 
 function loadOrCreateAuthUsers() {
+// ATHLYRAX_AUTH_BOOTSTRAP_ATOMIC_WRITES
 	ensureStorageLayout();
 
 	const sanitizeDemoUsers = (rows) => {
@@ -1944,6 +2095,23 @@ function loadOrCreateAuthUsers() {
 	const cleanedFromFile = sanitizeDemoUsers(fromFile);
 	const fromBackup = normalizeAuthUserRows(readJsonFile(AUTH_USERS_BACKUP_PATH));
 	const cleanedFromBackup = sanitizeDemoUsers(fromBackup);
+
+// ATHLYRAX_PRODUCTION_AUTH_STORE_FAIL_CLOSED
+	if (IS_PRODUCTION && cleanedFromFile.length < 1) {
+		throw new Error('Production authentication store is empty. Refusing backup/environment/default account fallback.');
+	}
+	if (IS_PRODUCTION && cleanedFromBackup.length < 1) {
+		throw new Error('Production authentication backup is empty. Refusing startup without a valid backup baseline.');
+	}
+	if (IS_PRODUCTION && cleanedFromFile.length !== fromFile.length) {
+		throw new Error('Production authentication store contains removable seed/demo users. Refusing startup-time auth mutation.');
+	}
+	if (IS_PRODUCTION && cleanedFromBackup.length !== fromBackup.length) {
+		throw new Error('Production authentication backup contains removable seed/demo users. Refusing startup-time auth mutation.');
+	}
+	if (IS_PRODUCTION) {
+		return { users: cleanedFromFile, source: 'file' };
+	}
 
 	if (
 		AUTH_PREVENT_USER_SHRINK
@@ -1957,16 +2125,16 @@ function loadOrCreateAuthUsers() {
 
 	if (cleanedFromFile.length > 0) {
 		if (cleanedFromFile.length !== fromFile.length) {
-			writeJsonFile(AUTH_USERS_PATH, cleanedFromFile);
+			writeAtomicJsonFile(AUTH_USERS_PATH, cleanedFromFile);
 		}
-		writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromFile);
+		writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromFile);
 		return { users: cleanedFromFile, source: 'file' };
 	}
 
 	if (cleanedFromBackup.length > 0) {
-		writeJsonFile(AUTH_USERS_PATH, cleanedFromBackup);
+		writeAtomicJsonFile(AUTH_USERS_PATH, cleanedFromBackup);
 		if (cleanedFromBackup.length !== fromBackup.length) {
-			writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromBackup);
+			writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromBackup);
 		}
 		return { users: cleanedFromBackup, source: 'backup' };
 	}
@@ -1974,14 +2142,14 @@ function loadOrCreateAuthUsers() {
 	const fromEnv = normalizeAuthUserRows(parseAuthUsersFromEnv());
 	const cleanedFromEnv = sanitizeDemoUsers(fromEnv);
 	if (cleanedFromEnv.length > 0) {
-		writeJsonFile(AUTH_USERS_PATH, cleanedFromEnv);
-		writeJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromEnv);
+		writeAtomicJsonFile(AUTH_USERS_PATH, cleanedFromEnv);
+		writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, cleanedFromEnv);
 		return { users: cleanedFromEnv, source: 'env' };
 	}
 
 	const fromDefaults = sanitizeDemoUsers(normalizeAuthUserRows(DEFAULT_AUTH_USERS));
-	writeJsonFile(AUTH_USERS_PATH, fromDefaults);
-	writeJsonFile(AUTH_USERS_BACKUP_PATH, fromDefaults);
+	writeAtomicJsonFile(AUTH_USERS_PATH, fromDefaults);
+	writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, fromDefaults);
 	return { users: fromDefaults, source: 'defaults' };
 }
 
@@ -2048,7 +2216,7 @@ function verifyAuthToken(token) {
 		if (payload.iat < getTokenValidAfter(user)) return null;
 		return {
 			username: String(user.username),
-			role: String(user.role || 'viewer'),
+			role: resolveEffectiveAuthRole(user),
 			csrf: String(payload.csrf),
 			iat: Number(payload.iat),
 			exp: Number(payload.exp),
@@ -2066,14 +2234,25 @@ function safeEqualText(left, right) {
 }
 
 function parseAllowedOrigins() {
+	// ATHLYRAX_PRODUCTION_CORS_FRONTEND_ORIGINS
+	const requiredProductionOrigins = IS_PRODUCTION
+		? ['https://athlyrax.com', 'https://www.athlyrax.com']
+		: [];
 	const raw = String(process.env.ALLOWED_ORIGINS || '').trim();
-	if (!raw) return new Set(DEFAULT_ALLOWED_ORIGINS);
-	return new Set(
-		raw
-			.split(',')
-			.map((value) => String(value || '').trim())
-			.filter(Boolean)
-	);
+	const configuredOrigins = raw
+		? raw.split(',').map((value) => String(value || '').trim()).filter(Boolean)
+		: (IS_PRODUCTION ? [] : DEFAULT_ALLOWED_ORIGINS);
+	const origins = [...configuredOrigins, ...requiredProductionOrigins];
+	for (const origin of origins) {
+		let parsed;
+		try { parsed = new URL(origin); } catch { parsed = null; }
+		const validProtocol = parsed && (parsed.protocol === 'https:' || parsed.protocol === 'http:');
+		const exactOrigin = parsed && parsed.origin === origin;
+		if (origin === '*' || !validProtocol || !exactOrigin || parsed.username || parsed.password) {
+			throw new Error(`Invalid CORS origin: ${origin || '(empty)'}. Use an exact http/https origin with no path, query, fragment or credentials; wildcard origins are forbidden.`);
+		}
+	}
+	return new Set(origins);
 }
 
 function parseCookies(req) {
@@ -2157,7 +2336,7 @@ function attachAuthContext(req, _res, next) {
 		next();
 		return;
 	}
-	req.auth = token ? verifyAuthToken(token) : null;
+	req.auth = token ? enforcePublicDemoReadOnlyIdentity(verifyAuthToken(token)) : null;
 	req.cookies = cookies;
 	req.authSource = cookieToken ? 'cookie' : (headerToken ? 'bearer' : 'none');
 	if (req.auth?.username) {
@@ -2252,7 +2431,7 @@ function requireWriteRole(req, res, next) {
 
 function requireBillingWriteAccess(req, res, next) {
 	if (!AUTH_REQUIRED) return next();
-	if (!BILLING_ENFORCED || !stripeClient) return next();
+	if (!stripeClient || !getBillingPolicy().enforceCharging) return next();
 	const user = findAuthUser(String(req.auth?.username || '').trim());
 	const access = buildBillingAccessForUser(user || req.auth);
 	if (access.canWriteData) {
@@ -2268,6 +2447,13 @@ function requireBillingWriteAccess(req, res, next) {
 function requireCsrf(req, res, next) {
 	const method = String(req.method || '').toUpperCase();
 	if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+	const requestPath = String(req.path || req.originalUrl || '').split('?')[0];
+	// Logout only destroys the authenticated session. Do not let a stale/missing
+	// CSRF token trap a user inside the application when the session cookie is valid.
+	if (requestPath === '/auth/logout') return next();
+	// Logout is deliberately CSRF-exempt: forcing a user to sign out is not a privileged mutation,
+	// and the endpoint still requires a valid authenticated session before clearing its cookies.
+	if (method === 'POST' && String(req.path || '') === '/auth/logout') return next();
 	if (!req.auth) return next();
 	if (String(req.authSource || 'none') !== 'cookie') return next();
 	const headerToken = String(req.headers?.[AUTH_CSRF_HEADER_NAME] || '').trim();
@@ -2366,11 +2552,22 @@ function rotateAuthAuditIfNeeded() {
 }
 
 function pruneAuthAuditFiles(paths, keepCount) {
+	// ATHLYRAX_PRODUCTION_AUDIT_ARCHIVE_BEFORE_DELETE
 	for (const stalePath of (Array.isArray(paths) ? paths : []).slice(keepCount)) {
 		try {
+			if (IS_PRODUCTION) {
+				const safetyRoot = String(process.env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();
+				if (!safetyRoot) continue;
+				const archiveDir = path.join(path.resolve(safetyRoot), 'auth-audit-retention');
+				fs.mkdirSync(archiveDir, { recursive: true });
+				const sourceBytes = fs.readFileSync(stalePath);
+				const archivePath = path.join(archiveDir, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}-${path.basename(stalePath)}`);
+				fs.writeFileSync(archivePath, sourceBytes, { mode: 0o600 });
+				if (!sourceBytes.equals(fs.readFileSync(archivePath))) { try { fs.unlinkSync(archivePath); } catch {} continue; }
+			}
 			fs.unlinkSync(stalePath);
 		} catch {
-			// Ignore cleanup failures for best-effort retention.
+			// Retain the primary file when archival/deletion cannot be verified.
 		}
 	}
 }
@@ -2495,9 +2692,11 @@ function readAuthAuditEvents(limit = 250, filters = {}) {
 }
 
 function resolveClientKey(req) {
+	// ATHLYRAX_PROXY_OBSERVED_CLIENT_IP
 	const forwarded = String(req.headers?.['x-forwarded-for'] || '').trim();
 	if (forwarded) {
-		return forwarded.split(',')[0].trim();
+		const chain = forwarded.split(',').map((value) => String(value || '').trim()).filter(Boolean);
+		if (chain.length > 0) return chain[chain.length - 1];
 	}
 	return String(req.socket?.remoteAddress || req.ip || 'unknown').trim() || 'unknown';
 }
@@ -2546,30 +2745,42 @@ function applyRateLimitHeaders(res, { maxAttempts, remaining, resetSeconds }) {
 }
 
 function requireLoginRateLimit(req, res, next) {
+	// ATHLYRAX_LAYERED_AUTH_RATE_LIMIT
 	const clientKey = resolveClientKey(req);
-	const username = String(req.body?.username || '').trim().toLowerCase();
-	const key = username ? `${clientKey}:${username}` : clientKey;
-	const result = checkRateLimit({
+	const identifier = String(req.body?.username || req.body?.identifier || req.body?.email || '').trim().toLowerCase();
+	const ipResult = checkRateLimit({
 		store: loginRateBuckets,
-		key,
+		key: `ip:${clientKey}`,
+		windowMs: AUTH_LOGIN_RATE_WINDOW_MS,
+		maxAttempts: AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,
+	});
+	const identityResult = identifier ? checkRateLimit({
+		store: loginRateBuckets,
+		key: `identity:${identifier}`,
 		windowMs: AUTH_LOGIN_RATE_WINDOW_MS,
 		maxAttempts: AUTH_LOGIN_RATE_MAX_ATTEMPTS,
-	});
+	}) : null;
+	const blockedByIp = !ipResult.allowed;
+	const blockedByIdentity = Boolean(identityResult && !identityResult.allowed);
 	applyRateLimitHeaders(res, {
-		maxAttempts: AUTH_LOGIN_RATE_MAX_ATTEMPTS,
-		remaining: result.remaining,
-		resetSeconds: result.resetSeconds,
+		maxAttempts: identityResult ? AUTH_LOGIN_RATE_MAX_ATTEMPTS : AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,
+		remaining: Math.min(ipResult.remaining, identityResult ? identityResult.remaining : ipResult.remaining),
+		resetSeconds: Math.max(ipResult.resetSeconds, identityResult ? identityResult.resetSeconds : 0),
 	});
-	if (!result.allowed) {
+	if (blockedByIp || blockedByIdentity) {
 		appendAuthAuditEvent({
 			action: 'rate_limit_blocked',
 			req,
 			status: 'blocked',
-			reason: 'login_rate_limit',
-			details: { limit: AUTH_LOGIN_RATE_MAX_ATTEMPTS, windowMs: AUTH_LOGIN_RATE_WINDOW_MS },
+			reason: blockedByIp ? 'login_ip_rate_limit' : 'login_identity_rate_limit',
+			details: {
+				ipLimit: AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS,
+				identityLimit: AUTH_LOGIN_RATE_MAX_ATTEMPTS,
+				windowMs: AUTH_LOGIN_RATE_WINDOW_MS,
+			},
 		});
-		res.setHeader('Retry-After', String(result.resetSeconds));
-		res.status(429).json({ error: 'Too many login attempts. Please wait and retry.' });
+		res.setHeader('Retry-After', String(Math.max(ipResult.resetSeconds, identityResult ? identityResult.resetSeconds : 0)));
+		res.status(429).json({ error: 'Too many authentication requests. Please wait and retry.' });
 		return;
 	}
 	next();
@@ -2628,9 +2839,48 @@ function sanitizeAuthUsers(users) {
 }
 
 function persistAuthUsers() {
+	// ATHLYRAX_AUTH_PAIRED_PERSISTENCE_TRANSACTION
+	// ATHLYRAX_AUTH_PERSISTENCE_SINGLE_OWNER
 	const payload = normalizeAuthUserRows(authUsers);
-	writeAtomicJsonFile(AUTH_USERS_PATH, payload);
-	writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);
+	if (!Array.isArray(payload) || payload.length < 1) {
+		throw new Error('Refusing to persist an empty or invalid authentication user store.');
+	}
+
+	const primaryExisted = fs.existsSync(AUTH_USERS_PATH);
+	const backupExisted = fs.existsSync(AUTH_USERS_BACKUP_PATH);
+	const previousPrimary = primaryExisted ? readJsonFile(AUTH_USERS_PATH) : null;
+	const previousBackup = backupExisted ? readJsonFile(AUTH_USERS_BACKUP_PATH) : null;
+	if (primaryExisted && !Array.isArray(previousPrimary)) throw new Error('Authentication primary store is unreadable or invalid before persistence.');
+	if (backupExisted && !Array.isArray(previousBackup)) throw new Error('Authentication backup store is unreadable or invalid before persistence.');
+
+	const restorePrevious = (filePath, existed, previousValue) => {
+		if (existed) {
+			writeAtomicJsonFile(filePath, previousValue);
+			return;
+		}
+		if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+	};
+
+	try {
+		// Write the backup first. If the primary write then fails, the catch path restores both.
+		writeAtomicJsonFile(AUTH_USERS_BACKUP_PATH, payload);
+		writeAtomicJsonFile(AUTH_USERS_PATH, payload);
+
+		const verifiedPrimary = normalizeAuthUserRows(readJsonFile(AUTH_USERS_PATH));
+		const verifiedBackup = normalizeAuthUserRows(readJsonFile(AUTH_USERS_BACKUP_PATH));
+		const expected = JSON.stringify(payload);
+		if (JSON.stringify(verifiedPrimary) !== expected || JSON.stringify(verifiedBackup) !== expected) {
+			throw new Error('Authentication primary/backup verification failed after persistence.');
+		}
+	} catch (error) {
+		const rollbackErrors = [];
+		try { restorePrevious(AUTH_USERS_PATH, primaryExisted, previousPrimary); } catch (rollbackError) { rollbackErrors.push(`primary: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}`); }
+		try { restorePrevious(AUTH_USERS_BACKUP_PATH, backupExisted, previousBackup); } catch (rollbackError) { rollbackErrors.push(`backup: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}`); }
+		if (rollbackErrors.length > 0) {
+			throw new Error(`Authentication persistence failed and rollback was incomplete (${rollbackErrors.join('; ')}). Original error: ${error instanceof Error ? error.message : 'unknown persistence error'}`);
+		}
+		throw error;
+	}
 }
 
 function writeJsonFile(filePath, data) {
@@ -2644,6 +2894,8 @@ function writeJsonFile(filePath, data) {
 }
 
 function ensureStorageLayout(storagePaths = null) {
+// ATHLYRAX_PRODUCTION_STORAGE_LAYOUT_READ_ONLY
+	if (IS_PRODUCTION) return;
 	const dbPath = storagePaths?.dbPath || DB_PATH;
 	const backupPath = storagePaths?.backupPath || TARGET_BACKUP_PATH;
 	const snapshotDir = storagePaths?.snapshotDir || DB_SNAPSHOT_DIR;
@@ -2663,18 +2915,38 @@ function ensureStorageLayout(storagePaths = null) {
 }
 
 function writeAtomicJsonFile(filePath, data) {
+// ATHLYRAX_DURABLE_ATOMIC_JSON_WRITES
 	const dir = path.dirname(filePath);
 	fs.mkdirSync(dir, { recursive: true });
 	const tmpPath = path.join(
 		dir,
-		`${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
+		`${path.basename(filePath)}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`
 	);
 	const serialized = `${JSON.stringify(data, null, 2)}\n`;
-	fs.writeFileSync(tmpPath, serialized, 'utf8');
-	fs.renameSync(tmpPath, filePath);
+	let fileHandle = null;
+	try {
+		fileHandle = fs.openSync(tmpPath, 'wx', 0o600);
+		fs.writeFileSync(fileHandle, serialized, 'utf8');
+		fs.fsyncSync(fileHandle);
+	} finally {
+		if (fileHandle !== null) fs.closeSync(fileHandle);
+	}
+	try {
+		fs.renameSync(tmpPath, filePath);
+	} catch (error) {
+		try { fs.unlinkSync(tmpPath); } catch {}
+		throw error;
+	}
+	try {
+		const directoryHandle = fs.openSync(dir, 'r');
+		try { fs.fsyncSync(directoryHandle); } finally { fs.closeSync(directoryHandle); }
+	} catch {
+		// Some hosted filesystems do not permit directory fsync. The atomic rename has still completed.
+	}
 }
 
 function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {
+	// ATHLYRAX_BOUNDED_PRIMARY_DB_SNAPSHOT_RETENTION
 	if (!fs.existsSync(snapshotDir)) return;
 	const snapshotFiles = fs.readdirSync(snapshotDir)
 		.filter((name) => name.startsWith('db-') && name.endsWith('.json'))
@@ -2777,33 +3049,19 @@ function mergePlannerTargets(dbShape, backupRows) {
 		const key = `${squadId}|${weekStart}`;
 		const existingIndex = weekIndexByKey.get(key);
 
-		if (existingIndex === undefined) {
-			nextWeeks.push({
-				id: String(target?.id || ''),
-				squadId,
-				weekStart,
-				primaryTargetCompetitionKey: targetKey,
-				primaryTargetCompetitionName: targetName,
-				primaryTargetCompetitionFixtureId: targetFixtureId,
-			});
-			weekIndexByKey.set(key, nextWeeks.length - 1);
-			recoveredTargets += 1;
-			if (targetFixtureId) recoveredFixtureIds += 1;
-			continue;
-		}
+		// ATHLYRAX_PLANNER_BACKUP_NON_AUTHORITATIVE
+		if (existingIndex === undefined) continue;
 
 		const existingWeek = nextWeeks[existingIndex] || {};
 		const existingTargetKey = String(existingWeek?.primaryTargetCompetitionKey || '').trim();
 		const existingTargetName = String(existingWeek?.primaryTargetCompetitionName || '').trim();
 		const existingFixtureId = normalizeTargetFixtureId(existingWeek);
-		const hasExplicitTargetField = Object.prototype.hasOwnProperty.call(existingWeek || {}, 'primaryTargetCompetitionKey');
-		const existingUpdatedAtMs = Date.parse(String(existingWeek?.updatedAt || existingWeek?.createdAt || ''));
-		const hasTimestampedIntentionalClear = hasExplicitTargetField
-			&& !existingTargetKey
-			&& Number.isFinite(existingUpdatedAtMs);
-		const shouldRecoverTarget = !existingTargetKey && !hasTimestampedIntentionalClear;
-		const shouldRecoverName = Boolean(existingTargetKey) && !existingTargetName && Boolean(targetName);
-		const shouldRecoverFixtureId = Boolean(existingTargetKey) && !existingFixtureId && Boolean(targetFixtureId);
+		// A backup may fill metadata only for the exact target key that is still
+		// present in the submitted week. It must never restore a missing target.
+		const shouldRecoverTarget = false;
+		const backupMatchesCurrentTarget = Boolean(existingTargetKey) && targetKey === existingTargetKey;
+		const shouldRecoverName = backupMatchesCurrentTarget && !existingTargetName && Boolean(targetName);
+		const shouldRecoverFixtureId = backupMatchesCurrentTarget && !existingFixtureId && Boolean(targetFixtureId);
 
 		if (!shouldRecoverTarget && !shouldRecoverName && !shouldRecoverFixtureId) continue;
 
@@ -2856,7 +3114,9 @@ const OWNERSHIP_TRACKED_COLLECTION_KEYS = Object.freeze([
 	'microCycles',
 	'attendance',
 	'tests',
+	'competitions',
 	'fixtures',
+	'groups',
 	'seasons',
 	'trainingPlannerWeeks',
 	'conflictResolutions',
@@ -2871,16 +3131,17 @@ function toRowId(value) {
 	return normalized;
 }
 
-function buildExistingDbRowIdIndex(dbShape) {
+function buildExistingDbRowIndex(dbShape) {
+	// ATHLYRAX_SERVER_AUTHORITATIVE_OWNERSHIP_METADATA
 	const index = new Map();
 	for (const key of OWNERSHIP_TRACKED_COLLECTION_KEYS) {
 		const rows = Array.isArray(dbShape?.[key]) ? dbShape[key] : [];
-		const rowIds = new Set();
+		const rowIndex = new Map();
 		for (const row of rows) {
 			const rowId = toRowId(row?.id);
-			if (rowId) rowIds.add(rowId);
+			if (rowId && !rowIndex.has(rowId)) rowIndex.set(rowId, row);
 		}
-		index.set(key, rowIds);
+		index.set(key, rowIndex);
 	}
 	return index;
 }
@@ -2919,7 +3180,7 @@ const TOMBSTONE_TRACKED_COLLECTION_KEYS = Object.freeze([
 	'trainingPlannerWeeks',
 ]);
 
-const TOMBSTONE_MAX_ENTRIES = 5000;
+const TOMBSTONE_MAX_ENTRIES = Number.POSITIVE_INFINITY;
 
 function parseIsoMs(value) {
 	if (!value) return NaN;
@@ -2997,13 +3258,9 @@ function applyTombstonesToDbShape(dbShape, tombstoneLookup) {
 			if (!rowId) { kept.push(row); continue; }
 			const tombstoneMs = tombstonesForCollection.get(rowId);
 			if (!Number.isFinite(tombstoneMs)) { kept.push(row); continue; }
-			const rowMs = rowLastMutatedMs(row);
-			if (rowMs > tombstoneMs) {
-				// Row legitimately re-created after the tombstone. Keep it and retire the tombstone.
-				kept.push(row);
-				tombstonesForCollection.delete(rowId);
-				continue;
-			}
+			// Tombstoned physical ids are permanent. A stale client can rewrite
+			// updatedAt while carrying old data, so timestamps are not proof of a
+			// legitimate recreate. Intentional recreation must use a fresh id.
 			blockedResurrections.push({ collection, id: rowId });
 		}
 		if (kept.length !== rows.length) next[collection] = kept;
@@ -3387,28 +3644,37 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 		);
 	}
 
+	// ATHLYRAX_SCHEDULE_SUPPRESSION_BLOCK_OWNER_INTEGRITY_V1
 	const sourceBlocks = Array.isArray(next.trainingSetBlocks) ? next.trainingSetBlocks : [];
 	if (sourceBlocks.length > 0 && (blockedSessionIds.size > 0 || blockedSetIds.size > 0)) {
-		next.trainingSetBlocks = sourceBlocks
-			.map((block) => {
-				const arraySetIds = Array.isArray(block?.setIds) ? block.setIds.map(toRowId).filter(Boolean) : [];
-				const singularSetId = toRowId(block?.setId);
-				const allSetIds = scheduleOccurrenceUnique([...arraySetIds, singularSetId]);
-				const remainingSetIds = allSetIds.filter((id) => !blockedSetIds.has(id));
-				if (remainingSetIds.length === allSetIds.length) return block;
-				return {
-					...block,
-					setIds: remainingSetIds,
-					...(singularSetId && blockedSetIds.has(singularSetId) ? { setId: '' } : {}),
-				};
-			})
-			.filter((block) => {
-				const sessionId = toRowId(block?.sessionId || block?.trainingSessionId);
-				if (!blockedSessionIds.has(sessionId)) return true;
-				const arraySetIds = Array.isArray(block?.setIds) ? block.setIds.map(toRowId).filter(Boolean) : [];
-				const remainingSetIds = scheduleOccurrenceUnique([...arraySetIds, toRowId(block?.setId)]);
-				return remainingSetIds.length > 0;
-			});
+		const setSessionById = new Map(
+			sourceSets
+				.map((row) => [toRowId(row?.id), toRowId(row?.sessionId || row?.trainingSessionId)])
+				.filter(([setId]) => Boolean(setId)),
+		);
+		next.trainingSetBlocks = sourceBlocks.flatMap((blockRow) => {
+			const arraySetIds = Array.isArray(blockRow?.setIds) ? blockRow.setIds.map(toRowId).filter(Boolean) : [];
+			const singularSetId = toRowId(blockRow?.setId);
+			const allSetIds = scheduleOccurrenceUnique([...arraySetIds, singularSetId]);
+			const remainingSetIds = allSetIds.filter((id) => !blockedSetIds.has(id));
+			const ownerSessionId = toRowId(blockRow?.sessionId || blockRow?.trainingSessionId);
+			const ownerDeleted = Boolean(ownerSessionId && blockedSessionIds.has(ownerSessionId));
+			if (ownerDeleted && remainingSetIds.length === 0) return [];
+			if (!ownerDeleted && remainingSetIds.length === allSetIds.length) return [blockRow];
+			const remainingOwnerIds = scheduleOccurrenceUnique(
+				remainingSetIds
+					.map((setId) => setSessionById.get(setId) || '')
+					.filter((sessionId) => sessionId && !blockedSessionIds.has(sessionId)),
+			);
+			const reassignedSessionId = ownerDeleted && remainingOwnerIds.length === 1 ? remainingOwnerIds[0] : '';
+			return [{
+				...blockRow,
+				setIds: remainingSetIds,
+				...(singularSetId && blockedSetIds.has(singularSetId) ? { setId: '' } : {}),
+				...(ownerDeleted && Object.prototype.hasOwnProperty.call(blockRow, 'sessionId') ? { sessionId: reassignedSessionId } : {}),
+				...(ownerDeleted && Object.prototype.hasOwnProperty.call(blockRow, 'trainingSessionId') ? { trainingSessionId: reassignedSessionId } : {}),
+			}];
+		});
 	}
 
 	if (Array.isArray(next.attendance)) {
@@ -3426,24 +3692,27 @@ function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 	const actorTenantId = String(resolveAuthTenantId(auth) || '').trim().toLowerCase();
 	const nowIsoValue = new Date().toISOString();
 	const nextShape = dbShape && typeof dbShape === 'object' ? { ...dbShape } : {};
-	const existingRowIdIndex = buildExistingDbRowIdIndex(existingDbShape);
+	const existingRowIndex = buildExistingDbRowIndex(existingDbShape);
 
 	for (const key of OWNERSHIP_TRACKED_COLLECTION_KEYS) {
 		const rows = Array.isArray(nextShape?.[key]) ? nextShape[key] : null;
 		if (!rows) continue;
-		const existingIds = existingRowIdIndex.get(key) || new Set();
+		const persistedRows = existingRowIndex.get(key) || new Map();
 		nextShape[key] = rows.map((row) => {
 			if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
 			const rowId = toRowId(row?.id);
-			const isExistingRow = Boolean(rowId && existingIds.has(rowId));
-			const existingCreatedBy = String(row?.createdByUserId || '').trim().toLowerCase();
-			const createdByUserId = existingCreatedBy
-				|| (isExistingRow ? 'legacy-unattributed' : actorUsername);
+			const persistedRow = rowId ? persistedRows.get(rowId) : null;
+			const isExistingRow = Boolean(persistedRow);
+			const persistedCreatedBy = String(persistedRow?.createdByUserId || '').trim().toLowerCase();
+			const incomingCreatedBy = String(row?.createdByUserId || '').trim().toLowerCase();
+			const createdByUserId = isExistingRow
+				? (persistedCreatedBy || 'legacy-unattributed')
+				: (incomingCreatedBy || actorUsername);
 			const attributionStatus = createdByUserId === 'legacy-unattributed' ? 'unattributed-legacy' : 'attributed';
 			return {
 				...row,
 				createdByUserId,
-				createdAt: String(row?.createdAt || nowIsoValue).trim() || nowIsoValue,
+				createdAt: String((isExistingRow ? persistedRow?.createdAt : row?.createdAt) || nowIsoValue).trim() || nowIsoValue,
 				updatedByUserId: actorUsername,
 				updatedAt: nowIsoValue,
 				tenantId: actorTenantId,
@@ -3543,7 +3812,7 @@ app.use((req, res, next) => {
 	}
 
 	res.setHeader('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-	res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token');
+	res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-AthlyraX-Tenant, X-AthlyraX-Tenant-Reason');
 	if (req.method === 'OPTIONS') {
 		res.status(204).end();
 		return;
@@ -3564,6 +3833,7 @@ app.get('/auth/config', (req, res) => {
 		bearerCompatEnabled: AUTH_ALLOW_BEARER_COMPAT && !IS_PRODUCTION,
 		csrfHeaderName: AUTH_CSRF_HEADER_NAME,
 		assetId: BACKEND_ASSET_ID,
+		releaseMarker: 'ATHLYRAX_DEMO_RECOVERY_RELEASE_2026_08_08_V1',
 	});
 });
 
@@ -3664,17 +3934,17 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 			target: username,
 			reason: 'password_too_short',
 		});
-		res.status(400).json({ error: 'Password must be at least 8 characters.' });
+		res.status(400).json({ error: 'Password must be at least 10 characters.' });
 		return;
 	}
 
 	const uniqueBase = String(username || 'coach').slice(0, 24) || 'coach';
 	let suffix = 0;
-	while (authUsers.some((row) => row.username === username) && suffix < 1000) {
+	while (authUsers.some((row) => String(row?.username || '').trim().toLowerCase() === username.toLowerCase()) && suffix < 1000) {
 		suffix += 1;
 		username = `${uniqueBase}-${suffix}`.slice(0, 32);
 	}
-	if (authUsers.some((row) => row.username === username)) {
+	if (authUsers.some((row) => String(row?.username || '').trim().toLowerCase() === username.toLowerCase())) {
 		res.status(500).json({ error: 'Could not allocate a unique username. Try again.' });
 		return;
 	}
@@ -3726,6 +3996,40 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 			res.status(409).json({ error: 'This team already exists. Ask an admin for an invite code.' });
 			return;
 		}
+
+		// ATHLYRAX_ORPHAN_TENANT_CLAIM_BLOCKED
+		const prospectiveTenantStorage = resolveStoragePathsForTenantKey(tenantId);
+		if (!tenantHasMembers && prospectiveTenantStorage.dbPath !== DB_PATH && fs.existsSync(prospectiveTenantStorage.dbPath)) {
+			appendAuthAuditEvent({
+				action: 'register_failed',
+				req,
+				status: 'blocked',
+				target: username,
+				reason: 'orphan_tenant_storage_requires_recovery',
+				details: { tenantId },
+			});
+			res.status(409).json({ error: 'Team storage already exists without an active membership. Automatic claiming is blocked; administrator recovery is required.' });
+			return;
+		}
+	}
+
+// ATHLYRAX_NEW_TENANT_DB_PROVISION
+	const registrationTenantStorage = resolveStoragePathsForTenantKey(tenantId);
+	const registrationTenantProvisioningToken = crypto.createHmac('sha256', AUTH_SECRET).update(path.resolve(registrationTenantStorage.dbPath)).digest('hex');
+	let registrationTenantDbCreated = false;
+	if (registrationTenantStorage.dbPath !== DB_PATH && !fs.existsSync(registrationTenantStorage.dbPath)) {
+		if (usableInvite) {
+			appendAuthAuditEvent({ action: 'register_blocked', req, status: 'blocked', target: username, reason: 'invited_tenant_database_missing', details: { tenantId } });
+			res.status(503).json({ error: 'Team data is temporarily unavailable. Registration was not completed.' });
+			return;
+		}
+		ensureStorageLayout(registrationTenantStorage);
+		const now = new Date().toISOString();
+		writeAtomicJsonFile(registrationTenantStorage.dbPath, {
+			__meta: { tenantId, createdAt: now, updatedAt: now, provisionedBy: 'auth-register', provisioningToken: registrationTenantProvisioningToken },
+			swimmers: [], squads: [], trainingSessions: [], trainingSessionSets: [], tests: [], attendance: [], fixtures: [], trainingPlannerWeeks: [],
+		});
+		registrationTenantDbCreated = true;
 	}
 
 	if (role === 'head-coach') {
@@ -3780,19 +4084,26 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 		setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
 		res.status(201).json({
 			ok: true,
-			token: session.token,
+			// // ATHLYRAX_PRODUCTION_AUTH_TOKEN_RESPONSE_REDACTED
+			...(IS_PRODUCTION ? {} : { token: session.token }),
 			csrfToken: session.csrf,
 			csrfHeaderName: AUTH_CSRF_HEADER_NAME,
 			user: buildAuthUserPayload({ username, role, onboardingCompletedAt: '', billing: getDefaultBillingState() }),
 		});
 	} catch (error) {
 		authUsers.pop();
+		if (usableInvite) usableInvite.usedCount = Math.max(0, Number(usableInvite.usedCount || 0) - 1);
+		let registrationRollbackFailed = false;
+		try { persistAuthUsers(); } catch (rollbackError) { registrationRollbackFailed = true; console.error('[auth] Registration auth rollback failed:', rollbackError instanceof Error ? rollbackError.message : rollbackError); }
 		if (usableInvite) {
-			usableInvite.usedCount = Math.max(0, Number(usableInvite.usedCount || 0) - 1);
+			try { persistAuthInvites(); } catch (rollbackError) { registrationRollbackFailed = true; console.error('[auth] Registration invite rollback failed:', rollbackError instanceof Error ? rollbackError.message : rollbackError); }
+		}
+		if (!registrationRollbackFailed && registrationTenantDbCreated && registrationTenantStorage.dbPath !== DB_PATH && fs.existsSync(registrationTenantStorage.dbPath)) {
+			try { fs.unlinkSync(registrationTenantStorage.dbPath); } catch (rollbackError) { registrationRollbackFailed = true; console.error('[auth] Registration tenant rollback failed:', rollbackError instanceof Error ? rollbackError.message : rollbackError); }
 		}
 		res.status(500).json({
-			error: 'Could not create account.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			error: registrationRollbackFailed ? 'Could not create account and automatic rollback requires administrator recovery.' : 'Could not create account.',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -3858,7 +4169,13 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 	}
 
 	const canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[String(user?.username || '').trim().toLowerCase()];
-	if (canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {
+// ATHLYRAX_PRODUCTION_LOGIN_READ_ONLY
+	if (IS_PRODUCTION && canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {
+		appendAuthAuditEvent({ action: 'login_blocked', req, status: 'blocked', target: user.username, reason: 'canonical_tenant_mismatch' });
+		res.status(503).json({ error: 'Account tenant configuration is invalid. Login was blocked without modifying stored data.' });
+		return;
+	}
+	if (!IS_PRODUCTION && canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {
 		const userIndex = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === String(user?.username || '').trim().toLowerCase());
 		if (userIndex >= 0) {
 			authUsers[userIndex] = {
@@ -3874,7 +4191,7 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		}
 	}
 
-	if (AUTH_AUTO_HEAL_SWIMMER_BINDINGS && String(user?.role || '').trim().toLowerCase() === 'swimmer') {
+	if (!IS_PRODUCTION && AUTH_AUTO_HEAL_SWIMMER_BINDINGS && String(user?.role || '').trim().toLowerCase() === 'swimmer') {
 		try {
 			ensureSwimmerAccountBindingInStorage(user);
 		} catch {
@@ -3903,7 +4220,7 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		},
 	});
 	res.status(200).json({
-		token: session.token,
+		...(IS_PRODUCTION ? {} : { token: session.token }),
 		csrfToken: session.csrf,
 		csrfHeaderName: AUTH_CSRF_HEADER_NAME,
 		user: buildAuthUserPayload(effectiveLoginUser),
@@ -3917,7 +4234,8 @@ app.post('/auth/password-reset/request', requireLoginRateLimit, async (req, res)
 		return;
 	}
 
-	const user = findAuthUserByIdentifier(identifier);
+	// ATHLYRAX_AUTH_IDENTIFIER_AMBIGUITY_SAFE
+	const { user } = resolveLoginUserByIdentifier(identifier);
 	if (!user) {
 		appendAuthAuditEvent({
 			action: 'password_reset_request',
@@ -3967,7 +4285,8 @@ app.post('/auth/password-reset/request', requireLoginRateLimit, async (req, res)
 			reason: 'delivery_failed',
 			details: { message: error instanceof Error ? error.message : 'Unknown delivery error' },
 		});
-		res.status(500).json({ error: 'Could not issue reset code. Please contact your administrator.' });
+		// ATHLYRAX_PASSWORD_RESET_REQUEST_GENERIC_FAILURE_RESPONSE
+		res.status(200).json({ ok: true, message: 'If an account exists, a reset code has been issued.' });
 	}
 });
 
@@ -3981,8 +4300,8 @@ app.post('/auth/password-reset/confirm', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	if (nextPassword.length < 8) {
-		res.status(400).json({ error: 'Password must be at least 8 characters.' });
+	if (nextPassword.length < 10) {
+		res.status(400).json({ error: 'Password must be at least 10 characters.' });
 		return;
 	}
 
@@ -4001,7 +4320,7 @@ app.post('/auth/password-reset/confirm', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	if (hashPasswordResetCode(resetCode) !== String(resetEntry.codeHash || '')) {
+	if (!safeEqualText(hashPasswordResetCode(resetCode), String(resetEntry.codeHash || ''))) {
 		appendAuthAuditEvent({
 			action: 'password_reset_confirm',
 			req,
@@ -4016,7 +4335,8 @@ app.post('/auth/password-reset/confirm', requireLoginRateLimit, (req, res) => {
 	const index = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === userKey);
 	if (index < 0) {
 		authPasswordResetByUser.delete(userKey);
-		res.status(404).json({ error: 'User not found.' });
+		// ATHLYRAX_PASSWORD_RESET_CONFIRM_GENERIC_UNKNOWN_ACCOUNT
+		res.status(400).json({ error: 'Reset code is invalid or expired.' });
 		return;
 	}
 
@@ -4041,7 +4361,7 @@ app.post('/auth/password-reset/confirm', requireLoginRateLimit, (req, res) => {
 		authUsers[index] = previous;
 		res.status(500).json({
 			error: 'Could not update password.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4064,6 +4384,8 @@ app.get('/auth/me', (req, res) => {
 	res.status(200).json({
 		authRequired: true,
 		authenticated: true,
+		csrfToken: String(req.auth?.csrf || ''),
+		csrfHeaderName: AUTH_CSRF_HEADER_NAME,
 		user: {
 			...buildAuthUserPayload(findAuthUser(req.auth.username) || req.auth),
 			expiresAt: req.auth.exp,
@@ -4173,9 +4495,43 @@ app.put('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (req, r
 		return;
 	}
 
-	const normalized = normalizeBillingCatalog(payload);
+	// ATHLYRAX_BILLING_CATALOG_PARTIAL_UPDATE_PRESERVES_STATE
+	const payloadHasPlans = Object.prototype.hasOwnProperty.call(payload, 'plans');
+	const payloadHasAddons = Object.prototype.hasOwnProperty.call(payload, 'addons');
+	const payloadHasSettings = payload?.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings);
+	if (payloadHasPlans && (!Array.isArray(payload.plans) || payload.plans.length < 1)) {
+		res.status(400).json({ error: 'At least one billing plan is required.' });
+		return;
+	}
+	if (payloadHasAddons && !Array.isArray(payload.addons)) {
+		res.status(400).json({ error: 'Billing addons must be an array.' });
+		return;
+	}
+	const normalized = normalizeBillingCatalog({
+		...billingCatalog,
+		...payload,
+		currency: Object.prototype.hasOwnProperty.call(payload, 'currency') ? payload.currency : billingCatalog?.currency,
+		plans: payloadHasPlans ? payload.plans : getBillingPlansCatalog(),
+		addons: payloadHasAddons ? payload.addons : (Array.isArray(billingCatalog?.addons) ? billingCatalog.addons : []),
+		settings: payloadHasSettings ? { ...getBillingPolicy(), ...payload.settings } : getBillingPolicy(),
+	});
 	if (!Array.isArray(normalized?.plans) || normalized.plans.length < 1) {
 		res.status(400).json({ error: 'At least one billing plan is required.' });
+		return;
+	}
+	const planKeys = normalized.plans.map((plan) => String(plan?.key || '').trim());
+	if (new Set(planKeys).size !== planKeys.length) {
+		res.status(400).json({ error: 'Billing plan keys must be unique.' });
+		return;
+	}
+	const configuredPriceIds = normalized.plans.map((plan) => String(plan?.stripePriceId || '').trim()).filter(Boolean);
+	if (new Set(configuredPriceIds).size !== configuredPriceIds.length) {
+		res.status(400).json({ error: 'Each configured Stripe price ID may belong to only one billing plan.' });
+		return;
+	}
+	const addonKeys = (Array.isArray(normalized?.addons) ? normalized.addons : []).map((addon) => String(addon?.key || '').trim()).filter(Boolean);
+	if (new Set(addonKeys).size !== addonKeys.length) {
+		res.status(400).json({ error: 'Billing addon keys must be unique.' });
 		return;
 	}
 
@@ -4196,6 +4552,7 @@ app.put('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (req, r
 			: {}),
 	};
 
+	const previousBillingCatalog = billingCatalog;
 	billingCatalog = {
 		version: Number(billingCatalog?.version || 1) + 1,
 		currency: String(normalized?.currency || 'GBP').toUpperCase(),
@@ -4203,7 +4560,14 @@ app.put('/billing/catalog', requireStrictAuth, requireSoftwareOwnerRole, (req, r
 		plans: normalized.plans,
 		addons: Array.isArray(normalized?.addons) ? normalized.addons : [],
 	};
-	persistBillingCatalog();
+	try {
+		// ATHLYRAX_BILLING_CATALOG_MEMORY_ROLLBACK
+		persistBillingCatalog();
+	} catch (error) {
+		billingCatalog = previousBillingCatalog;
+		res.status(500).json({ error: 'Could not persist billing catalog.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
+		return;
+	}
 
 	res.status(200).json({
 		ok: true,
@@ -4235,6 +4599,11 @@ app.get('/billing/subscription', requireStrictAuth, (req, res) => {
 });
 
 app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
+	// ATHLYRAX_BILLING_CHECKOUT_POLICY_ENFORCED
+	if (!getBillingPolicy().checkoutEnabled) {
+		res.status(403).json({ error: 'Subscription checkout is currently disabled.' });
+		return;
+	}
 	if (!stripeClient) {
 		res.status(503).json({ error: 'Stripe is not configured on backend.' });
 		return;
@@ -4315,7 +4684,7 @@ app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
 			url: String(checkoutSession?.url || '').trim(),
 		});
 	} catch (error) {
-		res.status(500).json({ error: 'Could not create checkout session.', details: error instanceof Error ? error.message : 'Unknown error' });
+		res.status(500).json({ error: 'Could not create checkout session.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
 	}
 });
 
@@ -4349,7 +4718,7 @@ app.post('/billing/portal-session', requireStrictAuth, async (req, res) => {
 		});
 		res.status(200).json({ ok: true, url: String(session?.url || '').trim() });
 	} catch (error) {
-		res.status(500).json({ error: 'Could not create billing portal session.', details: error instanceof Error ? error.message : 'Unknown error' });
+		res.status(500).json({ error: 'Could not create billing portal session.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
 	}
 });
 
@@ -4371,6 +4740,13 @@ app.post('/auth/onboarding/complete', requireStrictAuth, (req, res) => {
 		res.status(400).json({ error: 'Enter a valid email address.' });
 		return;
 	}
+	// ATHLYRAX_ONBOARDING_EMAIL_UNIQUE
+	const duplicateOnboardingEmail = authUsers.some((row) => String(row?.username || '').trim() !== username && String(row?.email || '').trim().toLowerCase() === email.toLowerCase());
+	if (duplicateOnboardingEmail) {
+		res.status(409).json({ error: 'Email is already registered.' });
+		return;
+	}
+
 
 	const index = authUsers.findIndex((row) => String(row?.username || '').trim() === username);
 	if (index < 0) {
@@ -4404,7 +4780,7 @@ app.post('/auth/onboarding/complete', requireStrictAuth, (req, res) => {
 		authUsers[index] = previous;
 		res.status(500).json({
 			error: 'Could not save onboarding details.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4413,33 +4789,34 @@ app.post('/auth/logout', requireStrictAuth, (req, res) => {
 	const username = String(req.auth?.username || '').trim();
 	const index = authUsers.findIndex((row) => String(row?.username || '').trim() === username);
 	if (index < 0) {
-		res.status(401).json({ error: 'Authentication required.' });
+		clearAuthCookies(res);
+		res.status(200).json({ ok: true, alreadySignedOut: true });
 		return;
 	}
 
-	const previous = authUsers[index];
+	// Revoke the current account's existing tokens immediately in memory. Persistence is
+	// best-effort: a read-only/degraded auth store must never trap a user inside a session.
 	authUsers[index] = {
-		...previous,
+		...authUsers[index],
 		tokenValidAfter: getNowEpochSeconds() + 1,
 	};
-
+	let revocationPersisted = true;
 	try {
 		persistAuthUsers();
-		clearAuthCookies(res);
-		appendAuthAuditEvent({
-			action: 'logout',
-			req,
-			status: 'success',
-			target: username,
-		});
-		res.status(200).json({ ok: true });
-	} catch (error) {
-		authUsers[index] = previous;
-		res.status(500).json({
-			error: 'Could not complete logout.',
-			details: error instanceof Error ? error.message : 'Unknown error',
-		});
+	} catch {
+		revocationPersisted = false;
 	}
+
+	clearAuthCookies(res);
+	authPresenceByUser.delete(username);
+	appendAuthAuditEvent({
+		action: 'logout',
+		req,
+		status: 'success',
+		target: username,
+		details: { revocationPersisted },
+	});
+	res.status(200).json({ ok: true, revocationPersisted });
 });
 
 app.get('/auth/audit/events', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
@@ -4493,6 +4870,24 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	const inviteTenantId = actorIsPrimaryOwner
 		? (normalizeTenantId(req.body?.tenantId) || resolveTenantKeyFromUser({ swimClub: inviteSwimClub, teamName: inviteTeamName }))
 		: resolveTenantKeyFromUser(actor);
+	// ATHLYRAX_INVITE_REQUIRES_EXISTING_TENANT
+	const rawInviteTenantId = String(req.body?.tenantId || '').trim();
+	if (actorIsPrimaryOwner && rawInviteTenantId && (rawInviteTenantId !== normalizeTenantId(rawInviteTenantId) || !/^[a-z0-9_-]+$/.test(rawInviteTenantId))) {
+		res.status(400).json({ error: 'tenantId must already be a canonical lowercase tenant ID.' });
+		return;
+	}
+	// ATHLYRAX_INVITE_GLOBAL_OWNER_FORBIDDEN
+	if (inviteTenantId === 'global-owner') {
+		res.status(400).json({ error: 'Coach/viewer invites must be bound to an existing club tenant, not global-owner.' });
+		return;
+	}
+	if (inviteTenantId) {
+		const inviteTenantStorage = resolveStoragePathsForTenantKey(inviteTenantId);
+		if (!fs.existsSync(inviteTenantStorage.dbPath)) {
+			res.status(409).json({ error: 'Cannot create an invite for a tenant whose database does not exist.', tenantId: inviteTenantId });
+			return;
+		}
+	}
 	if (role === 'head-coach') {
 		const sessionCoordinatorCapacityError = getSessionCoordinatorCapacityError(inviteTenantId, { includePendingInvites: true });
 		if (sessionCoordinatorCapacityError) {
@@ -4510,6 +4905,11 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	for (let attempt = 0; attempt < 4; attempt += 1) {
 		if (!authInvites.some((row) => String(row?.code || '').trim().toUpperCase() === code)) break;
 		code = makeInviteCode();
+	}
+	// ATHLYRAX_INVITE_CODE_UNIQUENESS_FAIL_CLOSED
+	if (authInvites.some((row) => String(row?.code || '').trim().toUpperCase() === code)) {
+		res.status(503).json({ error: 'Could not allocate a unique invite code. Try again.' });
+		return;
 	}
 
 	const createdAt = new Date();
@@ -4554,7 +4954,7 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 		authInvites.pop();
 		res.status(500).json({
 			error: 'Could not create invite.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4597,12 +4997,47 @@ app.post('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLim
 		}
 	}
 
+	// ATHLYRAX_ADMIN_USER_REQUIRES_EXISTING_TENANT
+	const rawRequestedAdminTenantId = String(req.body?.tenantId || '').trim();
+	if (rawRequestedAdminTenantId && (rawRequestedAdminTenantId !== normalizeTenantId(rawRequestedAdminTenantId) || !/^[a-z0-9_-]+$/.test(rawRequestedAdminTenantId))) {
+		res.status(400).json({ error: 'tenantId must already be a canonical lowercase tenant ID.' });
+		return;
+	}
+	if (!AUTH_USERNAME_PATTERN.test(username)) {
+		res.status(400).json({ error: 'Username must be 3-32 chars and only use letters, numbers, dot, underscore, or dash.' });
+		return;
+	}
+	if (String(password).length < 8) {
+		res.status(400).json({ error: 'Password must be at least 10 characters.' });
+		return;
+	}
+	if (!['software-owner', 'head-coach', 'assistant-coach', 'viewer', 'swimmer'].includes(role)) {
+		res.status(400).json({ error: 'Role is not allowed.' });
+		return;
+	}
+	// ATHLYRAX_GLOBAL_OWNER_ROLE_TENANT_CONTRACT
+	if (tenantId === 'global-owner' && role !== 'software-owner') {
+		res.status(400).json({ error: 'Non-software-owner accounts must be bound to an existing tenant database.' });
+		return;
+	}
+	if (role === 'software-owner' && tenantId !== 'global-owner' && actorIsPrimaryOwner) {
+		res.status(400).json({ error: 'Software-owner accounts created by the primary owner must use the global-owner scope.' });
+		return;
+	}
+	if (tenantId && tenantId !== 'global-owner') {
+		const adminTenantStorage = resolveStoragePathsForTenantKey(tenantId);
+		if (!fs.existsSync(adminTenantStorage.dbPath)) {
+			res.status(409).json({ error: 'Cannot create a user for a tenant whose database does not exist. Provision the tenant through the guarded registration flow first.', tenantId });
+			return;
+		}
+	}
+
 	if (!username || !password) {
 		res.status(400).json({ error: 'Username and password are required.' });
 		return;
 	}
 
-	if (authUsers.some((row) => row.username === username)) {
+	if (authUsers.some((row) => String(row?.username || '').trim().toLowerCase() === username.toLowerCase())) {
 		res.status(409).json({ error: 'User already exists.' });
 		return;
 	}
@@ -4637,7 +5072,7 @@ app.post('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLim
 		authUsers.pop();
 		res.status(500).json({
 			error: 'Could not persist auth user.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4649,6 +5084,12 @@ app.put('/auth/users/:username/password', requireStrictAuth, requireAdminRole, r
 		res.status(400).json({ error: 'Username and password are required.' });
 		return;
 	}
+	// ATHLYRAX_ADMIN_PASSWORD_MINIMUM
+	if (nextPassword.length < 10) {
+		res.status(400).json({ error: 'Password must be at least 10 characters.' });
+		return;
+	}
+
 
 	const index = authUsers.findIndex((row) => row.username === targetUsername);
 	if (index < 0) {
@@ -4680,7 +5121,7 @@ app.put('/auth/users/:username/password', requireStrictAuth, requireAdminRole, r
 		authUsers[index] = previous;
 		res.status(500).json({
 			error: 'Could not update password.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4692,12 +5133,30 @@ app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requi
 		res.status(400).json({ error: 'Username and role are required.' });
 		return;
 	}
+	// ATHLYRAX_ROLE_VALUE_ALLOWLIST
+	if (!['software-owner', 'head-coach', 'assistant-coach', 'viewer', 'swimmer'].includes(nextRole)) {
+		res.status(400).json({ error: 'Role is not allowed.' });
+		return;
+	}
 
+
+	// ATHLYRAX_PRIMARY_OWNER_ROLE_IMMUTABLE
+	if (targetUsername.toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME && nextRole !== 'software-owner') {
+		res.status(409).json({ error: 'The configured primary software-owner role cannot be changed.' });
+		return;
+	}
 	const index = authUsers.findIndex((row) => row.username === targetUsername);
 	if (index < 0) {
 		res.status(404).json({ error: 'User not found.' });
 		return;
 	}
+	// ATHLYRAX_ROLE_TENANT_COMPATIBILITY
+	const roleTargetTenant = resolveAuthTenantId(authUsers[index]);
+	if (roleTargetTenant === 'global-owner' && nextRole !== 'software-owner') {
+		res.status(409).json({ error: 'A global-owner account cannot be changed to a tenant-bound role without an explicit tenant reassignment workflow.' });
+		return;
+	}
+
 	if (!canAdminManageUser(req.auth, authUsers[index])) {
 		res.status(403).json({ error: 'Tenant scope does not allow managing this user.' });
 		return;
@@ -4739,7 +5198,7 @@ app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requi
 		authUsers[index] = previous;
 		res.status(500).json({
 			error: 'Could not update role.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4752,6 +5211,11 @@ app.put('/auth/users/:username/approval', requireStrictAuth, requireAdminRole, r
 		return;
 	}
 
+	// ATHLYRAX_PRIMARY_OWNER_APPROVAL_IMMUTABLE
+	if (targetUsername.toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME && !approved) {
+		res.status(409).json({ error: 'The configured primary software-owner account cannot be unapproved.' });
+		return;
+	}
 	const index = authUsers.findIndex((row) => row.username === targetUsername);
 	if (index < 0) {
 		res.status(404).json({ error: 'User not found.' });
@@ -4782,7 +5246,7 @@ app.put('/auth/users/:username/approval', requireStrictAuth, requireAdminRole, r
 		authUsers[index] = previous;
 		res.status(500).json({
 			error: 'Could not update approval state.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4810,6 +5274,30 @@ app.delete('/auth/users/:username', requireStrictAuth, requireAdminRole, require
 		return;
 	}
 
+	// ATHLYRAX_LAST_TENANT_ACCOUNT_DELETE_BLOCKED
+	const targetTenantId = resolveAuthTenantId(authUsers[index]);
+	const tenantIsSharedSnapshot = targetTenantId === 'snapshot-public';
+	const tenantIsGlobalOwner = targetTenantId === 'global-owner';
+	if (targetTenantId && !tenantIsSharedSnapshot && !tenantIsGlobalOwner) {
+		const remainingTenantUsers = authUsers.filter((row, rowIndex) => rowIndex !== index && resolveAuthTenantId(row) === targetTenantId);
+		const tenantStorage = resolveStoragePathsForTenantKey(targetTenantId);
+		if (remainingTenantUsers.length === 0 && tenantStorage.dbPath !== DB_PATH && fs.existsSync(tenantStorage.dbPath)) {
+			appendAuthAuditEvent({
+				action: 'user_delete_blocked',
+				req,
+				status: 'blocked',
+				target: targetUsername,
+				reason: 'last_tenant_account_with_data',
+				details: { tenantId: targetTenantId },
+			});
+			res.status(409).json({
+				error: 'Cannot delete the last account for a tenant while its database still exists. Reassign or explicitly archive the tenant data first.',
+				tenantId: targetTenantId,
+			});
+			return;
+		}
+	}
+
 	const [removed] = authUsers.splice(index, 1);
 	try {
 		persistAuthUsers();
@@ -4824,7 +5312,7 @@ app.delete('/auth/users/:username', requireStrictAuth, requireAdminRole, require
 		authUsers.splice(index, 0, removed);
 		res.status(500).json({
 			error: 'Could not delete user.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4969,7 +5457,7 @@ app.post('/content/capability/score', requireAuth, (req, res) => {
 	} catch (error) {
 		res.status(500).json({
 			error: 'Could not compute capability scores.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -4990,8 +5478,8 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 			res.status(400).json({ error: 'Full name is required.' });
 			return;
 		}
-		if (password.length < 8) {
-			res.status(400).json({ error: 'Password must be at least 8 characters.' });
+		if (password.length < 10) {
+			res.status(400).json({ error: 'Password must be at least 10 characters.' });
 			return;
 		}
 
@@ -5047,29 +5535,35 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 		try {
 			persistAuthUsers();
 			const session = issueAuthToken({ username, role: 'swimmer' });
+			setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
 			res.status(201).json({
 				ok: true,
-				token: session.token,
+				// ATHLYRAX_SNAPSHOT_SIGNUP_NO_BEARER_TOKEN
+				csrfToken: session.csrf,
+				csrfHeaderName: AUTH_CSRF_HEADER_NAME,
 				user: buildAuthUserPayload(findAuthUser(username)),
 			});
 		} catch (error) {
 			authUsers.pop();
 			res.status(500).json({
 				error: 'Could not create snapshot account.',
-				details: error instanceof Error ? error.message : 'Unknown error',
+				...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 			});
 		}
 		return;
 	}
 
-	const user = findAuthUserByIdentifier(identifier);
+	// ATHLYRAX_SNAPSHOT_LOGIN_IDENTIFIER_AMBIGUITY_SAFE
+	const { user } = resolveLoginUserByIdentifier(identifier);
 	if (!user || !verifyPassword(password, user.passwordHash)) {
 		res.status(401).json({ error: 'Invalid credentials.' });
 		return;
 	}
 
 	const session = issueAuthToken(user);
-	res.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });
+	setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
+	// ATHLYRAX_SNAPSHOT_COOKIE_SESSION_V1
+	res.status(200).json({ csrfToken: session.csrf, csrfHeaderName: AUTH_CSRF_HEADER_NAME, user: buildAuthUserPayload(user) });
 });
 
 app.post('/snapshot/account/password-reset/request', requireLoginRateLimit, async (req, res) => {
@@ -5079,7 +5573,8 @@ app.post('/snapshot/account/password-reset/request', requireLoginRateLimit, asyn
 		return;
 	}
 
-	const user = findAuthUserByIdentifier(identifier);
+	// ATHLYRAX_SNAPSHOT_AUTH_IDENTIFIER_AMBIGUITY_SAFE
+	const { user } = resolveLoginUserByIdentifier(identifier);
 	if (!user) {
 		res.status(200).json({ ok: true, message: 'If an account exists, a reset code has been issued.' });
 		return;
@@ -5107,10 +5602,16 @@ app.post('/snapshot/account/password-reset/request', requireLoginRateLimit, asyn
 		}
 		res.status(200).json(payload);
 	} catch (error) {
-		res.status(500).json({
-			error: 'Could not issue reset code. Please try again.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+		// ATHLYRAX_SNAPSHOT_PASSWORD_RESET_REQUEST_GENERIC_FAILURE_RESPONSE
+		appendAuthAuditEvent({
+			action: 'password_reset_delivery_failed',
+			req,
+			status: 'error',
+			target: String(user?.username || '').trim(),
+			reason: 'delivery_failed',
+			details: { message: error instanceof Error ? error.message : 'Unknown delivery error' },
 		});
+		res.status(200).json({ ok: true, message: 'If an account exists, a reset code has been issued.' });
 	}
 });
 
@@ -5123,14 +5624,16 @@ app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req
 		res.status(400).json({ error: 'Email/username, reset code, and new password are required.' });
 		return;
 	}
-	if (nextPassword.length < 8) {
-		res.status(400).json({ error: 'Password must be at least 8 characters.' });
+	if (nextPassword.length < 10) {
+		res.status(400).json({ error: 'Password must be at least 10 characters.' });
 		return;
 	}
 
-	const user = findAuthUserByIdentifier(identifier);
+	// ATHLYRAX_SNAPSHOT_RESET_CONFIRM_IDENTIFIER_AMBIGUITY_SAFE
+	const { user } = resolveLoginUserByIdentifier(identifier);
 	if (!user) {
-		res.status(404).json({ error: 'User not found.' });
+		// ATHLYRAX_PASSWORD_RESET_CONFIRM_GENERIC_UNKNOWN_ACCOUNT
+		res.status(400).json({ error: 'Reset code is invalid or expired.' });
 		return;
 	}
 
@@ -5142,7 +5645,7 @@ app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req
 		return;
 	}
 
-	if (hashPasswordResetCode(resetCode) !== String(resetEntry.codeHash || '')) {
+	if (!safeEqualText(hashPasswordResetCode(resetCode), String(resetEntry.codeHash || ''))) {
 		res.status(400).json({ error: 'Reset code is invalid or expired.' });
 		return;
 	}
@@ -5150,7 +5653,8 @@ app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req
 	const index = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === userKey);
 	if (index < 0) {
 		authPasswordResetByUser.delete(userKey);
-		res.status(404).json({ error: 'User not found.' });
+		// ATHLYRAX_PASSWORD_RESET_CONFIRM_GENERIC_UNKNOWN_ACCOUNT
+		res.status(400).json({ error: 'Reset code is invalid or expired.' });
 		return;
 	}
 
@@ -5169,7 +5673,7 @@ app.post('/snapshot/account/password-reset/confirm', requireLoginRateLimit, (req
 		authUsers[index] = previous;
 		res.status(500).json({
 			error: 'Could not update password.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -5242,9 +5746,7 @@ app.post('/snapshot/account', requireStrictAuth, (req, res) => {
 	};
 
 	snapshotSubmissions.unshift(submission);
-	if (snapshotSubmissions.length > 5000) {
-		snapshotSubmissions.length = 5000;
-	}
+	// ATHLYRAX_SNAPSHOT_HISTORY_NO_SILENT_TRUNCATION
 
 	try {
 		persistSnapshotSubmissions();
@@ -5261,7 +5763,7 @@ app.post('/snapshot/account', requireStrictAuth, (req, res) => {
 		snapshotSubmissions = snapshotSubmissions.filter((row) => String(row?.id || '') !== submission.id);
 		res.status(500).json({
 			error: 'Could not save snapshot submission.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -5348,7 +5850,7 @@ app.post('/snapshot/account/settings', requireStrictAuth, (req, res) => {
 			authUsers[index] = previous;
 			res.status(500).json({
 				error: 'Could not save snapshot settings.',
-				details: error instanceof Error ? error.message : 'Unknown error',
+				...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 			});
 			return;
 		}
@@ -5413,8 +5915,7 @@ function normalizeTargetHistoryRows(rows) {
 				notes: String(row?.notes || '').trim(),
 			};
 		})
-		.filter(Boolean)
-		.slice(0, 240);
+		.filter(Boolean);
 }
 
 function normalizeSwimmerPathway(value) {
@@ -5491,11 +5992,13 @@ function sanitizeSwimmerSyncPayload(sourcePayload = {}) {
 		}
 	}
 
+	// ATHLYRAX_PARENT_NOTIFICATION_ONLY
+	// Parent emails are optional notification destinations. They are not an
+	// approval authority and consent flags must not control coach-link state.
 	const age = ageFromDob(dob);
-	if (linkStatus === 'approved' && Number.isFinite(age) && age < 18) {
-		if (!parent1) issues.push('Under-18 approvals require parent email 1.');
-		if (!parent1Consent) issues.push('Under-18 approvals require parent 1 consent.');
-		if (parent2 && !parent2Consent) issues.push('Parent 2 consent is required when parent email 2 is provided.');
+	if (Number.isFinite(age) && age < 18) {
+		if (source?.parent1 && !parent1) issues.push('Parent email 1 is invalid.');
+		if (source?.parent2 && !parent2) issues.push('Parent email 2 is invalid.');
 	}
 
 	return {
@@ -5653,6 +6156,8 @@ function ensureSwimmerAccountBindingInStorage(authLike) {
 }
 
 function autoHealSwimmerBindingsAtStartup() {
+// ATHLYRAX_NO_PRODUCTION_STARTUP_AUTOHEAL
+	if (IS_PRODUCTION) return;
 	if (!AUTH_AUTO_HEAL_SWIMMER_BINDINGS) return;
 	const swimmerUsers = authUsers.filter((row) => String(row?.role || '').trim().toLowerCase() === 'swimmer');
 	if (swimmerUsers.length < 1) return;
@@ -5885,8 +6390,9 @@ app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req
 	nextDb.swimmers = swimmersRows;
 
 	try {
-		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
+		// ATHLYRAX_PREWRITE_DB_SNAPSHOT_ORDER
 		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
 		res.status(200).json({
 			ok: true,
 			swimmerId: String(swimmersRows[resolvedSwimmerIndex]?.id || ''),
@@ -5895,7 +6401,7 @@ app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req
 	} catch (error) {
 		res.status(500).json({
 			error: 'Could not save swimmer target profile.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
@@ -5903,16 +6409,26 @@ app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req
 app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, res) => {
 	const body = req.body && typeof req.body === 'object' ? req.body : {};
 	const swimmerPayload = body?.swimmer && typeof body.swimmer === 'object' ? body.swimmer : {};
-	const snapshots = Array.isArray(body?.snapshots) ? body.snapshots.slice(0, SWIMMER_SYNC_MAX_SNAPSHOTS) : [];
-	const history = Array.isArray(body?.history) ? body.history.slice(0, SWIMMER_SYNC_MAX_HISTORY_DAYS) : [];
-	const pbRows = Array.isArray(body?.pbRows) ? body.pbRows.slice(0, SWIMMER_SYNC_MAX_PB_ROWS) : [];
+	const snapshots = Array.isArray(body?.snapshots) ? body.snapshots : [];
+	const history = Array.isArray(body?.history) ? body.history : [];
+	const pbRows = Array.isArray(body?.pbRows) ? body.pbRows : [];
 	const pbSelectedSnapshotIds = Array.isArray(body?.pbSelectedSnapshotIds)
 		? body.pbSelectedSnapshotIds.map((id) => String(id || '').trim()).filter(Boolean)
 		: [];
 	const targetPreference = normalizeTargetPreference(body?.targetPreference);
 	const targetHistory = normalizeTargetHistoryRows(body?.targetHistory);
-	const customTestSets = Array.isArray(body?.customTestSets) ? body.customTestSets.slice(0, SWIMMER_SYNC_MAX_TEST_SETS) : [];
+	const customTestSets = Array.isArray(body?.customTestSets) ? body.customTestSets : [];
 	const ispProfile = body?.ispProfile && typeof body.ispProfile === 'object' ? body.ispProfile : null;
+	const oversizedSyncFields = [
+		['snapshots', snapshots.length, SWIMMER_SYNC_MAX_SNAPSHOTS],
+		['history', history.length, SWIMMER_SYNC_MAX_HISTORY_DAYS],
+		['pbRows', pbRows.length, SWIMMER_SYNC_MAX_PB_ROWS],
+		['customTestSets', customTestSets.length, SWIMMER_SYNC_MAX_TEST_SETS],
+	].filter(([, count, max]) => count > max);
+	if (oversizedSyncFields.length > 0) {
+		res.status(413).json({ error: 'Swimmer profile payload exceeds a storage safety limit. No data was changed.', fields: oversizedSyncFields.map(([field, count, max]) => ({ field, count, max })) });
+		return;
+	}
 	const sanitizedSync = sanitizeSwimmerSyncPayload(swimmerPayload);
 
 	if (sanitizedSync.issues.length) {
@@ -5977,6 +6493,11 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 		: {};
 	const previousCoachLinkStatus = String(existingRow?.coachLinkStatus || 'none').trim() || 'none';
 	const previousCoachConnected = Boolean(existingRow?.coachConnected);
+	// ATHLYRAX_SWIMMER_PROFILE_SYNC_COACH_LINK_NON_AUTHORITATIVE
+	// Coach-link lifecycle state is changed only by the dedicated request/decision/disconnect routes.
+	const serverCoachLinkApproved = previousCoachLinkStatus === 'approved';
+	const serverCoachLinkActive = previousCoachLinkStatus === 'pending' || serverCoachLinkApproved;
+	const nextCoachLinkStatus = previousCoachLinkStatus;
 
 	swimmersRows[swimmerIndex] = {
 		...existingRow,
@@ -5991,16 +6512,16 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 		mainEvent: sanitizedSync.payload.mainEvent || String(existingRow?.mainEvent || ''),
 		club: sanitizedSync.payload.club || String(existingRow?.club || ''),
 		squad: sanitizedSync.payload.squad || String(existingRow?.squad || ''),
-		pathway: sanitizedSync.payload.pathway,
-		coachConnected: sanitizedSync.payload.coachConnected,
-		coachLinkStatus: sanitizedSync.payload.coachLinkStatus,
-		coachEmail: sanitizedSync.payload.coachEmail || String(existingRow?.coachEmail || ''),
-		coachCode: sanitizedSync.payload.coachCode || String(existingRow?.coachCode || ''),
-		coachPhase: sanitizedSync.payload.coachPhase || String(existingRow?.coachPhase || ''),
-		coachRequestAt: sanitizedSync.payload.coachRequestAt || String(existingRow?.coachRequestAt || ''),
-		coachReplyAt: sanitizedSync.payload.coachReplyAt || String(existingRow?.coachReplyAt || ''),
-		coachApprovalAt: sanitizedSync.payload.coachApprovalAt || String(existingRow?.coachApprovalAt || ''),
-		shareMode: sanitizedSync.payload.shareMode || String(existingRow?.shareMode || ''),
+		pathway: serverCoachLinkActive ? 'club' : sanitizedSync.payload.pathway,
+		coachConnected: previousCoachConnected,
+		coachLinkStatus: nextCoachLinkStatus,
+		coachEmail: String(existingRow?.coachEmail || ''),
+		coachCode: String(existingRow?.coachCode || ''),
+		coachPhase: String(existingRow?.coachPhase || ''),
+		coachRequestAt: String(existingRow?.coachRequestAt || ''),
+		coachReplyAt: String(existingRow?.coachReplyAt || ''),
+		coachApprovalAt: String(existingRow?.coachApprovalAt || ''),
+		shareMode: String(existingRow?.shareMode || ''),
 		parent1: sanitizedSync.payload.parent1 || String(existingRow?.parent1 || ''),
 		parent2: sanitizedSync.payload.parent2 || String(existingRow?.parent2 || ''),
 		parent1Consent: sanitizedSync.payload.parent1Consent === true,
@@ -6020,8 +6541,9 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 	nextDb.swimmers = swimmersRows;
 
 	try {
-		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
+		// ATHLYRAX_PREWRITE_DB_SNAPSHOT_ORDER
 		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
 		appendAuthAuditEvent({
 			action: 'swimmer_profile_sync_saved',
 			req,
@@ -6055,130 +6577,552 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 		});
 		res.status(500).json({
 			error: 'Could not sync swimmer profile data.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
 
-app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (req, res) => {
-	const swimmerPayload = req.body && req.body.swimmer && typeof req.body.swimmer === 'object' ? req.body.swimmer : {};
-	const fullName = String(swimmerPayload?.name || swimmerPayload?.fullName || '').trim() || String(findAuthUser(String(req.auth?.username || '').trim())?.fullName || '').trim();
-	const splitName = splitFullName(fullName);
-	const email = String(swimmerPayload?.email || '').trim() || String(findAuthUser(String(req.auth?.username || '').trim())?.email || '').trim();
-	const authUsername = String(req.auth?.username || '').trim();
-	const authEmail = String(findAuthUser(authUsername)?.email || '').trim();
-	const swimmerId = String(swimmerPayload?.id || '').trim();
+// ATHLYRAX_COACH_LINK_WORKFLOW_V1
+function requireCoachLinkManagerRole(req, res, next) {
+	const role = String(req.auth?.role || '').trim().toLowerCase();
+	if (role === 'head-coach' || role === 'assistant-coach') {
+		next();
+		return;
+	}
+	res.status(403).json({ error: 'Coach account required for swimmer connection decisions.' });
+}
 
-	const storagePaths = resolveStoragePathsForAuth(req.auth);
-	ensureStorageLayout(storagePaths);
-	const dbShape = readJsonFile(storagePaths.dbPath);
-	const nextDb = dbShape && typeof dbShape === 'object' ? { ...dbShape } : {};
-	const swimmersRows = Array.isArray(nextDb.swimmers) ? nextDb.swimmers.slice() : [];
-
-	const swimmerIndex = resolveSwimmerRowIndex(swimmersRows, {
-		authUsername,
-		authEmail,
-		swimmerId,
-		email,
-		fullName,
-		firstName: splitName.firstName,
-		lastName: splitName.lastName,
-		strictAccountBinding: true,
+// ATHLYRAX_COACH_LINK_LIFECYCLE_V1
+function requireCoachLinkDecisionRole(req, res, next) {
+	const role = String(req.auth?.role || '').trim().toLowerCase();
+	if (role === 'head-coach') {
+		next();
+		return;
+	}
+	appendAuthAuditEvent({
+		action: 'unauthorized_access_blocked',
+		req,
+		status: 'blocked',
+		reason: 'head_coach_required_for_swimmer_membership_decision',
+		details: { role, path: req.path },
 	});
+	res.status(403).json({ error: 'Session Coordinator approval is required for swimmer membership decisions.' });
+}
 
-	if (swimmerIndex < 0) {
-		appendAuthAuditEvent({
-			action: 'swimmer_coach_disconnect_failed',
-			req,
-			status: 'error',
-			reason: 'swimmer_not_found',
-			details: {
-				authUsername,
-				swimmerId,
-			},
-		});
-		res.status(404).json({
-			error: 'Could not match swimmer record for disconnect action.',
-		});
+function readCoachLinkDbStrict(storagePaths, label) {
+	if (!storagePaths?.dbPath || !fs.existsSync(storagePaths.dbPath)) {
+		throw new Error(`${label} database is missing.`);
+	}
+	const parsed = readJsonFile(storagePaths.dbPath);
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		throw new Error(`${label} database is unreadable or invalid.`);
+	}
+	return parsed;
+}
+
+function findCoachAccountsByEmail(email) {
+	// ATHLYRAX_COACH_LINK_APPROVED_COACH_EMAIL_MATCHES_ONLY
+	const target = String(email || '').trim().toLowerCase();
+	if (!target) return [];
+	return authUsers.filter((row) => {
+		const role = String(row?.role || '').trim().toLowerCase();
+		if (role !== 'head-coach' && role !== 'assistant-coach') return false;
+		if (row?.isApproved === false) return false;
+		return String(row?.email || '').trim().toLowerCase() === target;
+	});
+}
+
+function findBoundSwimmerIndex(rows, username) {
+	const target = String(username || '').trim().toLowerCase();
+	if (!target) return -1;
+	return (Array.isArray(rows) ? rows : []).findIndex((row) => String(row?.swimmerAccountUsername || '').trim().toLowerCase() === target);
+}
+
+function buildCoachLinkRequestId() {
+	return `coach-link-${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+}
+
+app.post('/swimmer/coach/request', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const coachEmail = String(req.body?.coachEmail || req.body?.swimmer?.coachEmail || '').trim().toLowerCase();
+	if (!coachEmail || !AUTH_EMAIL_PATTERN.test(coachEmail)) {
+		res.status(400).json({ error: 'A valid registered coach email is required for AthlyraX coach connection.' });
+		return;
+	}
+	const swimmerUser = findAuthUser(String(req.auth?.username || '').trim());
+	const coachMatches = findCoachAccountsByEmail(coachEmail);
+	if (coachMatches.length > 1) {
+		res.status(409).json({ error: 'More than one approved coach account uses that email. Ask the coach for a unique account email before connecting.' });
+		return;
+	}
+	const coachUser = coachMatches[0] || null;
+	if (!swimmerUser || String(swimmerUser?.role || '').trim().toLowerCase() !== 'swimmer') {
+		res.status(404).json({ error: 'Swimmer account was not found.' });
+		return;
+	}
+	if (!coachUser) {
+		res.status(404).json({ error: 'No active AthlyraX coach account matches that email.' });
 		return;
 	}
 
-	const existingRow = swimmersRows[swimmerIndex] && typeof swimmersRows[swimmerIndex] === 'object'
-		? swimmersRows[swimmerIndex]
-		: {};
-	const existingHistory = normalizeTargetHistoryRows(existingRow?.targetHistory);
-	const disconnectedAt = new Date().toISOString();
-	const disconnectedHistory = [
-		{
-			id: `target-history-disconnect-${Date.now().toString(36)}`,
-			at: disconnectedAt,
-			action: 'Coach connection disconnected by swimmer',
-			mode: 'independent',
-			status: 'none',
-			event: '',
-			date: '',
-			notes: 'Swimmer ended coach data-sharing connection.',
-		},
-		...existingHistory,
-	].slice(0, 240);
-
-	const existingPreference = normalizeTargetPreference(existingRow?.targetPreference);
-
-	swimmersRows[swimmerIndex] = {
-		...existingRow,
-		coachConnected: false,
-		coachLinkStatus: 'none',
-		coachConnectionStatus: {
-			state: 'disconnected-by-swimmer',
-			disconnectedAt,
-			disconnectedBy: String(req.auth?.username || '').trim(),
-		},
-		targetPreference: {
-			...existingPreference,
-			mode: 'independent',
-			status: existingPreference.ignored ? 'ignored-by-swimmer' : 'none',
-			updatedAt: disconnectedAt,
-		},
-		targetHistory: disconnectedHistory,
-		targetHistoryUpdatedAt: disconnectedAt,
-	};
-
-	nextDb.swimmers = swimmersRows;
+	const sourceTenantId = resolveTenantKeyFromUser(swimmerUser);
+	const targetTenantId = resolveTenantKeyFromUser(coachUser);
+	// ATHLYRAX_COACH_LINK_DISTINCT_SOURCE_TARGET
+	if (sourceTenantId && targetTenantId && sourceTenantId === targetTenantId) {
+		res.status(409).json({ error: 'This swimmer account already belongs to the requested coach tenant. A cross-tenant connection request was not created.' });
+		return;
+	}
+	if (!sourceTenantId || !targetTenantId || targetTenantId === 'global-owner') {
+		res.status(409).json({ error: 'Coach connection tenant could not be resolved safely.' });
+		return;
+	}
+	const sourcePaths = resolveStoragePathsForTenantKey(sourceTenantId);
+	const targetPaths = resolveStoragePathsForTenantKey(targetTenantId);
 
 	try {
-		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
-		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		const sourceDb = readCoachLinkDbStrict(sourcePaths, 'Swimmer source');
+		const sourceRows = Array.isArray(sourceDb?.swimmers) ? sourceDb.swimmers : [];
+		const swimmerIndex = findBoundSwimmerIndex(sourceRows, swimmerUser.username);
+		if (swimmerIndex < 0) {
+			res.status(409).json({ error: 'Swimmer profile binding is missing. Connection request was not created.' });
+			return;
+		}
+
+		const targetDb = readCoachLinkDbStrict(targetPaths, 'Coach target');
+		const requests = Array.isArray(targetDb?.coachLinkRequests) ? targetDb.coachLinkRequests.slice() : [];
+		const sourceSwimmerRow = sourceRows[swimmerIndex] && typeof sourceRows[swimmerIndex] === 'object' ? sourceRows[swimmerIndex] : {};
+		const sourcePendingRequestId = String(sourceSwimmerRow?.coachLinkRequestId || '').trim();
+		const sourcePendingTarget = normalizeTenantId(sourceSwimmerRow?.coachTargetTenantId);
+		const sourceIsPending = String(sourceSwimmerRow?.coachLinkStatus || '').trim().toLowerCase() === 'pending';
+		if (sourceIsPending) {
+			const matchingPending = requests.find((row) =>
+				String(row?.id || '').trim() === sourcePendingRequestId
+				&& String(row?.status || '').trim().toLowerCase() === 'pending'
+				&& normalizeTenantId(row?.targetTenantId) === targetTenantId
+			);
+			if (matchingPending && sourcePendingTarget === targetTenantId) {
+				res.status(200).json({ ok: true, request: matchingPending, alreadyPending: true });
+				return;
+			}
+			res.status(409).json({ error: 'A different coach connection request is already pending. Cancel it before creating another.' });
+			return;
+		}
+		const existingPending = requests.find((row) =>
+			String(row?.swimmerUsername || '').trim().toLowerCase() === String(swimmerUser.username || '').trim().toLowerCase()
+			&& String(row?.status || '').trim().toLowerCase() === 'pending'
+		);
+		if (existingPending) {
+			res.status(409).json({ error: 'Coach tenant contains an orphan pending request for this swimmer. It must be resolved before a new request is created.' });
+			return;
+		}
+
+		const now = new Date().toISOString();
+		const requestRow = {
+			id: buildCoachLinkRequestId(),
+			status: 'pending',
+			requestedAt: now,
+			swimmerUsername: String(swimmerUser.username || '').trim(),
+			swimmerEmail: String(swimmerUser.email || '').trim(),
+			swimmerName: String(swimmerUser.fullName || sourceRows[swimmerIndex]?.name || '').trim(),
+			swimmerId: String(sourceRows[swimmerIndex]?.id || '').trim(),
+			sourceTenantId,
+			targetTenantId,
+			coachUsername: String(coachUser.username || '').trim(),
+			coachEmail: String(coachUser.email || '').trim(),
+		};
+
+		const nextTargetDb = { ...targetDb, coachLinkRequests: [...requests, requestRow] };
+		writeDbSnapshotIfPossible(targetPaths.dbPath, targetPaths.snapshotDir);
+		writeAtomicJsonFile(targetPaths.dbPath, nextTargetDb);
+
+		try {
+			const nextSourceDb = { ...sourceDb, swimmers: sourceRows.slice() };
+			nextSourceDb.swimmers[swimmerIndex] = {
+				...sourceRows[swimmerIndex],
+				pathway: 'club',
+				coachConnected: false,
+				coachLinkStatus: 'pending',
+				coachEmail: String(coachUser.email || '').trim(),
+				coachRequestAt: now,
+				coachLinkRequestId: requestRow.id,
+				coachTargetTenantId: targetTenantId,
+				shareMode: 'Approval pending',
+			};
+			writeDbSnapshotIfPossible(sourcePaths.dbPath, sourcePaths.snapshotDir);
+			writeAtomicJsonFile(sourcePaths.dbPath, nextSourceDb);
+		} catch (error) {
+			writeAtomicJsonFile(targetPaths.dbPath, targetDb);
+			throw error;
+		}
+
 		appendAuthAuditEvent({
-			action: 'swimmer_coach_disconnected',
-			req,
-			status: 'success',
-			target: String(swimmersRows[swimmerIndex]?.id || ''),
-			details: {
-				disconnectedAt,
-				previousCoachLinkStatus: String(existingRow?.coachLinkStatus || 'none').trim() || 'none',
-				previousCoachConnected: Boolean(existingRow?.coachConnected),
-			},
+			action: 'swimmer_coach_link_requested', req, status: 'success', target: requestRow.id,
+			details: { swimmerUsername: requestRow.swimmerUsername, targetTenantId, coachUsername: requestRow.coachUsername },
 		});
-		res.status(200).json({
-			ok: true,
-			swimmerId: String(swimmersRows[swimmerIndex]?.id || ''),
-			disconnectedAt,
-		});
+		res.status(201).json({ ok: true, request: requestRow });
 	} catch (error) {
+		res.status(500).json({ error: 'Could not create coach connection request.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
+	}
+});
+
+app.get('/coach/swimmer-links', requireStrictAuth, requireCoachLinkManagerRole, (req, res) => {
+	try {
+		const tenantId = resolveAuthTenantId(req.auth);
+		const storagePaths = resolveStoragePathsForTenantKey(tenantId);
+		const db = readCoachLinkDbStrict(storagePaths, 'Coach');
+		const requests = Array.isArray(db?.coachLinkRequests) ? db.coachLinkRequests : [];
+		// ATHLYRAX_COACH_LINK_PARENT_CONTACTS_PRIVATE
+		const publicRequests = requests.map((row) => ({
+			id: String(row?.id || ''),
+			status: String(row?.status || ''),
+			requestedAt: String(row?.requestedAt || ''),
+			decidedAt: String(row?.decidedAt || ''),
+			decidedBy: String(row?.decidedBy || ''),
+			swimmerUsername: String(row?.swimmerUsername || ''),
+			swimmerEmail: String(row?.swimmerEmail || ''),
+			swimmerName: String(row?.swimmerName || ''),
+			swimmerId: String(row?.swimmerId || ''),
+			coachEmail: String(row?.coachEmail || ''),
+		}));
+		res.status(200).json({ ok: true, tenantId, requests: publicRequests });
+	} catch (error) {
+		res.status(500).json({ error: 'Could not load swimmer connection requests.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
+	}
+});
+
+app.post('/coach/swimmer-links/:requestId/accept', requireStrictAuth, requireCoachLinkDecisionRole, requireBillingWriteAccess, (req, res) => {
+	const requestId = String(req.params?.requestId || '').trim();
+	if (!requestId) { res.status(400).json({ error: 'Connection request ID is required.' }); return; }
+	const actorTenantId = resolveAuthTenantId(req.auth);
+	const targetPaths = resolveStoragePathsForTenantKey(actorTenantId);
+	try {
+		const targetDb = readCoachLinkDbStrict(targetPaths, 'Coach target');
+		const requests = Array.isArray(targetDb?.coachLinkRequests) ? targetDb.coachLinkRequests.slice() : [];
+		const requestIndex = requests.findIndex((row) => String(row?.id || '').trim() === requestId);
+		if (requestIndex < 0) { res.status(404).json({ error: 'Connection request not found.' }); return; }
+		const requestRow = requests[requestIndex];
+		if (String(requestRow?.targetTenantId || '').trim() !== actorTenantId) { res.status(403).json({ error: 'Connection request belongs to another tenant.' }); return; }
+		if (String(requestRow?.status || '').trim().toLowerCase() === 'approved') { res.status(200).json({ ok: true, request: requestRow, alreadyApproved: true }); return; }
+		if (String(requestRow?.status || '').trim().toLowerCase() !== 'pending') { res.status(409).json({ error: 'Connection request is no longer pending.' }); return; }
+
+		const swimmerUsername = String(requestRow?.swimmerUsername || '').trim();
+		const swimmerUserIndex = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === swimmerUsername.toLowerCase());
+		if (swimmerUserIndex < 0 || String(authUsers[swimmerUserIndex]?.role || '').trim().toLowerCase() !== 'swimmer') { res.status(409).json({ error: 'Swimmer account is no longer available.' }); return; }
+		const sourceTenantId = normalizeTenantId(requestRow?.sourceTenantId);
+		if (!sourceTenantId) { res.status(409).json({ error: 'Connection request source tenant is invalid.' }); return; }
+		const sourcePaths = resolveStoragePathsForTenantKey(sourceTenantId);
+		const sourceDb = readCoachLinkDbStrict(sourcePaths, 'Swimmer source');
+		const sourceRows = Array.isArray(sourceDb?.swimmers) ? sourceDb.swimmers : [];
+		const sourceIndex = findBoundSwimmerIndex(sourceRows, swimmerUsername);
+		if (sourceIndex < 0) { res.status(409).json({ error: 'Source swimmer profile is missing. Nothing was moved.' }); return; }
+		const sourceSwimmerRow = sourceRows[sourceIndex] && typeof sourceRows[sourceIndex] === 'object' ? sourceRows[sourceIndex] : {};
+		if (
+			String(sourceSwimmerRow?.coachLinkStatus || '').trim().toLowerCase() !== 'pending'
+			|| String(sourceSwimmerRow?.coachLinkRequestId || '').trim() !== requestId
+			|| normalizeTenantId(sourceSwimmerRow?.coachTargetTenantId) !== actorTenantId
+		) {
+			res.status(409).json({ error: 'Connection request is stale or no longer matches the swimmer pending state.' });
+			return;
+		}
+
+		const currentTargetRows = Array.isArray(targetDb?.swimmers) ? targetDb.swimmers.slice() : [];
+		const existingTargetIndex = findBoundSwimmerIndex(currentTargetRows, swimmerUsername);
+		const acceptanceAddsActiveSwimmer = existingTargetIndex < 0 || currentTargetRows[existingTargetIndex]?.active === false;
+		if (acceptanceAddsActiveSwimmer) {
+			const { limits } = resolveTenantPlanLimits(actorTenantId);
+			const maxSwimmers = limits?.maxSwimmers;
+			if (maxSwimmers !== null && maxSwimmers !== undefined) {
+				const activeSwimmerCount = currentTargetRows.filter((row) => row && typeof row === 'object' && row?.active !== false).length;
+				if (activeSwimmerCount >= Number(maxSwimmers)) {
+					res.status(409).json({ error: 'This subscription tier has reached its swimmer limit. Upgrade or free capacity before accepting another swimmer.' });
+					return;
+				}
+			}
+		}
+		if (existingTargetIndex >= 0) {
+			const existingTargetStatus = String(currentTargetRows[existingTargetIndex]?.coachLinkStatus || '').trim().toLowerCase();
+			if (existingTargetStatus !== 'approved' && existingTargetStatus !== 'disconnected') {
+				res.status(409).json({ error: 'Coach tenant already contains a conflicting swimmer binding.' });
+				return;
+			}
+		}
+
+		const approvedAt = new Date().toISOString();
+		const approvedRow = {
+			...sourceRows[sourceIndex],
+			tenantId: actorTenantId,
+			active: true,
+			pathway: 'club',
+			coachConnected: true,
+			coachLinkStatus: 'approved',
+			coachEmail: String(requestRow?.coachEmail || '').trim(),
+			coachRequestAt: String(requestRow?.requestedAt || '').trim(),
+			coachReplyAt: approvedAt,
+			coachApprovalAt: approvedAt,
+			coachLinkRequestId: requestId,
+			coachLinkSourceTenantId: sourceTenantId,
+			coachTargetTenantId: actorTenantId,
+			shareMode: 'Shared AthlyraX data',
+		};
+		if (existingTargetIndex >= 0) currentTargetRows[existingTargetIndex] = approvedRow;
+		else currentTargetRows.push(approvedRow);
+		requests[requestIndex] = { ...requestRow, status: 'approved', decidedAt: approvedAt, decidedBy: String(req.auth?.username || '').trim() };
+		const nextTargetDb = { ...targetDb, swimmers: currentTargetRows, coachLinkRequests: requests };
+
+		// ATHLYRAX_COACH_LINK_ACCEPT_DB_FIRST_AUTH_LAST
+		writeDbSnapshotIfPossible(targetPaths.dbPath, targetPaths.snapshotDir);
+		writeAtomicJsonFile(targetPaths.dbPath, nextTargetDb);
+
+		const nextSourceDb = { ...sourceDb, swimmers: sourceRows.slice() };
+		nextSourceDb.swimmers[sourceIndex] = {
+			...sourceRows[sourceIndex],
+			coachConnected: true, coachLinkStatus: 'approved', coachApprovalAt: approvedAt,
+			coachLinkRequestId: requestId, coachTargetTenantId: actorTenantId,
+			coachLinkMigratedAt: approvedAt, coachLinkMigratedToTenantId: actorTenantId,
+		};
+		try {
+			writeDbSnapshotIfPossible(sourcePaths.dbPath, sourcePaths.snapshotDir);
+			writeAtomicJsonFile(sourcePaths.dbPath, nextSourceDb);
+		} catch (sourceError) {
+			try {
+				writeAtomicJsonFile(targetPaths.dbPath, targetDb);
+			} catch (rollbackError) {
+				throw new Error(`Coach-link acceptance source write failed and target rollback failed: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}. Original error: ${sourceError instanceof Error ? sourceError.message : 'unknown source write error'}`);
+			}
+			throw sourceError;
+		}
+
+		const previousAuthUser = authUsers[swimmerUserIndex];
+		authUsers[swimmerUserIndex] = { ...previousAuthUser, tenantId: actorTenantId };
+		try {
+			persistAuthUsers();
+		} catch (error) {
+			authUsers[swimmerUserIndex] = previousAuthUser;
+			const rollbackErrors = [];
+			try { writeAtomicJsonFile(sourcePaths.dbPath, sourceDb); } catch (rollbackError) { rollbackErrors.push(`source: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}`); }
+			try { writeAtomicJsonFile(targetPaths.dbPath, targetDb); } catch (rollbackError) { rollbackErrors.push(`target: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}`); }
+			if (rollbackErrors.length > 0) {
+				throw new Error(`Coach-link acceptance auth persistence failed and database rollback was incomplete (${rollbackErrors.join('; ')}). Original error: ${error instanceof Error ? error.message : 'unknown auth persistence error'}`);
+			}
+			throw error;
+		}
+		appendAuthAuditEvent({ action: 'coach_swimmer_link_approved', req, status: 'success', target: requestId, details: { swimmerUsername, sourceTenantId, targetTenantId: actorTenantId } });
+		res.status(200).json({ ok: true, request: requests[requestIndex], swimmerId: String(approvedRow?.id || ''), tenantId: actorTenantId });
+	} catch (error) {
+		res.status(500).json({ error: 'Could not approve swimmer connection.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
+	}
+});
+
+app.post('/coach/swimmer-links/:requestId/reject', requireStrictAuth, requireCoachLinkDecisionRole, (req, res) => {
+	const requestId = String(req.params?.requestId || '').trim();
+	const actorTenantId = resolveAuthTenantId(req.auth);
+	const targetPaths = resolveStoragePathsForTenantKey(actorTenantId);
+	try {
+		const targetDb = readCoachLinkDbStrict(targetPaths, 'Coach target');
+		const requests = Array.isArray(targetDb?.coachLinkRequests) ? targetDb.coachLinkRequests.slice() : [];
+		const requestIndex = requests.findIndex((row) => String(row?.id || '').trim() === requestId);
+		if (requestIndex < 0) { res.status(404).json({ error: 'Connection request not found.' }); return; }
+		const requestRow = requests[requestIndex];
+		if (String(requestRow?.targetTenantId || '').trim() !== actorTenantId) { res.status(403).json({ error: 'Connection request belongs to another tenant.' }); return; }
+		if (String(requestRow?.status || '').trim().toLowerCase() !== 'pending') { res.status(409).json({ error: 'Connection request is no longer pending.' }); return; }
+		const rejectedAt = new Date().toISOString();
+		requests[requestIndex] = { ...requestRow, status: 'rejected', decidedAt: rejectedAt, decidedBy: String(req.auth?.username || '').trim() };
+		const nextTargetDb = { ...targetDb, coachLinkRequests: requests };
+		writeDbSnapshotIfPossible(targetPaths.dbPath, targetPaths.snapshotDir);
+		writeAtomicJsonFile(targetPaths.dbPath, nextTargetDb);
+
+		try {
+			const sourceTenantId = normalizeTenantId(requestRow?.sourceTenantId);
+			const sourcePaths = resolveStoragePathsForTenantKey(sourceTenantId);
+			const sourceDb = readCoachLinkDbStrict(sourcePaths, 'Swimmer source');
+			const rows = Array.isArray(sourceDb?.swimmers) ? sourceDb.swimmers.slice() : [];
+			const swimmerIndex = findBoundSwimmerIndex(rows, requestRow?.swimmerUsername);
+			if (swimmerIndex >= 0) {
+				// ATHLYRAX_COACH_LINK_REJECTION_STALE_GUARD
+				const currentSourceRow = rows[swimmerIndex] && typeof rows[swimmerIndex] === 'object' ? rows[swimmerIndex] : {};
+				const rejectionMatchesCurrent = String(currentSourceRow?.coachLinkRequestId || '').trim() === requestId
+					&& normalizeTenantId(currentSourceRow?.coachTargetTenantId) === actorTenantId
+					&& String(currentSourceRow?.coachLinkStatus || '').trim().toLowerCase() === 'pending';
+				if (rejectionMatchesCurrent) {
+					rows[swimmerIndex] = {
+						...currentSourceRow,
+						coachConnected: false, coachLinkStatus: 'none', coachEmail: '', coachCode: '', coachPhase: '',
+						coachRequestAt: '', coachReplyAt: rejectedAt, coachApprovalAt: '', coachLinkRequestId: '', coachTargetTenantId: '', shareMode: 'Feedback link only',
+					};
+					writeDbSnapshotIfPossible(sourcePaths.dbPath, sourcePaths.snapshotDir);
+					writeAtomicJsonFile(sourcePaths.dbPath, { ...sourceDb, swimmers: rows });
+				}
+			}
+		} catch (sourceError) {
+			// ATHLYRAX_COACH_LINK_REJECT_ROLLBACK_TARGET
+			try {
+				writeAtomicJsonFile(targetPaths.dbPath, targetDb);
+			} catch (rollbackError) {
+				throw new Error(`Coach-link rejection source update failed and target rollback failed: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}. Original error: ${sourceError instanceof Error ? sourceError.message : 'unknown source update error'}`);
+			}
+			throw sourceError;
+		}
+		appendAuthAuditEvent({ action: 'coach_swimmer_link_rejected', req, status: 'success', target: requestId });
+		res.status(200).json({ ok: true, request: requests[requestIndex] });
+	} catch (error) {
+		res.status(500).json({ error: 'Could not reject swimmer connection.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
+	}
+});
+
+app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	// ATHLYRAX_COACH_LINK_DISCONNECT_COPY_BACK_FIRST
+	const authUsername = String(req.auth?.username || '').trim();
+	const authUserIndex = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === authUsername.toLowerCase());
+	if (authUserIndex < 0 || String(authUsers[authUserIndex]?.role || '').trim().toLowerCase() !== 'swimmer') {
+		res.status(404).json({ error: 'Swimmer account was not found.' });
+		return;
+	}
+
+	const currentTenantId = resolveTenantKeyFromUser(authUsers[authUserIndex]);
+	const currentPaths = resolveStoragePathsForTenantKey(currentTenantId);
+	try {
+		const currentDb = readCoachLinkDbStrict(currentPaths, 'Current swimmer');
+		const currentRows = Array.isArray(currentDb?.swimmers) ? currentDb.swimmers.slice() : [];
+		const currentIndex = findBoundSwimmerIndex(currentRows, authUsername);
+		if (currentIndex < 0) {
+			res.status(409).json({ error: 'Current swimmer profile binding is missing. Disconnect was not performed.' });
+			return;
+		}
+
+		const currentRow = currentRows[currentIndex] && typeof currentRows[currentIndex] === 'object' ? currentRows[currentIndex] : {};
+		const wasApproved = String(currentRow?.coachLinkStatus || '').trim().toLowerCase() === 'approved';
+		const sourceTenantId = normalizeTenantId(currentRow?.coachLinkSourceTenantId);
+		const disconnectedAt = new Date().toISOString();
+
+		if (!wasApproved) {
+			const pendingRequestId = String(currentRow?.coachLinkRequestId || '').trim();
+			const pendingTargetTenantId = normalizeTenantId(currentRow?.coachTargetTenantId);
+			let pendingTargetRollback = null;
+			let pendingTargetPaths = null;
+			if (String(currentRow?.coachLinkStatus || '').trim().toLowerCase() === 'pending' && pendingRequestId && pendingTargetTenantId) {
+				pendingTargetPaths = resolveStoragePathsForTenantKey(pendingTargetTenantId);
+				const pendingTargetDb = readCoachLinkDbStrict(pendingTargetPaths, 'Pending coach target');
+				const pendingRequests = Array.isArray(pendingTargetDb?.coachLinkRequests) ? pendingTargetDb.coachLinkRequests.slice() : [];
+				const pendingIndex = pendingRequests.findIndex((row) => String(row?.id || '').trim() === pendingRequestId);
+				if (pendingIndex < 0 || String(pendingRequests[pendingIndex]?.status || '').trim().toLowerCase() !== 'pending') {
+					res.status(409).json({ error: 'Pending coach request could not be verified. Disconnect was blocked to avoid leaving inconsistent membership state.' });
+					return;
+				}
+				pendingTargetRollback = pendingTargetDb;
+				pendingRequests[pendingIndex] = { ...pendingRequests[pendingIndex], status: 'cancelled', decidedAt: disconnectedAt, decidedBy: authUsername };
+				writeAtomicJsonFile(pendingTargetPaths.dbPath, { ...pendingTargetDb, coachLinkRequests: pendingRequests });
+			}
+			const nextRows = currentRows.slice();
+			nextRows[currentIndex] = {
+				...currentRow,
+				pathway: 'individual',
+				coachConnected: false,
+				coachLinkStatus: 'none',
+				coachEmail: '',
+				coachCode: '',
+				coachPhase: '',
+				coachRequestAt: '',
+				coachReplyAt: '',
+				coachApprovalAt: '',
+				coachLinkRequestId: '',
+				coachTargetTenantId: '',
+				shareMode: 'Feedback link only',
+				coachConnectionStatus: { state: 'disconnected-by-swimmer', disconnectedAt, disconnectedBy: authUsername },
+			};
+			writeDbSnapshotIfPossible(currentPaths.dbPath, currentPaths.snapshotDir);
+			try {
+				writeAtomicJsonFile(currentPaths.dbPath, { ...currentDb, swimmers: nextRows });
+			} catch (error) {
+				if (pendingTargetRollback && pendingTargetPaths) writeAtomicJsonFile(pendingTargetPaths.dbPath, pendingTargetRollback);
+				throw error;
+			}
+			res.status(200).json({ ok: true, swimmerId: String(nextRows[currentIndex]?.id || ''), disconnectedAt, tenantId: currentTenantId });
+			return;
+		}
+
+		if (!sourceTenantId || sourceTenantId === currentTenantId || sourceTenantId === 'global-owner') {
+			res.status(409).json({ error: 'Original swimmer tenant is missing or invalid. Disconnect was blocked to protect swimmer data.' });
+			return;
+		}
+
+		const sourcePaths = resolveStoragePathsForTenantKey(sourceTenantId);
+		const sourceDb = readCoachLinkDbStrict(sourcePaths, 'Original swimmer');
+		const sourceRows = Array.isArray(sourceDb?.swimmers) ? sourceDb.swimmers.slice() : [];
+		const sourceIndex = findBoundSwimmerIndex(sourceRows, authUsername);
+		if (sourceIndex < 0) {
+			res.status(409).json({ error: 'Original swimmer profile binding is missing. Disconnect was blocked to protect swimmer data.' });
+			return;
+		}
+
+		const restoredRow = {
+			...currentRow,
+			tenantId: sourceTenantId,
+			active: true,
+			pathway: 'individual',
+			coachConnected: false,
+			coachLinkStatus: 'none',
+			coachEmail: '',
+			coachCode: '',
+			coachPhase: '',
+			coachRequestAt: '',
+			coachReplyAt: '',
+			coachApprovalAt: '',
+			coachLinkRequestId: '',
+			coachLinkSourceTenantId: '',
+			coachTargetTenantId: '',
+			shareMode: 'Feedback link only',
+			coachConnectionStatus: { state: 'disconnected-by-swimmer', disconnectedAt, disconnectedBy: authUsername },
+		};
+		const nextSourceRows = sourceRows.slice();
+		nextSourceRows[sourceIndex] = restoredRow;
+		const nextSourceDb = { ...sourceDb, swimmers: nextSourceRows };
+
+		// ATHLYRAX_COACH_LINK_DISCONNECT_DB_FIRST_AUTH_LAST
+		writeDbSnapshotIfPossible(sourcePaths.dbPath, sourcePaths.snapshotDir);
+		writeAtomicJsonFile(sourcePaths.dbPath, nextSourceDb);
+
+		const archiveRows = currentRows.slice();
+		archiveRows[currentIndex] = {
+			...currentRow,
+			active: false,
+			coachConnected: false,
+			coachLinkStatus: 'disconnected',
+			coachPhase: '',
+			shareMode: 'Disconnected archive',
+			coachConnectionStatus: { state: 'disconnected-by-swimmer', disconnectedAt, disconnectedBy: authUsername },
+		};
+		try {
+			writeDbSnapshotIfPossible(currentPaths.dbPath, currentPaths.snapshotDir);
+			writeAtomicJsonFile(currentPaths.dbPath, { ...currentDb, swimmers: archiveRows });
+		} catch (archiveError) {
+			try {
+				writeAtomicJsonFile(sourcePaths.dbPath, sourceDb);
+			} catch (rollbackError) {
+				throw new Error(`Coach-link disconnect archive write failed and source rollback failed: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}. Original error: ${archiveError instanceof Error ? archiveError.message : 'unknown archive write error'}`);
+			}
+			throw archiveError;
+		}
+
+		const previousAuthUser = authUsers[authUserIndex];
+		authUsers[authUserIndex] = { ...previousAuthUser, tenantId: sourceTenantId };
+		try {
+			persistAuthUsers();
+		} catch (error) {
+			authUsers[authUserIndex] = previousAuthUser;
+			const rollbackErrors = [];
+			try { writeAtomicJsonFile(sourcePaths.dbPath, sourceDb); } catch (rollbackError) { rollbackErrors.push(`source: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}`); }
+			try { writeAtomicJsonFile(currentPaths.dbPath, currentDb); } catch (rollbackError) { rollbackErrors.push(`coach: ${rollbackError instanceof Error ? rollbackError.message : 'unknown rollback error'}`); }
+			if (rollbackErrors.length > 0) {
+				throw new Error(`Coach-link disconnect auth persistence failed and database rollback was incomplete (${rollbackErrors.join('; ')}). Original error: ${error instanceof Error ? error.message : 'unknown auth persistence error'}`);
+			}
+			throw error;
+		}
 		appendAuthAuditEvent({
-			action: 'swimmer_coach_disconnect_failed',
-			req,
-			status: 'error',
-			target: String(swimmersRows[swimmerIndex]?.id || ''),
-			reason: 'write_failed',
-			details: {
-				message: error instanceof Error ? error.message : 'Unknown error',
-			},
+			action: 'swimmer_coach_disconnected', req, status: 'success', target: authUsername,
+			details: { disconnectedAt, fromTenantId: currentTenantId, restoredTenantId: sourceTenantId },
 		});
-		res.status(500).json({
-			error: 'Could not disconnect coach connection.',
-			details: error instanceof Error ? error.message : 'Unknown error',
-		});
+		res.status(200).json({ ok: true, swimmerId: String(restoredRow?.id || ''), disconnectedAt, tenantId: sourceTenantId });
+	} catch (error) {
+		res.status(500).json({ error: 'Could not disconnect coach connection safely.', ...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }) });
 	}
 });
 
@@ -6192,30 +7136,59 @@ app.get('/db', requireAuth, (req, res) => {
 	const storagePaths = tenantScope.storagePaths;
 	ensureStorageLayout(storagePaths);
 	if (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {
-		writeAtomicJsonFile(storagePaths.dbPath, {});
+		appendAuthAuditEvent({
+			action: 'tenant_database_missing',
+			req,
+			status: 'blocked',
+			reason: 'missing_existing_tenant_database',
+			details: { tenantKey: storagePaths.tenantKey },
+		});
+		res.status(503).json({
+			error: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',
+			tenantKey: storagePaths.tenantKey,
+		});
+		return;
 	}
 	fs.readFile(storagePaths.dbPath, 'utf8', (err, data) => {
 		if (err) {
 			res.status(500).json({ error: 'Could not read db.json', tenant: storagePaths.tenantKey });
 		} else {
-			let responsePayload = data;
+			// ATHLYRAX_RUNTIME_DB_READ_FAIL_CLOSED
+			let parsedDatabase;
 			try {
-				const persistedShape = JSON.parse(String(data || '{}'));
-				const persistedSuppressions = Array.isArray(persistedShape?.__meta?.scheduleOccurrenceSuppressions)
-					? persistedShape.__meta.scheduleOccurrenceSuppressions
-					: [];
-				const readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(persistedShape, persistedSuppressions);
-				responsePayload = JSON.stringify(readFiltered.dbShape);
-			} catch {
-				// Invalid db.json is handled by the storage safety layer; preserve the original response here.
+				parsedDatabase = JSON.parse(String(data || ''));
+				if (!parsedDatabase || typeof parsedDatabase !== 'object' || Array.isArray(parsedDatabase)) {
+					throw new Error('Database root must be an object.');
+				}
+			} catch (error) {
+				appendAuthAuditEvent({
+					action: 'database_read_blocked',
+					req,
+					status: 'blocked',
+					reason: 'database_invalid_json',
+					details: { tenantKey: storagePaths.tenantKey },
+				});
+				res.status(503).json({
+					error: 'Tenant data is unavailable because the stored database failed integrity validation. No empty replacement was created.',
+					tenantKey: storagePaths.tenantKey,
+				});
+				return;
 			}
+			// ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1
+			// trainingSchedules is an obsolete mirror and must never be exposed as a second Schedule source.
+			parsedDatabase.trainingSchedules = [];
+			const persistedSuppressions = Array.isArray(parsedDatabase?.__meta?.scheduleOccurrenceSuppressions)
+				? parsedDatabase.__meta.scheduleOccurrenceSuppressions
+				: [];
+			const readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(parsedDatabase, persistedSuppressions);
+			let responsePayload = JSON.stringify(readFiltered.dbShape);
 			const role = String(req.auth?.role || '').trim().toLowerCase();
 			if (role === 'swimmer') {
 				const authUsername = String(req.auth?.username || '').trim().toLowerCase();
 				const authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
 				const authEmail = String(authUser?.email || '').trim().toLowerCase();
 				try {
-					const parsed = JSON.parse(String(responsePayload || '{}'));
+					const parsed = typeof readFiltered !== 'undefined' ? readFiltered.dbShape : parsedDatabase;
 					const swimmers = Array.isArray(parsed?.swimmers) ? parsed.swimmers : [];
 					let scopedSwimmers = swimmers.filter((row) => {
 						const rowUsername = String(row?.swimmerAccountUsername || '').trim().toLowerCase();
@@ -6225,7 +7198,8 @@ app.get('/db', requireAuth, (req, res) => {
 						if (authEmail && (rowAccountEmail === authEmail || rowEmail === authEmail)) return true;
 						return false;
 					});
-					if (scopedSwimmers.length < 1 && AUTH_AUTO_HEAL_SWIMMER_BINDINGS) {
+					// ATHLYRAX_PRODUCTION_DB_GET_READ_ONLY
+				if (!IS_PRODUCTION && scopedSwimmers.length < 1 && AUTH_AUTO_HEAL_SWIMMER_BINDINGS) {
 						try {
 							const healResult = ensureSwimmerAccountBindingInStorage(authUser);
 							if (healResult?.updated) {
@@ -6245,9 +7219,20 @@ app.get('/db', requireAuth, (req, res) => {
 						}
 					}
 					responsePayload = JSON.stringify({ swimmers: scopedSwimmers });
-				} catch {
-					responsePayload = JSON.stringify({ swimmers: [] });
+				} catch (error) {
+					appendAuthAuditEvent({ action: 'database_read_blocked', req, status: 'blocked', reason: 'swimmer_scope_filter_failed', details: { tenantKey: storagePaths.tenantKey } });
+					res.status(503).json({ error: 'Swimmer data could not be safely scoped. No empty result was substituted.' });
+					return;
 				}
+			}
+			// ATHLYRAX_COACH_LINK_REQUESTS_HIDDEN_FROM_GENERIC_DB
+			try {
+				const responseShape = JSON.parse(String(responsePayload || '{}'));
+				if (responseShape && typeof responseShape === 'object' && !Array.isArray(responseShape)) delete responseShape.coachLinkRequests;
+				responsePayload = JSON.stringify(responseShape);
+			} catch {
+				res.status(500).json({ error: 'Could not safely scope db.json response.' });
+				return;
 			}
 			res.setHeader('Content-Type', 'application/json');
 			res.send(responsePayload);
@@ -6258,8 +7243,19 @@ app.get('/db', requireAuth, (req, res) => {
 app.get('/db/ownership-summary', requireAuth, (req, res) => {
 	try {
 		const storagePaths = resolveStoragePathsForAuth(req.auth);
-		ensureStorageLayout(storagePaths);
-		const dbShape = readJsonFile(storagePaths.dbPath);
+		// ATHLYRAX_OWNERSHIP_SUMMARY_STRICT_DB_READ
+		if (!fs.existsSync(storagePaths.dbPath)) {
+			res.status(503).json({ error: 'Tenant database is missing. No empty replacement was created.' });
+			return;
+		}
+		let dbShape;
+		try {
+			dbShape = JSON.parse(fs.readFileSync(storagePaths.dbPath, 'utf8'));
+			if (!dbShape || typeof dbShape !== 'object' || Array.isArray(dbShape)) throw new Error('Database root must be an object.');
+		} catch {
+			res.status(503).json({ error: 'Tenant database failed integrity validation.' });
+			return;
+		}
 		const summary = buildOwnershipSummary(dbShape);
 		res.status(200).json({
 			ok: true,
@@ -6269,12 +7265,12 @@ app.get('/db/ownership-summary', requireAuth, (req, res) => {
 	} catch (error) {
 		res.status(500).json({
 			error: 'Could not build ownership summary.',
-			details: error instanceof Error ? error.message : 'Unknown error',
+			...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 		});
 	}
 });
 
-app.post('/db/ownership-backfill', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, res) => {
+app.post('/db/ownership-backfill', requireAuth, requireAdminRole, requireBillingWriteAccess, (req, res) => {
 	const storagePaths = resolveStoragePathsForAuth(req.auth);
 	ensureStorageLayout(storagePaths);
 
@@ -6341,7 +7337,271 @@ app.post('/db/ownership-backfill', requireAuth, requireWriteRole, requireBilling
 		.catch((error) => {
 			res.status(500).json({
 				error: 'Could not backfill ownership metadata.',
-				details: error instanceof Error ? error.message : 'Unknown error',
+				...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
+			});
+		});
+});
+
+// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_V1
+app.post('/db/schedule-delete', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, res) => {
+	const tenantScope = resolveStoragePathsForRequest(req);
+	if (!tenantScope.ok) {
+		res.status(tenantScope.status).json(tenantScope.body);
+		return;
+	}
+
+	const rawIds = Array.isArray(req.body?.scheduleIds) ? req.body.scheduleIds : [];
+	const scheduleIds = Array.from(new Set(rawIds.map((value) => String(value || '').trim()).filter(Boolean)));
+	if (scheduleIds.length < 1) {
+		res.status(400).json({ error: 'At least one schedule ID is required.' });
+		return;
+	}
+	if (scheduleIds.length > 20000) {
+		res.status(413).json({ error: 'Too many schedule IDs in one delete request.' });
+		return;
+	}
+
+	const storagePaths = tenantScope.storagePaths;
+	ensureStorageLayout(storagePaths);
+
+	enqueueWrite(async () => {
+		ensureStorageLayout(storagePaths);
+		if (!fs.existsSync(storagePaths.dbPath)) {
+			const err = new Error('Tenant database is missing. Refusing destructive operation.');
+			err.status = 503;
+			throw err;
+		}
+
+		const currentDb = readJsonFile(storagePaths.dbPath);
+		if (!currentDb || typeof currentDb !== 'object' || Array.isArray(currentDb)) {
+			const err = new Error('Tenant database is unreadable. Refusing destructive operation.');
+			err.status = 503;
+			throw err;
+		}
+
+		const now = new Date().toISOString();
+		const textId = (value) => String(value || '').trim();
+		const scheduleRows = Array.isArray(currentDb.schedule) ? currentDb.schedule : [];
+		const legacyScheduleRows = Array.isArray(currentDb.trainingSchedules) ? currentDb.trainingSchedules : [];
+		const sessionRows = Array.isArray(currentDb.trainingSessions) ? currentDb.trainingSessions : [];
+		const setRows = Array.isArray(currentDb.trainingSessionSets) ? currentDb.trainingSessionSets : [];
+		const blockRows = Array.isArray(currentDb.trainingSetBlocks) ? currentDb.trainingSetBlocks : [];
+		// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_SESSION_ALIAS_V1
+		// ATHLYRAX_CANONICAL_SCHEDULE_DELETE_OCCURRENCE_V1
+		const requestedDeleteIds = new Set(scheduleIds.map(textId).filter(Boolean));
+		const canonicalDeleteResolution = resolveCanonicalScheduleDeleteTargets({
+			requestedIds: scheduleIds,
+			scheduleRows,
+			legacyScheduleRows,
+			sessionRows,
+			deletedAt: now,
+		});
+		if (canonicalDeleteResolution.targetScheduleIds.length < 1) {
+			const err = new Error('No persisted Schedule could be resolved from the selected Scheduled Session rows.');
+			err.status = 409;
+			err.details = { requestedScheduleIds: Array.from(requestedDeleteIds) };
+			throw err;
+		}
+		// ATHLYRAX_SPARSE_LEGACY_SCHEDULE_PHYSICAL_DELETE_V1
+		// A sparse legacy/generated row may not contain enough date/time/source metadata
+		// to derive a semantic occurrence suppression. It is still the user's persisted
+		// data and must remain deletable. Exact physical Schedule IDs are permanently
+		// tombstoned by the authoritative route, so stale clients cannot restore them.
+		// Semantic suppressions remain an additional protection whenever identity exists.
+		const physicalOnlyScheduleIds = canonicalDeleteResolution.unresolvedGeneratedScheduleIds;
+		const targetIds = new Set(canonicalDeleteResolution.targetScheduleIds);
+		const serverDerivedSuppressions = canonicalDeleteResolution.suppressions;
+		const attendanceRows = Array.isArray(currentDb.attendance) ? currentDb.attendance : [];
+
+		const linkedSessionIds = new Set(
+			sessionRows
+				.filter((row) => targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))
+				.map((row) => textId(row?.id))
+				.filter(Boolean),
+		);
+		const linkedSetIds = new Set(
+			setRows
+				.filter((row) => linkedSessionIds.has(textId(row?.sessionId || row?.trainingSessionId)) || targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))
+				.map((row) => textId(row?.id))
+				.filter(Boolean),
+		);
+// ATHLYRAX_SCHEDULE_DELETE_BLOCK_INTEGRITY_V1
+		const setSessionById = new Map(
+			setRows
+				.map((row) => [textId(row?.id), textId(row?.sessionId || row?.trainingSessionId)])
+				.filter(([setId]) => Boolean(setId)),
+		);
+		const removedBlockIds = new Set();
+		const nextBlocks = blockRows.flatMap((row) => {
+			const blockId = textId(row?.id);
+			const ownerSessionId = textId(row?.sessionId || row?.trainingSessionId);
+			const ownerDeleted = Boolean(ownerSessionId && linkedSessionIds.has(ownerSessionId));
+			const singularSetId = textId(row?.setId);
+			const singularRemoved = Boolean(singularSetId && linkedSetIds.has(singularSetId));
+			const originalSetIds = (Array.isArray(row?.setIds) ? row.setIds : []).map(textId).filter(Boolean);
+			const remainingSetIds = originalSetIds.filter((id) => !linkedSetIds.has(id));
+
+			if (ownerDeleted && remainingSetIds.length === 0 && (!singularSetId || singularRemoved)) {
+				if (blockId) removedBlockIds.add(blockId);
+				return [];
+			}
+
+			const changedSetIds = remainingSetIds.length !== originalSetIds.length;
+			if (!ownerDeleted && !singularRemoved && !changedSetIds) return [row];
+
+			const remainingOwnerIds = Array.from(new Set(
+				remainingSetIds
+					.map((setId) => setSessionById.get(setId) || '')
+					.filter((sessionId) => sessionId && !linkedSessionIds.has(sessionId)),
+			));
+			const reassignedSessionId = ownerDeleted && remainingOwnerIds.length === 1 ? remainingOwnerIds[0] : '';
+			return [{
+				...row,
+				...(Array.isArray(row?.setIds) ? { setIds: remainingSetIds } : {}),
+				...(singularRemoved ? { setId: '' } : {}),
+				...(ownerDeleted && Object.prototype.hasOwnProperty.call(row, 'sessionId') ? { sessionId: reassignedSessionId } : {}),
+				...(ownerDeleted && Object.prototype.hasOwnProperty.call(row, 'trainingSessionId') ? { trainingSessionId: reassignedSessionId } : {}),
+				updatedAt: now,
+			}];
+		});
+		const linkedAttendanceIds = new Set(
+			attendanceRows
+				.filter((row) => targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId)))
+				.map((row) => textId(row?.id))
+				.filter(Boolean),
+		);
+
+		const deletionTombstones = [
+			...Array.from(targetIds).map((id) => ({ collection: 'schedule', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
+			...Array.from(linkedSessionIds).map((id) => ({ collection: 'trainingSessions', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
+			...Array.from(linkedSetIds).map((id) => ({ collection: 'trainingSessionSets', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
+			...Array.from(removedBlockIds).map((id) => ({ collection: 'trainingSetBlocks', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
+			...Array.from(linkedAttendanceIds).map((id) => ({ collection: 'attendance', id, deletedAt: now, deletedBy: 'server-authoritative-schedule-delete' })),
+		];
+		const mergedTombstones = mergeTombstoneLists(
+			Array.isArray(currentDb.__tombstones) ? currentDb.__tombstones : [],
+			deletionTombstones,
+		);
+		const mergedSuppressions = mergeScheduleOccurrenceSuppressionLists(
+			Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : [],
+			serverDerivedSuppressions,
+		);
+
+		const currentRevisionRaw = Number.parseInt(String(currentDb?.__meta?.storageRevision ?? '0'), 10);
+		const currentRevision = Number.isFinite(currentRevisionRaw) && currentRevisionRaw >= 0 ? currentRevisionRaw : 0;
+		let nextDb = {
+			...currentDb,
+			schedule: scheduleRows.filter((row) => !targetIds.has(textId(row?.id))),
+			...(Object.prototype.hasOwnProperty.call(currentDb, 'trainingSchedules')
+				? { trainingSchedules: legacyScheduleRows.filter((row) => !targetIds.has(textId(row?.id))) }
+				: {}),
+			trainingSessions: sessionRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId))),
+			trainingSessionSets: setRows.filter((row) => !linkedSessionIds.has(textId(row?.sessionId || row?.trainingSessionId)) && !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId))),
+			trainingSetBlocks: nextBlocks,
+			attendance: attendanceRows.filter((row) => !targetIds.has(textId(row?.scheduleId || row?.trainingScheduleId))),
+			__tombstones: mergedTombstones,
+			__meta: {
+				...(currentDb.__meta && typeof currentDb.__meta === 'object' ? currentDb.__meta : {}),
+				scheduleOccurrenceSuppressions: mergedSuppressions,
+				storageRevision: currentRevision,
+				updatedAt: now,
+			},
+		};
+
+		const suppressionFiltered = applyScheduleOccurrenceSuppressionsToDbShape(nextDb, mergedSuppressions);
+		nextDb = {
+			...suppressionFiltered.dbShape,
+			__tombstones: mergedTombstones,
+			__meta: {
+				...(suppressionFiltered.dbShape?.__meta && typeof suppressionFiltered.dbShape.__meta === 'object'
+					? suppressionFiltered.dbShape.__meta
+					: {}),
+				scheduleOccurrenceSuppressions: mergedSuppressions,
+				storageRevision: currentRevision,
+				updatedAt: now,
+			},
+		};
+
+		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
+		writeAtomicJsonFile(storagePaths.dbPath, nextDb);
+
+		const persisted = readJsonFile(storagePaths.dbPath);
+		const persistedSchedule = Array.isArray(persisted?.schedule) ? persisted.schedule : [];
+		const persistedLegacySchedule = Array.isArray(persisted?.trainingSchedules) ? persisted.trainingSchedules : [];
+		const persistedSessions = Array.isArray(persisted?.trainingSessions) ? persisted.trainingSessions : [];
+		const persistedSets = Array.isArray(persisted?.trainingSessionSets) ? persisted.trainingSessionSets : [];
+		// ATHLYRAX_SERVER_AUTHORITATIVE_SCHEDULE_DELETE_MATCH_VERIFICATION_V1
+		const removedPersistedScheduleCount = scheduleRows.length - persistedSchedule.length;
+		const removedPersistedLegacyScheduleCount = legacyScheduleRows.length - persistedLegacySchedule.length;
+		const removedPersistedTrainingSessionCount = sessionRows.length - persistedSessions.length;
+		const removedPersistedTrainingSetCount = setRows.length - persistedSets.length;
+		if (removedPersistedScheduleCount + removedPersistedLegacyScheduleCount + removedPersistedTrainingSessionCount <= 0) {
+			const err = new Error('No persisted Scheduled Session matched the authoritative deletion request. Refusing false success.');
+			err.status = 409;
+			err.details = {
+				requestedScheduleIds: scheduleIds,
+				serverDerivedScheduleOccurrenceSuppressions: serverDerivedSuppressions.length,
+			};
+			throw err;
+		}
+		const persistedBlocks = Array.isArray(persisted?.trainingSetBlocks) ? persisted.trainingSetBlocks : [];
+		const persistedAttendance = Array.isArray(persisted?.attendance) ? persisted.attendance : [];
+		const remainingScheduleIds = persistedSchedule.map((row) => textId(row?.id)).filter((id) => targetIds.has(id));
+		const remainingLegacyIds = persistedLegacySchedule.map((row) => textId(row?.id)).filter((id) => targetIds.has(id));
+		const remainingSessionIds = persistedSessions.map((row) => textId(row?.id)).filter((id) => linkedSessionIds.has(id));
+		const remainingSetIds = persistedSets.map((row) => textId(row?.id)).filter((id) => linkedSetIds.has(id));
+		const remainingBlockIds = persistedBlocks.map((row) => textId(row?.id)).filter((id) => removedBlockIds.has(id));
+		const staleBlockSetReferences = persistedBlocks.flatMap((row) => {
+			const referenced = [textId(row?.setId), ...(Array.isArray(row?.setIds) ? row.setIds.map(textId) : [])].filter(Boolean);
+			const stale = referenced.filter((id) => linkedSetIds.has(id));
+			return stale.length > 0 ? [{ blockId: textId(row?.id), setIds: stale }] : [];
+		});
+		const staleBlockOwnerReferences = persistedBlocks
+			.filter((row) => linkedSessionIds.has(textId(row?.sessionId || row?.trainingSessionId)))
+			.map((row) => textId(row?.id));
+		const remainingAttendanceIds = persistedAttendance.map((row) => textId(row?.id)).filter((id) => linkedAttendanceIds.has(id));
+		if (remainingScheduleIds.length || remainingLegacyIds.length || remainingSessionIds.length || remainingSetIds.length || remainingAttendanceIds.length) {
+			const err = new Error('Server-authoritative schedule deletion verification failed after persistence reread.');
+			err.status = 500;
+			err.details = {
+				remainingScheduleIds,
+				remainingLegacyIds,
+				remainingSessionIds,
+				remainingSetIds,
+				remainingAttendanceIds,
+			};
+			throw err;
+		}
+
+		return {
+			requestedScheduleIds: scheduleIds,
+			deletedScheduleIds: Array.from(targetIds),
+			removedScheduleCount: removedPersistedScheduleCount,
+			removedLegacyScheduleCount: removedPersistedLegacyScheduleCount,
+			removedTrainingSessionCount: removedPersistedTrainingSessionCount,
+			removedTrainingSetCount: removedPersistedTrainingSetCount,
+			removedTrainingSetBlockCount: removedBlockIds.size,
+			removedAttendanceCount: linkedAttendanceIds.size,
+			tombstoneCount: mergedTombstones.length,
+			scheduleOccurrenceSuppressionCount: mergedSuppressions.length,
+			serverDerivedScheduleOccurrenceSuppressionCount: serverDerivedSuppressions.length,
+			physicalOnlyScheduleIds,
+			storageRevision: currentRevision + 1,
+		};
+	})
+		.then((result) => {
+			res.setHeader('X-AthlyraX-DB-Revision', String(result.storageRevision));
+			res.status(200).json({
+				ok: true,
+				verified: true,
+				...result,
+			});
+		})
+		.catch((error) => {
+			const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+			res.status(status).json({
+				error: error instanceof Error ? error.message : 'Could not delete scheduled sessions.',
+				...(error?.details ? { details: error.details } : {}),
 			});
 		});
 });
@@ -6357,6 +7617,10 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		res.status(400).json({ error: 'Invalid payload. Expected JSON object.' });
 		return;
 	}
+	// // ATHLYRAX_RETIRE_LEGACY_TRAINING_SCHEDULES_V1
+	// Retire the obsolete legacy mirror on every normal write so it cannot survive a delete,
+	// reload, or later whole-database save and be promoted back into canonical Schedule state.
+	body.trainingSchedules = [];
 	const actorTenantId = String(tenantScope.tenantId || '').trim().toLowerCase();
 	const foreignTenantViolations = collectForeignTenantRowViolations(body, actorTenantId);
 	if (foreignTenantViolations.length > 0) {
@@ -6399,6 +7663,22 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 	const storagePaths = tenantScope.storagePaths;
 	ensureStorageLayout(storagePaths);
 
+// ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE
+	if (!fs.existsSync(storagePaths.dbPath) && storagePaths.dbPath !== DB_PATH) {
+		appendAuthAuditEvent({
+			action: 'tenant_database_missing',
+			req,
+			status: 'blocked',
+			reason: 'missing_existing_tenant_database',
+			details: { tenantKey: storagePaths.tenantKey },
+		});
+		res.status(503).json({
+			error: 'Tenant data is temporarily unavailable. The server refused to create an empty replacement database.',
+			tenantKey: storagePaths.tenantKey,
+		});
+		return;
+	}
+
 	const existingDb = readJsonFile(storagePaths.dbPath);
 	if (hasUnauthorizedDocumentsChange(existingDb, body, req.auth)) {
 		appendAuthAuditEvent({
@@ -6417,18 +7697,6 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		writeDbSnapshotIfPossible(storagePaths.dbPath, storagePaths.snapshotDir);
 
 		const currentDb = readJsonFile(storagePaths.dbPath);
-		const currentUpdatedAtMs = getDbShapeUpdatedAtMs(currentDb);
-		const incomingUpdatedAtMs = getDbShapeUpdatedAtMs(body);
-		const isStaleWrite = Number.isFinite(currentUpdatedAtMs)
-			&& Number.isFinite(incomingUpdatedAtMs)
-			&& incomingUpdatedAtMs + 1000 < currentUpdatedAtMs;
-		if (isStaleWrite) {
-			return {
-				recoveredTargets: 0,
-				recoveredFixtureIds: 0,
-				staleWriteIgnored: true,
-			};
-		}
 
 		const backupPayload = readJsonFile(storagePaths.backupPath);
 		const backupRows = Array.isArray(backupPayload?.rows) ? backupPayload.rows : [];
@@ -6446,14 +7714,23 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 		const merged = mergePlannerTargets(body, backupRows);
 
 		// Tombstone merge: union of what's on disk with what the client sent.
+// ATHLYRAX_SCHEDULE_DELETION_AUTHORITY_V1
+		// Schedule deletion is server-authoritative. Generic whole-DB writes may
+		// preserve tombstones for other collection workflows, but cannot create a
+		// new Schedule tombstone and thereby bypass POST /db/schedule-delete.
+		const incomingNonScheduleTombstones = (Array.isArray(body?.__tombstones) ? body.__tombstones : [])
+			.filter((row) => String(row?.collection || '').trim() !== 'schedule');
 		const mergedTombstones = mergeTombstoneLists(
 			Array.isArray(currentDb?.__tombstones) ? currentDb.__tombstones : [],
-			Array.isArray(body?.__tombstones) ? body.__tombstones : [],
+			incomingNonScheduleTombstones,
 		);
 		const tombstoneLookup = buildTombstoneLookup(mergedTombstones);
+		// Generic PUT can preserve server-owned suppressions but cannot create new
+		// ones. New permanent occurrence suppressions are created only inside the
+		// authoritative Schedule-delete transaction from persisted server data.
 		const mergedScheduleOccurrenceSuppressions = mergeScheduleOccurrenceSuppressionLists(
 			Array.isArray(currentDb?.__meta?.scheduleOccurrenceSuppressions) ? currentDb.__meta.scheduleOccurrenceSuppressions : [],
-			Array.isArray(body?.__meta?.scheduleOccurrenceSuppressions) ? body.__meta.scheduleOccurrenceSuppressions : [],
+			[],
 		);
 
 		// Filter the incoming payload: any tombstoned row not legitimately re-created after
@@ -6468,6 +7745,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 			mergedScheduleOccurrenceSuppressions,
 		);
 
+		// ATHLYRAX_COACH_LINK_REQUESTS_PRESERVED_ON_GENERIC_DB_WRITE
 		const safeBody = {
 			...occurrenceFiltered.dbShape,
 			__tombstones: mergedTombstones,
@@ -6475,6 +7753,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				...(occurrenceFiltered.dbShape?.__meta || {}),
 				scheduleOccurrenceSuppressions: mergedScheduleOccurrenceSuppressions,
 			},
+			coachLinkRequests: Array.isArray(currentDb?.coachLinkRequests) ? currentDb.coachLinkRequests : [],
 		};
 		const ownershipStampedBody = applyOwnershipMetadataToDbShape(safeBody, currentDb, req.auth);
 
@@ -6484,17 +7763,27 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 			savedAt: new Date().toISOString(),
 				rows: extractPlannerTargetRows(ownershipStampedBody),
 		};
-		writeAtomicJsonFile(storagePaths.backupPath, nextBackup);
+		let plannerBackupSaved = true;
+		try {
+			try {
+			writeAtomicJsonFile(storagePaths.backupPath, nextBackup);
+		} catch (backupError) {
+			console.warn(`Planner target backup refresh was preserved after the primary database committed: ${backupError instanceof Error ? backupError.message : String(backupError)}`);
+		}
+		} catch (backupError) {
+			plannerBackupSaved = false;
+			console.error('[planner-backup] Database was saved but derived planner backup refresh failed:', backupError instanceof Error ? backupError.message : String(backupError));
+		}
 
 		return {
 			recoveredTargets: merged.recoveredTargets,
 			recoveredFixtureIds: merged.recoveredFixtureIds,
-			staleWriteIgnored: false,
 			blockedResurrections: [
 				...(Array.isArray(filtered.blockedResurrections) ? filtered.blockedResurrections : []),
 				...(Array.isArray(occurrenceFiltered.blockedResurrections) ? occurrenceFiltered.blockedResurrections : []),
 			],
 			tombstoneCount: mergedTombstones.length,
+			plannerBackupSaved,
 		};
 	})
 		.then((result) => {
@@ -6502,12 +7791,16 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				ok: true,
 				recoveredTargets: result.recoveredTargets,
 				recoveredFixtureIds: result.recoveredFixtureIds,
-				staleWriteIgnored: result.staleWriteIgnored === true,
 				blockedResurrections: Array.isArray(result.blockedResurrections) ? result.blockedResurrections : [],
 				tombstoneCount: Number.isFinite(result.tombstoneCount) ? result.tombstoneCount : 0,
+				plannerBackupSaved: result.plannerBackupSaved !== false,
 			});
 		})
 		.catch((error) => {
+			if (error?.code === 'ATHLYRAX_DB_REVISION_CONFLICT') {
+				res.status(409).json({ error: 'Database revision conflict.', details: error.message });
+				return;
+			}
 			// [STRUCTURED_400_CATCH_V1] Structured client-facing errors surface with attached body.
 			if (error && error.status === 400 && error.body) {
 				res.status(400).json(error.body);
@@ -6515,15 +7808,15 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 			}
 			res.status(500).json({
 				error: 'Could not write db.json',
-				details: error instanceof Error ? error.message : 'Unknown error',
+				...(IS_PRODUCTION ? {} : { details: error instanceof Error ? error.message : 'Unknown error' }),
 			});
 		});
 });
 
+autoHealSwimmerBindingsAtStartup();
 const server = app.listen(PORT, () => {
 	console.log(`Server running at http://localhost:${PORT}/db`);
 	console.log(`Website placeholders feed at http://localhost:${PORT}/content/placeholders`);
-	autoHealSwimmerBindingsAtStartup();
 });
 
 server.on('error', (error) => {

@@ -16,6 +16,10 @@ import {
   restoreBundledDemoTenantIfNeeded,
 } from './storage-path-contract.mjs';
 import { sanitizeDemoTenantDatabase } from './demo-data-sanitizer.mjs';
+import { validateAuthStoreSemanticIntegrity } from './auth-store-integrity.mjs';
+import { validateInviteStoreSemanticIntegrity } from './invite-store-integrity.mjs';
+import { validateTenantDatabaseSemanticIntegrity } from './tenant-db-integrity.mjs';
+import { validateBillingCatalogSemanticIntegrity } from './billing-catalog-store-integrity.mjs';
 import { assertNoSymlinkStorageLayout } from './storage-path-integrity.mjs';
 import {
   activeMigrationTransactionPath,
@@ -259,6 +263,15 @@ try {
   }
 
   // ATHLYRAX_MIGRATION_MARKER_ALL_STARTUP_STORES_VERIFIED
+  // ATHLYRAX_MIGRATION_SEMANTIC_VALIDATION
+  const semanticFailures = [
+    ...validateAuthStoreSemanticIntegrity(configuration, process.env, fs),
+    ...validateInviteStoreSemanticIntegrity(configuration, process.env, fs),
+    ...validateTenantDatabaseSemanticIntegrity(configuration, process.env, fs),
+    ...validateBillingCatalogSemanticIntegrity(configuration, process.env, fs),
+  ];
+  if (semanticFailures.length > 0) throw new Error(semanticFailures.join('\n'));
+
   const verifiedFiles = [
     { path: paths.globalDb, sha256: sha256File(paths.globalDb), bytes: fs.statSync(paths.globalDb).size },
     { path: paths.authUsers, sha256: sha256File(paths.authUsers), bytes: fs.statSync(paths.authUsers).size },

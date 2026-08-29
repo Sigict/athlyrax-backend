@@ -7,8 +7,10 @@ const INSTALL_MARK = Symbol.for('athlyrax.dataSafetyGuardsInstalled');
 const EXPRESS_INSTALL_MARK = Symbol.for('athlyrax.dbRevisionResponseGuardInstalled');
 const readContext = new AsyncLocalStorage();
 const CORE_DB_COLLECTIONS = Object.freeze([
-  'swimmers', 'squads', 'trainingSessions', 'trainingSessionSets', 'tests', 'attendance',
-  'competitions', 'fixtures', 'groups', 'trainingPlannerWeeks',
+  'coaches', 'squads', 'swimmers', 'venues', 'sessionTypes', 'timetables', 'timetableSlots', 'schedule',
+  'trainingSessions', 'trainingSessionSets', 'templateSets', 'templateTests', 'trainingSetBlocks',
+  'seasonPlans', 'mesoCycles', 'microCycles', 'attendance', 'tests', 'competitions', 'fixtures', 'groups',
+  'seasons', 'trainingPlannerWeeks', 'conflictResolutions', 'changeLog', 'auditLog', 'notifications', 'documents',
 ]);
 
 function resolveFilePath(value) {
@@ -44,6 +46,19 @@ function getRevisionTime(payload) {
 function coreRecordCount(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return 0;
   return CORE_DB_COLLECTIONS.reduce((sum, key) => sum + (Array.isArray(payload[key]) ? payload[key].length : 0), 0);
+}
+function hasRecognizedDatabaseShape(payload) {
+  return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload)
+    && CORE_DB_COLLECTIONS.some((key) => Array.isArray(payload[key]));
+}
+function assertNoCatastrophicDataShrink(current, incoming) {
+  const currentCount = coreRecordCount(current);
+  const incomingCount = coreRecordCount(incoming);
+  if (currentCount >= 20 && incomingCount < Math.ceil(currentCount * 0.2)) {
+    const error = new Error(`Refusing database replacement that would shrink recognized records from ${currentCount} to ${incomingCount}. Use an explicit controlled bulk-deletion/recovery workflow.`);
+    error.code = 'ATHLYRAX_DB_CATASTROPHIC_SHRINK_BLOCKED';
+    throw error;
+  }
 }
 function assertNoTotalDataWipe(current, incoming) {
   const currentCount = coreRecordCount(current);
@@ -114,6 +129,25 @@ function assertNoCriticalStoreWipe(current, incoming, kind) {
     const error = new Error('Refusing to replace non-empty snapshot history with an empty history. Use an explicit controlled reset procedure.');
     error.code = 'ATHLYRAX_SNAPSHOT_HISTORY_EMPTY_WIPE_BLOCKED';
     throw error;
+  }
+  if (kind === 'snapshot-submissions' && Array.isArray(current) && Array.isArray(incoming) && incoming.length < current.length) {
+    const error = new Error('Refusing to shrink snapshot submission history during ordinary persistence. Use an explicit controlled retention/reset procedure.');
+    error.code = 'ATHLYRAX_SNAPSHOT_HISTORY_SHRINK_BLOCKED';
+    throw error;
+  }
+  if (kind === 'auth-invites' && Array.isArray(current) && Array.isArray(incoming) && incoming.length < current.length) {
+    const error = new Error('Refusing to shrink authentication invite history during ordinary persistence.');
+    error.code = 'ATHLYRAX_AUTH_INVITE_HISTORY_SHRINK_BLOCKED';
+    throw error;
+  }
+  if ((kind === 'auth-users' || kind === 'auth-users-backup')) {
+    const currentUsers = Array.isArray(current) ? current : (current && Array.isArray(current.users) ? current.users : []);
+    const incomingUsers = Array.isArray(incoming) ? incoming : (incoming && Array.isArray(incoming.users) ? incoming.users : []);
+    if (incomingUsers.length < currentUsers.length - 1) {
+      const error = new Error('Refusing authentication-store replacement that removes more than one account in a single ordinary operation.');
+      error.code = 'ATHLYRAX_AUTH_STORE_CATASTROPHIC_SHRINK_BLOCKED';
+      throw error;
+    }
   }
 }
 function scopeToken(filePath) {
@@ -199,7 +233,6 @@ export function installDataSafetyGuards(options = {}) {
   const logger = options.logger || console;
   const isProduction = String(env.NODE_ENV || '').trim().toLowerCase() === 'production';
   const maxFiles = Math.max(1, Number.parseInt(String(env.ATHLYRAX_SAFETY_MAX_BACKUPS || '30'), 10) || 30);
-  const staleToleranceMs = Math.max(0, Number.parseInt(String(env.ATHLYRAX_STALE_WRITE_TOLERANCE_MS || '1000'), 10) || 1000);
   const originalReadFile = fsModule.readFile.bind(fsModule);
   const originalRenameSync = fsModule.renameSync.bind(fsModule);
 
@@ -262,11 +295,17 @@ export function installDataSafetyGuards(options = {}) {
       error.code = 'ATHLYRAX_INCOMING_DB_INVALID';
       throw error;
     }
+    if (!hasRecognizedDatabaseShape(incoming)) {
+      const error = new Error(`Refusing database replacement because the incoming object has no recognized AthlyraX data collections: ${source}`);
+      error.code = 'ATHLYRAX_DB_SHAPE_INVALID';
+      throw error;
+    }
 
     const expectedTenantId = assertTenantIdentity(incoming, destination, env, 'Incoming database');
     if (current) {
       assertTenantIdentity(current, destination, env, 'Current database');
       assertNoTotalDataWipe(current, incoming);
+      assertNoCatastrophicDataShrink(current, incoming);
     }
     if (!destinationExists && isProduction && !hasValidProvisioningProof(incoming, destination, env)) {
       const error = new Error(`Refusing to create a missing production database outside explicit server-bound tenant provisioning: ${destination}`);
@@ -287,13 +326,6 @@ export function installDataSafetyGuards(options = {}) {
         error.code = 'ATHLYRAX_DB_REVISION_CONFLICT';
         throw error;
       }
-    }
-    const currentTime = getRevisionTime(current);
-    const incomingTime = getRevisionTime(incoming);
-    if (Number.isFinite(currentTime) && Number.isFinite(incomingTime) && incomingTime + staleToleranceMs < currentTime) {
-      const error = new Error('Refusing stale database replacement.');
-      error.code = 'ATHLYRAX_STALE_DB_WRITE';
-      throw error;
     }
 
     writeRevisionToIncoming(source, incoming, currentRevision + 1, expectedTenantId, fsModule);
