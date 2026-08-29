@@ -3857,13 +3857,20 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		return;
 	}
 
-	const canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[String(user?.username || '').trim().toLowerCase()];
-	if (canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {
-		const userIndex = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === String(user?.username || '').trim().toLowerCase());
+	const canonicalUsername = String(user?.username || '').trim().toLowerCase();
+	const canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[canonicalUsername];
+	const canonicalRole = canonicalUsername === 'demo.coach' ? 'head-coach' : '';
+	const canonicalProfileDrifted = Boolean(canonicalTenantId) && (
+		normalizeTenantId(user?.tenantId) !== canonicalTenantId
+		|| (canonicalRole && String(user?.role || '').trim().toLowerCase() !== canonicalRole)
+	);
+	if (canonicalProfileDrifted) {
+		const userIndex = authUsers.findIndex((row) => String(row?.username || '').trim().toLowerCase() === canonicalUsername);
 		if (userIndex >= 0) {
 			authUsers[userIndex] = {
 				...authUsers[userIndex],
 				tenantId: canonicalTenantId,
+				...(canonicalRole ? { role: canonicalRole } : {}),
 			};
 			user = authUsers[userIndex];
 			try {
