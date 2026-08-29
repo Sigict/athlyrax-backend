@@ -55,6 +55,9 @@ for (const relative of transforms) {
 if (!fs.existsSync(path.join(root, 'scripts/patch-athlete-tenant-registry.mjs'))) throw new Error('Required athlete tenant registry guard is missing.');
 run('athlete tenant registry guard', ['scripts/patch-athlete-tenant-registry.mjs']);
 
+if (!fs.existsSync(path.join(root, 'scripts/patch-athlete-wearable-api.mjs'))) throw new Error('Required athlete wearable gateway guard is missing.');
+run('athlete wearable gateway guard', ['scripts/patch-athlete-wearable-api.mjs']);
+
 if (!fs.existsSync(path.join(root, 'scripts/patch-schedule-deletion-authority.mjs'))) throw new Error('Required Schedule deletion authority guard is missing.');
 run('Schedule deletion authority guard', ['scripts/patch-schedule-deletion-authority.mjs']);
 
@@ -87,6 +90,8 @@ for (const relative of [
   'athlete-capability-projection.mjs',
   'athlete-tenant-registry.mjs',
   'athlete-session-write.mjs',
+  'athlete-session-review.mjs',
+  'athlete-wearable-sync.mjs',
   'scripts/storage-path-contract.mjs',
   'scripts/migrate-storage-once.mjs',
   'scripts/approve-storage-layout.mjs',
@@ -103,6 +108,7 @@ for (const relative of [
   'scripts/patch-request-body-limits.mjs',
   'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-athlete-home-api.mjs',
+  'scripts/patch-athlete-wearable-api.mjs',
   'scripts/patch-schedule-deletion-authority.mjs',
   'scripts/patch-bulk-delete-tombstone-capacity.mjs',
   'scripts/patch-server-authoritative-schedule-delete.mjs',
