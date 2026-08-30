@@ -79,3 +79,30 @@ test('clubs path still blocks cross-tenant replacement', { concurrency: false },
   assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8')).swimmers[0].id, 'keep');
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+
+test('database write survives failed backup when storage-root env is absent', { concurrency: false }, () => {
+  const root = tempDir('athlyrax-render-default-root-fallback-');
+  const storageRoot = path.join(root, 'storage');
+  const brokenBackupRoot = path.join(root, 'broken-backup-root');
+  fs.writeFileSync(brokenBackupRoot, 'not-a-directory', 'utf8');
+
+  const tenantDir = path.join(storageRoot, 'tenants', 'clubs', 'demo-company');
+  const destination = path.join(tenantDir, 'db.json');
+  const source = path.join(tenantDir, 'db.json.next.tmp');
+  writeJson(destination, { swimmers: [{ id: 'old' }], __meta: { tenantId: 'demo-company', storageRevision: 20 } });
+  writeJson(source, { swimmers: [{ id: 'new' }], __meta: { tenantId: 'demo-company', storageRevision: 20 } });
+
+  withGuard({
+    NODE_ENV: 'production',
+    ATHLYRAX_SAFETY_BACKUP_ROOT: brokenBackupRoot,
+    AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long',
+  }, () => fs.renameSync(source, destination));
+
+  const saved = JSON.parse(fs.readFileSync(destination, 'utf8'));
+  assert.equal(saved.swimmers[0].id, 'new');
+  assert.equal(saved.__meta.storageRevision, 21);
+  const emergencyRoot = path.join(storageRoot, '.athlyrax-emergency-backups', 'pre-write');
+  assert.equal(fs.existsSync(emergencyRoot), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});

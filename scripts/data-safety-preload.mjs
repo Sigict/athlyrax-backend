@@ -172,8 +172,17 @@ function backupFile(filePath, reason, env, maxFiles, fsModule = fs) {
     return backupFileAtRoot(filePath, reason, preferredRoot, maxFiles, fsModule);
   } catch (preferredError) {
     const storageRootRaw = String(env.ATHLYRAX_STORAGE_ROOT || '').trim();
-    if (!storageRootRaw) throw preferredError;
-    const fallbackRoot = path.join(path.resolve(storageRootRaw), '.athlyrax-emergency-backups');
+    const resolvedStorageRoot = storageRootRaw
+      ? path.resolve(storageRootRaw)
+      : (() => {
+          const resolvedFile = path.resolve(filePath);
+          const marker = path.join('tenants', 'clubs');
+          const markerIndex = resolvedFile.lastIndexOf(marker);
+          return markerIndex >= 0
+            ? resolvedFile.slice(0, markerIndex).replace(/[\\/]$/, '')
+            : path.dirname(filePath);
+        })();
+    const fallbackRoot = path.join(resolvedStorageRoot, '.athlyrax-emergency-backups');
     if (fallbackRoot === preferredRoot) throw preferredError;
     try {
       return backupFileAtRoot(filePath, reason, fallbackRoot, maxFiles, fsModule);
