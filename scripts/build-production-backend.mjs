@@ -93,6 +93,9 @@ run('final revision integrity guard', ['scripts/patch-revision-integrity.mjs']);
 // Narrow compatibility repair for the canonical production demo tenant. Keep this
 // outside the audited core transform array so it cannot reorder general hardening.
 run('final canonical demo tenant metadata repair guard', ['scripts/patch-demo-company-tenant-metadata-write.mjs']);
+// Safe production-only classification for the otherwise-redacted /db write failure.
+// This intentionally runs after redaction and exposes only a bounded stage/code pair.
+run('final DB write stage diagnostics', ['scripts/patch-db-write-stage-diagnostics.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
@@ -109,6 +112,7 @@ for (const relative of [
   'scripts/patch-production-auth-token-redaction.mjs',
   'scripts/patch-public-demo-readonly.mjs',
   'scripts/patch-demo-company-tenant-metadata-write.mjs',
+  'scripts/patch-db-write-stage-diagnostics.mjs',
   'scripts/patch-athlete-home-api.mjs',
   'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-athlete-wearable-api.mjs',
