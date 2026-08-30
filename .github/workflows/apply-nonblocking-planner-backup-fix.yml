@@ -1,0 +1,75 @@
+name: Apply nonblocking planner backup fix
+
+on:
+  push:
+    branches:
+      - fix/nonblocking-planner-backup-write
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/nonblocking-planner-backup-write
+      - name: Make secondary Planner backup nonblocking after primary DB commit
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('index.js')
+          s = p.read_text()
+          old = "\t\tconst nextBackup = {\n\t\t\tsavedAt: new Date().toISOString(),\n\t\t\trows: extractPlannerTargetRows(ownershipStampedBody),\n\t\t};\n\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);"
+          new = "\t\tconst nextBackup = {\n\t\t\tsavedAt: new Date().toISOString(),\n\t\t\trows: extractPlannerTargetRows(ownershipStampedBody),\n\t\t};\n\t\ttry {\n\t\t\twriteAtomicJsonFile(storagePaths.backupPath, nextBackup);\n\t\t} catch (backupError) {\n\t\t\tconsole.error('[planner-backup] Primary db.json commit succeeded but Planner recovery backup write failed:', backupError instanceof Error ? backupError.message : backupError);\n\t\t}"
+          if old not in s:
+              raise SystemExit('Planner backup write anchor not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          cat > tests/planner-backup-nonblocking-write.test.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import test from 'node:test';
+
+          test('secondary Planner backup cannot turn a successful primary db commit into HTTP 500', () => {
+            const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+            const primary = 'writeAtomicJsonFile(storagePaths.dbPath, ownershipStampedBody);';
+            const backup = 'writeAtomicJsonFile(storagePaths.backupPath, nextBackup);';
+            const primaryAt = source.indexOf(primary);
+            const backupAt = source.indexOf(backup, primaryAt);
+            assert.ok(primaryAt >= 0, 'primary DB write missing');
+            assert.ok(backupAt > primaryAt, 'secondary Planner backup write missing or ordered before primary');
+            const between = source.slice(primaryAt, backupAt);
+            assert.match(between, /const nextBackup\s*=\s*\{/);
+            const surrounding = source.slice(Math.max(0, backupAt - 200), backupAt + backup.length + 300);
+            assert.match(surrounding, /try\s*\{/);
+            assert.match(surrounding, /catch\s*\(backupError\)/);
+            assert.match(surrounding, /Primary db\.json commit succeeded but Planner recovery backup write failed/);
+          });
+          EOF
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('package.json')
+          data=json.loads(p.read_text())
+          old=data['scripts']['test:data-safety']
+          extra=' tests/planner-backup-nonblocking-write.test.mjs'
+          if extra.strip() not in old:
+              data['scripts']['test:data-safety']=old+extra
+          p.write_text(json.dumps(data, indent=2)+'\n')
+          PY
+      - name: Run exact regression and production build
+        run: |
+          node --test tests/planner-backup-nonblocking-write.test.mjs
+          npm ci
+          npm run test:data-safety
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name 'Sigict'
+          git config user.email 'sergio.catania1@hotmail.com'
+          git add index.js package.json tests/planner-backup-nonblocking-write.test.mjs
+          git commit -m 'Do not fail DB save after secondary Planner backup error'
+          git push origin HEAD:fix/nonblocking-planner-backup-write
