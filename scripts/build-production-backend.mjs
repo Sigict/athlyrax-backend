@@ -23,6 +23,7 @@ const transforms = [
   'scripts/patch-operational-integrity.mjs',
   'scripts/patch-runtime-data-retention.mjs',
   'scripts/patch-revision-integrity.mjs',
+  'scripts/patch-demo-company-tenant-metadata-write.mjs',
   'scripts/patch-auth-tenant-integrity.mjs',
   'scripts/patch-migration-validation.mjs',
   'scripts/patch-runtime-auth-billing-safety.mjs',
@@ -90,6 +91,7 @@ run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 // Final persistence authority pass. Later transforms must never reintroduce timestamp-based
 // stale-write rejection after storageRevision has been established as the sole concurrency authority.
 run('final revision integrity guard', ['scripts/patch-revision-integrity.mjs']);
+run('final canonical demo tenant metadata repair guard', ['scripts/patch-demo-company-tenant-metadata-write.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
@@ -105,6 +107,7 @@ for (const relative of [
   'scripts/patch-snapshot-cookie-session.mjs',
   'scripts/patch-production-auth-token-redaction.mjs',
   'scripts/patch-public-demo-readonly.mjs',
+  'scripts/patch-demo-company-tenant-metadata-write.mjs',
   'scripts/patch-athlete-home-api.mjs',
   'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-athlete-wearable-api.mjs',
