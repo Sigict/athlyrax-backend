@@ -1,0 +1,51 @@
+name: Apply Render storage-root fix
+
+on:
+  push:
+    branches:
+      - fix/render-storage-root-default-fallback
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/render-storage-root-default-fallback
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply exact storage fallback fix and regression
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const safetyPath = 'scripts/data-safety-preload.mjs';
+          let safety = fs.readFileSync(safetyPath, 'utf8');
+          const oldBlock = `  } catch (preferredError) {\n    const storageRootRaw = String(env.ATHLYRAX_STORAGE_ROOT || '').trim();\n    if (!storageRootRaw) throw preferredError;\n    const fallbackRoot = path.join(path.resolve(storageRootRaw), '.athlyrax-emergency-backups');\n    if (fallbackRoot === preferredRoot) throw preferredError;\n`;
+          const newBlock = `  } catch (preferredError) {\n    const storageRootRaw = String(env.ATHLYRAX_STORAGE_ROOT || '').trim();\n    const resolvedStorageRoot = storageRootRaw\n      ? path.resolve(storageRootRaw)\n      : (() => {\n          const resolvedFile = path.resolve(filePath);\n          const marker = path.join('tenants', 'clubs');\n          const markerIndex = resolvedFile.lastIndexOf(marker);\n          return markerIndex >= 0\n            ? resolvedFile.slice(0, markerIndex).replace(/[\\\\/]$/, '')\n            : path.dirname(filePath);\n        })();\n    const fallbackRoot = path.join(resolvedStorageRoot, '.athlyrax-emergency-backups');\n    if (fallbackRoot === preferredRoot) throw preferredError;\n`;
+          if (!safety.includes(oldBlock)) throw new Error('expected backup fallback block not found');
+          safety = safety.replace(oldBlock, newBlock);
+          fs.writeFileSync(safetyPath, safety);
+
+          const testPath = 'tests/render-storage-write-fallback.test.mjs';
+          let tests = fs.readFileSync(testPath, 'utf8');
+          if (!tests.includes("storage-root env is absent")) {
+            tests += `\n\ntest('database write survives failed backup when storage-root env is absent', { concurrency: false }, () => {\n  const root = tempDir('athlyrax-render-default-root-fallback-');\n  const storageRoot = path.join(root, 'storage');\n  const brokenBackupRoot = path.join(root, 'broken-backup-root');\n  fs.writeFileSync(brokenBackupRoot, 'not-a-directory', 'utf8');\n\n  const tenantDir = path.join(storageRoot, 'tenants', 'clubs', 'demo-company');\n  const destination = path.join(tenantDir, 'db.json');\n  const source = path.join(tenantDir, 'db.json.next.tmp');\n  writeJson(destination, { swimmers: [{ id: 'old' }], __meta: { tenantId: 'demo-company', storageRevision: 20 } });\n  writeJson(source, { swimmers: [{ id: 'new' }], __meta: { tenantId: 'demo-company', storageRevision: 20 } });\n\n  withGuard({\n    NODE_ENV: 'production',\n    ATHLYRAX_SAFETY_BACKUP_ROOT: brokenBackupRoot,\n    AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long',\n  }, () => fs.renameSync(source, destination));\n\n  const saved = JSON.parse(fs.readFileSync(destination, 'utf8'));\n  assert.equal(saved.swimmers[0].id, 'new');\n  assert.equal(saved.__meta.storageRevision, 21);\n  const emergencyRoot = path.join(storageRoot, '.athlyrax-emergency-backups', 'pre-write');\n  assert.equal(fs.existsSync(emergencyRoot), true);\n  fs.rmSync(root, { recursive: true, force: true });\n});\n`;
+            fs.writeFileSync(testPath, tests);
+          }
+          NODE
+      - name: Run exact regression
+        run: node --test tests/render-storage-write-fallback.test.mjs
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'Sigict'
+          git config user.email 'sergio.catania1@hotmail.com'
+          git add scripts/data-safety-preload.mjs tests/render-storage-write-fallback.test.mjs
+          git commit -m 'Fix Render backup fallback without storage-root env'
+          git push origin HEAD:fix/render-storage-root-default-fallback
