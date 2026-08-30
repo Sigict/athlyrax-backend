@@ -51,8 +51,6 @@ for (const relative of transforms) {
   run(relative, [relative]);
 }
 
-// Athlete/Terra is an additive production phase. Keep it outside the audited core
-// transform array so current production hardening order remains byte-for-byte explicit.
 for (const relative of [
   'scripts/patch-athlete-home-api.mjs',
   'scripts/patch-athlete-tenant-registry.mjs',
@@ -64,38 +62,26 @@ for (const relative of [
 
 if (!fs.existsSync(path.join(root, 'scripts/patch-schedule-deletion-authority.mjs'))) throw new Error('Required Schedule deletion authority guard is missing.');
 run('Schedule deletion authority guard', ['scripts/patch-schedule-deletion-authority.mjs']);
-
 if (!fs.existsSync(path.join(root, 'scripts/patch-bulk-delete-tombstone-capacity.mjs'))) throw new Error('Required bulk-delete tombstone capacity guard is missing.');
 run('bulk-delete tombstone capacity guard', ['scripts/patch-bulk-delete-tombstone-capacity.mjs']);
-
 if (!fs.existsSync(path.join(root, 'scripts/patch-server-authoritative-schedule-delete.mjs'))) throw new Error('Required server-authoritative schedule deletion guard is missing.');
 run('server-authoritative schedule deletion guard', ['scripts/patch-server-authoritative-schedule-delete.mjs']);
-
 if (!fs.existsSync(path.join(root, 'scripts/patch-schedule-delete-block-integrity.mjs'))) throw new Error('Required Schedule delete block-integrity guard is missing.');
 run('Schedule delete block-integrity guard', ['scripts/patch-schedule-delete-block-integrity.mjs']);
-
 if (!fs.existsSync(path.join(root, 'scripts/patch-server-authoritative-schedule-delete-verification.mjs'))) throw new Error('Required server-authoritative schedule deletion match verification is missing.');
 run('server-authoritative schedule deletion match verification', ['scripts/patch-server-authoritative-schedule-delete-verification.mjs']);
-
 if (!fs.existsSync(path.join(root, 'scripts/schedule-delete-occurrence-identity.mjs'))) throw new Error('Required canonical Schedule occurrence resolver is missing.');
 if (!fs.existsSync(path.join(root, 'scripts/patch-canonical-schedule-delete-occurrence.mjs'))) throw new Error('Required canonical Schedule occurrence deletion guard is missing.');
 run('canonical Schedule occurrence deletion guard', ['scripts/patch-canonical-schedule-delete-occurrence.mjs']);
-
 if (!fs.existsSync(path.join(root, 'scripts/patch-retire-legacy-training-schedules.mjs'))) throw new Error('Required legacy trainingSchedules retirement guard is missing.');
 run('legacy trainingSchedules retirement guard', ['scripts/patch-retire-legacy-training-schedules.mjs']);
-
 if (!fs.existsSync(path.join(root, 'scripts/patch-public-demo-readonly.mjs'))) throw new Error('Required public demo read-only guard is missing.');
 run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 
-// Final persistence authority pass. Later transforms must never reintroduce timestamp-based
-// stale-write rejection after storageRevision has been established as the sole concurrency authority.
 run('final revision integrity guard', ['scripts/patch-revision-integrity.mjs']);
-// Narrow compatibility repair for the canonical production demo tenant. Keep this
-// outside the audited core transform array so it cannot reorder general hardening.
 run('final canonical demo tenant metadata repair guard', ['scripts/patch-demo-company-tenant-metadata-write.mjs']);
-// Safe production-only classification for the otherwise-redacted /db write failure.
-// This intentionally runs after redaction and exposes only a bounded stage/code pair.
 run('final DB write stage diagnostics', ['scripts/patch-db-write-stage-diagnostics.mjs']);
+run('final ENOSPC primary DB recovery', ['scripts/patch-enospc-primary-db-recovery.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
@@ -113,6 +99,7 @@ for (const relative of [
   'scripts/patch-public-demo-readonly.mjs',
   'scripts/patch-demo-company-tenant-metadata-write.mjs',
   'scripts/patch-db-write-stage-diagnostics.mjs',
+  'scripts/patch-enospc-primary-db-recovery.mjs',
   'scripts/patch-athlete-home-api.mjs',
   'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-athlete-wearable-api.mjs',
