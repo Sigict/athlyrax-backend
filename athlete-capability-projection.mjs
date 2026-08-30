@@ -31,7 +31,8 @@ function radarLabels(row = {}) {
   const summary = row.summary && typeof row.summary === 'object'
     ? row.summary
     : (row.results && typeof row.results === 'object' ? row.results : row);
-  return asArray(summary?.radar?.labels).map(text).filter(Boolean);
+  const labels = asArray(summary?.radar?.labels).map(text).filter(Boolean);
+  return labels;
 }
 
 function average(values = []) {

@@ -117,10 +117,11 @@ function canonicalSessionId(session = {}) {
 }
 
 function safeSession(session = {}, linkedSets = []) {
+  const sessionId = canonicalSessionId(session);
   const nestedSets = asArray(session.sets || session.sessionSets);
   const sets = nestedSets.length ? nestedSets : linkedSets;
   return {
-    id: canonicalSessionId(session),
+    id: sessionId,
     date: text(session.date || session.sessionDate),
     disciplineId: text(session.disciplineId || session.discipline || 'swimming'),
     ownerType: session.ownerType === 'athlete' ? 'athlete' : 'club',
@@ -157,7 +158,9 @@ function safeClubConnection(connection = {}) {
     startDate: text(connection.startDate),
     endDate: text(connection.endDate),
     swimmingSessionPolicy: text(connection.swimmingSessionPolicy),
-    sessionPolicies: connection.sessionPolicies && typeof connection.sessionPolicies === 'object' ? connection.sessionPolicies : {},
+    sessionPolicies: connection.sessionPolicies && typeof connection.sessionPolicies === 'object'
+      ? connection.sessionPolicies
+      : {},
     dataScopes: asArray(connection.dataScopes),
   };
 }
@@ -172,12 +175,17 @@ function dedupeConnections(rows = []) {
       byKey.set(key, row);
       continue;
     }
+    const nextPolicies = Object.keys(row.sessionPolicies || {}).length
+      ? row.sessionPolicies
+      : previous.sessionPolicies;
+    const nextSwimmingPolicy = row.swimmingSessionPolicy || previous.swimmingSessionPolicy;
+    const nextScopes = row.dataScopes.length ? row.dataScopes : previous.dataScopes;
     byKey.set(key, {
       ...previous,
       ...row,
-      swimmingSessionPolicy: row.swimmingSessionPolicy || previous.swimmingSessionPolicy,
-      sessionPolicies: Object.keys(row.sessionPolicies || {}).length ? row.sessionPolicies : previous.sessionPolicies,
-      dataScopes: row.dataScopes.length ? row.dataScopes : previous.dataScopes,
+      swimmingSessionPolicy: nextSwimmingPolicy,
+      sessionPolicies: nextPolicies,
+      dataScopes: nextScopes,
     });
   }
   return [...byKey.values()];
@@ -198,7 +206,11 @@ function dedupeSessions(rows = []) {
       const setId = text(set?.id);
       if (setId && !setsById.has(setId)) setsById.set(setId, set);
     }
-    byId.set(id, { ...previous, ...row, sets: [...setsById.values()] });
+    byId.set(id, {
+      ...previous,
+      ...row,
+      sets: [...setsById.values()],
+    });
   }
   return [...byId.values()];
 }
@@ -243,7 +255,10 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
     const linkedSets = linkedSetRows.filter((set) => {
       const parentSessionId = setSessionId(set);
       const parentScheduleId = setScheduleId(set);
-      return Boolean((sessionId && parentSessionId === sessionId) || (scheduleId && parentScheduleId === scheduleId));
+      return Boolean(
+        (sessionId && parentSessionId === sessionId) ||
+        (scheduleId && parentScheduleId === scheduleId)
+      );
     });
     return safeSession(row, linkedSets);
   }));
