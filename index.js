@@ -2671,16 +2671,33 @@ function ensureStorageLayout(storagePaths = null) {
 	}
 }
 
+function cleanupStaleAtomicTemps(filePath) {
+	const dir = path.dirname(filePath);
+	const prefix = `${path.basename(filePath)}.`;
+	try {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith('.tmp')) continue;
+			try { fs.unlinkSync(path.join(dir, entry.name)); } catch {}
+		}
+	} catch {}
+}
+
 function writeAtomicJsonFile(filePath, data) {
 	const dir = path.dirname(filePath);
 	fs.mkdirSync(dir, { recursive: true });
+	cleanupStaleAtomicTemps(filePath);
 	const tmpPath = path.join(
 		dir,
 		`${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
 	);
 	const serialized = `${JSON.stringify(data, null, 2)}\n`;
-	fs.writeFileSync(tmpPath, serialized, 'utf8');
-	fs.renameSync(tmpPath, filePath);
+	try {
+		fs.writeFileSync(tmpPath, serialized, 'utf8');
+		fs.renameSync(tmpPath, filePath);
+	} catch (error) {
+		try { fs.unlinkSync(tmpPath); } catch {}
+		throw error;
+	}
 }
 
 function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {

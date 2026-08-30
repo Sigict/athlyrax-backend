@@ -20,6 +20,14 @@ function isDatabasePath(value) {
   const resolved = resolveFilePath(value);
   return Boolean(resolved) && path.basename(resolved).toLowerCase() === 'db.json';
 }
+function isAtomicDbTempSource(source, destination) {
+  const sourcePath = resolveFilePath(source);
+  const destinationPath = resolveFilePath(destination);
+  if (path.dirname(sourcePath) !== path.dirname(destinationPath)) return false;
+  const sourceName = path.basename(sourcePath);
+  const destinationName = path.basename(destinationPath);
+  return sourceName.startsWith(`${destinationName}.`) && sourceName.endsWith('.tmp');
+}
 function safeJsonRead(filePath, fsModule = fs) {
   try {
     if (!fsModule.existsSync(filePath)) return null;
@@ -150,6 +158,7 @@ function durableWriteBytes(destination, bytes, fsModule = fs) {
 function backupFileAtRoot(filePath, reason, root, maxFiles, fsModule = fs) {
   const directory = path.join(root, reason, scopeToken(filePath));
   fsModule.mkdirSync(directory, { recursive: true });
+  rotate(directory, Math.max(0, maxFiles - 1), fsModule);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const destination = path.join(directory, `${stamp}-${process.pid}-${crypto.randomBytes(4).toString('hex')}.json`);
   const sourceBytes = fsModule.readFileSync(filePath);
@@ -267,6 +276,7 @@ export function installDataSafetyGuards(options = {}) {
       return originalRenameSync(source, destination);
     }
 
+    try {
     const context = readContext.getStore();
     if (context?.dbPath === destination) {
       const preview = backupFile(destination, 'read-time-rewrite-blocked', env, maxFiles, fsModule);
@@ -328,6 +338,12 @@ export function installDataSafetyGuards(options = {}) {
     try { return originalRenameSync(source, destination); }
     catch (error) {
       logger.error(`[data-safety] Database replacement failed for ${destination}${backup ? `; previous version preserved at ${backup}` : ''}`);
+      throw error;
+    }
+    } catch (error) {
+      if (isAtomicDbTempSource(source, destination)) {
+        try { fsModule.unlinkSync(source); } catch {}
+      }
       throw error;
     }
   };
