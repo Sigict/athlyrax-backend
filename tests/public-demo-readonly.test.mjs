@@ -53,7 +53,7 @@ async function startServer() {
       NODE_ENV: 'development',
       PORT: port,
       AUTH_REQUIRED: 'true',
-      AUTH_SECRET: 'public-demo-readonly-test-secret-at-least-32-characters',
+      AUTH_SECRET: 'public-demo-write-test-secret-at-least-32-characters',
       AUTH_ALLOW_COACH_SIGNUP: 'false',
       AUTH_ALLOW_BEARER_COMPAT: 'false',
       FRONTEND_PUBLIC_ORIGIN: 'http://localhost:5173',
@@ -100,7 +100,7 @@ function cookieHeader(response) {
   return rows.map((row) => String(row || '').split(';')[0].trim()).filter(Boolean).join('; ');
 }
 
-test('public demo coach keeps coach UI authority but remains server read-only and tenant-isolated', async () => {
+test('demo coach keeps head-coach write authority while remaining tenant-isolated', async () => {
   const server = await startServer();
   try {
     const loginResponse = await fetch(`${server.baseUrl}/auth/login`, {
@@ -132,6 +132,10 @@ test('public demo coach keeps coach UI authority but remains server read-only an
     });
     assert.equal(foreignResponse.status, 403);
 
+    const nextDb = {
+      ...db,
+      swimmers: [...(db?.swimmers || []), { id: 'allowed-write', name: 'Allowed Demo Write' }],
+    };
     const writeResponse = await fetch(`${server.baseUrl}/db`, {
       method: 'PUT',
       headers: {
@@ -139,9 +143,16 @@ test('public demo coach keeps coach UI authority but remains server read-only an
         'Content-Type': 'application/json',
         [String(login?.csrfHeaderName || 'x-csrf-token').toLowerCase()]: String(login?.csrfToken || ''),
       },
-      body: JSON.stringify({ swimmers: [{ id: 'forbidden-write' }] }),
+      body: JSON.stringify(nextDb),
     });
-    assert.equal(writeResponse.status, 403, 'public demo coach must remain server-side read-only even with head-coach UI authority');
+    const writeBody = await writeResponse.json();
+    assert.equal(writeResponse.status, 200, JSON.stringify(writeBody));
+
+    const persistedResponse = await fetch(`${server.baseUrl}/db`, { headers: { Cookie: cookie } });
+    const persisted = await persistedResponse.json();
+    assert.equal(persistedResponse.status, 200);
+    assert.ok((persisted?.swimmers || []).some((row) => row.id === 'allowed-write'));
+    assert.ok(!(persisted?.swimmers || []).some((row) => row.id === 'other-swimmer'));
   } finally {
     await server.stop();
   }

@@ -26,7 +26,7 @@ jobs:
           grep -F "ATHLYRAX_CANONICAL_STORAGE_RUNTIME_GUARD" index.js
           grep -F "ATHLYRAX_FAIL_CLOSED_MISSING_TENANT_WRITE" index.js
           grep -F "ATHLYRAX_DEMO_RECOVERY_RELEASE_2026_08_08_V1" index.js
-          grep -F "ATHLYRAX_PUBLIC_DEMO_READ_ONLY" index.js
+          grep -F "PUBLIC_DEMO_CANONICAL_IDENTITY" scripts/patch-public-demo-readonly.mjs
           node --test tests/demo-coach-routing-regression.test.mjs
           npm run test:signup-legal-acceptance
           npm run test:public-demo-readonly
@@ -85,7 +85,7 @@ jobs:
           echo "Production never exposed the exact backend commit ${expected_sha} with required guards." >&2
           exit 1
 
-      - name: Verify live public demo read-only access when credential secret is configured
+      - name: Verify live demo coach canonical access when credential secret is configured
         id: verify_demo
         if: github.event_name != 'pull_request'
         env:
@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${DEMO_PASSWORD:-}" ]; then
-            echo 'ATHLYRAX_DEMO_PASSWORD is not configured; exact-release verification remains authoritative and the public-demo boundary is covered by the mandatory integration test.'
+            echo 'ATHLYRAX_DEMO_PASSWORD is not configured; exact-release verification remains authoritative and the demo coach boundary is covered by the mandatory integration test.'
             exit 0
           fi
 
@@ -142,7 +142,7 @@ jobs:
           const role = String(me?.user?.role || '');
           if (username !== 'demo.coach') throw new Error(`Unexpected live demo username: ${username}`);
           if (tenantId !== 'demo-company') throw new Error(`Live demo tenant mismatch: ${tenantId}`);
-          if (role !== 'viewer') throw new Error(`Live demo must be server-forced to viewer, got: ${role}`);
+          if (role !== 'head-coach') throw new Error(`Live demo coach must keep head-coach authority, got: ${role}`);
           const keys = ['swimmers','squads','trainingSessions','trainingSessionSets','tests','attendance','competitions','fixtures','groups','timetables','timetableSlots'];
           const meaningful = keys.some((key) => Array.isArray(db?.[key]) && db[key].length > 0);
           if (!meaningful) throw new Error('Live demo coach database contains no meaningful synthetic records.');
