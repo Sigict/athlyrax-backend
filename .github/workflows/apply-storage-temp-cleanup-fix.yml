@@ -1,0 +1,121 @@
+name: Apply storage temp cleanup fix
+
+on:
+  push:
+    branches:
+      - fix/storage-temp-leak-and-preprune
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/storage-temp-leak-and-preprune
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply storage leak and pre-prune fixes
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const indexPath = 'index.js';
+          let index = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
+          const oldAtomic = `function writeAtomicJsonFile(filePath, data) {\n\tconst dir = path.dirname(filePath);\n\tfs.mkdirSync(dir, { recursive: true });\n\tconst tmpPath = path.join(\n\t\tdir,\n\t\t\`${'${'}path.basename(filePath)}.${'${'}process.pid}.${'${'}Date.now()}.tmp\`\n\t);\n\tconst serialized = \`${'${'}JSON.stringify(data, null, 2)}\\n\`;\n\tfs.writeFileSync(tmpPath, serialized, 'utf8');\n\tfs.renameSync(tmpPath, filePath);\n}`;
+          const newAtomic = `function cleanupStaleAtomicTemps(filePath) {\n\tconst dir = path.dirname(filePath);\n\tconst prefix = \`${'${'}path.basename(filePath)}.\`;\n\ttry {\n\t\tfor (const entry of fs.readdirSync(dir, { withFileTypes: true })) {\n\t\t\tif (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith('.tmp')) continue;\n\t\t\ttry { fs.unlinkSync(path.join(dir, entry.name)); } catch {}\n\t\t}\n\t} catch {}\n}\n\nfunction writeAtomicJsonFile(filePath, data) {\n\tconst dir = path.dirname(filePath);\n\tfs.mkdirSync(dir, { recursive: true });\n\tcleanupStaleAtomicTemps(filePath);\n\tconst tmpPath = path.join(\n\t\tdir,\n\t\t\`${'${'}path.basename(filePath)}.${'${'}process.pid}.${'${'}Date.now()}.tmp\`\n\t);\n\tconst serialized = \`${'${'}JSON.stringify(data, null, 2)}\\n\`;\n\ttry {\n\t\tfs.writeFileSync(tmpPath, serialized, 'utf8');\n\t\tfs.renameSync(tmpPath, filePath);\n\t} catch (error) {\n\t\ttry { fs.unlinkSync(tmpPath); } catch {}\n\t\tthrow error;\n\t}\n}`;
+          if (!index.includes(oldAtomic)) throw new Error('writeAtomicJsonFile anchor not found');
+          index = index.replace(oldAtomic, newAtomic);
+          fs.writeFileSync(indexPath, index);
+
+          const safetyPath = 'scripts/data-safety-preload.mjs';
+          let safety = fs.readFileSync(safetyPath, 'utf8').replace(/\r\n/g, '\n');
+          const oldBackup = `function backupFileAtRoot(filePath, reason, root, maxFiles, fsModule = fs) {\n  const directory = path.join(root, reason, scopeToken(filePath));\n  fsModule.mkdirSync(directory, { recursive: true });\n  const stamp = new Date().toISOString().replace(/[:.]/g, '-');`;
+          const newBackup = `function backupFileAtRoot(filePath, reason, root, maxFiles, fsModule = fs) {\n  const directory = path.join(root, reason, scopeToken(filePath));\n  fsModule.mkdirSync(directory, { recursive: true });\n  rotate(directory, Math.max(0, maxFiles - 1), fsModule);\n  const stamp = new Date().toISOString().replace(/[:.]/g, '-');`;
+          if (!safety.includes(oldBackup)) throw new Error('backupFileAtRoot anchor not found');
+          safety = safety.replace(oldBackup, newBackup);
+
+          const oldGuardTail = `    writeRevisionToIncoming(source, incoming, currentRevision + 1, expectedTenantId, fsModule);\n    const backup = backupFile(destination, 'pre-write', env, maxFiles, fsModule);\n    try { return originalRenameSync(source, destination); }\n    catch (error) {\n      logger.error(\`[data-safety] Database replacement failed for ${'${'}destination}${'${'}backup ? \`; previous version preserved at ${'${'}backup}\` : ''}\`);\n      throw error;\n    }`;
+          const newGuardTail = `    try {\n      writeRevisionToIncoming(source, incoming, currentRevision + 1, expectedTenantId, fsModule);\n      const backup = backupFile(destination, 'pre-write', env, maxFiles, fsModule);\n      try { return originalRenameSync(source, destination); }\n      catch (error) {\n        logger.error(\`[data-safety] Database replacement failed for ${'${'}destination}${'${'}backup ? \`; previous version preserved at ${'${'}backup}\` : ''}\`);\n        throw error;\n      }\n    } catch (error) {\n      try { fsModule.unlinkSync(source); } catch {}\n      throw error;\n    }`;
+          if (!safety.includes(oldGuardTail)) throw new Error('guarded DB commit tail anchor not found');
+          safety = safety.replace(oldGuardTail, newGuardTail);
+          fs.writeFileSync(safetyPath, safety);
+          NODE
+      - name: Add regression tests
+        shell: bash
+        run: |
+          cat > tests/storage-temp-cleanup-regression.test.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import path from 'node:path';
+          import test from 'node:test';
+          import { installDataSafetyGuards } from '../scripts/data-safety-preload.mjs';
+
+          function tempDir(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), prefix)); }
+          function writeJson(filePath, value) {
+            fs.mkdirSync(path.dirname(filePath), { recursive: true });
+            fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf8');
+          }
+
+          test('guarded database failure deletes caller atomic temp file', { concurrency: false }, () => {
+            const root = tempDir('athlyrax-temp-cleanup-');
+            const storageRoot = path.join(root, 'storage');
+            const tenantDir = path.join(storageRoot, 'tenants', 'clubs', 'demo-company');
+            const destination = path.join(tenantDir, 'db.json');
+            const source = path.join(tenantDir, 'db.json.123.456.tmp');
+            writeJson(destination, { swimmers: [{ id: 'keep' }], __meta: { tenantId: 'demo-company', storageRevision: 20 } });
+            writeJson(source, { swimmers: [{ id: 'new' }], __meta: { tenantId: 'other-company', storageRevision: 20 } });
+            const installation = installDataSafetyGuards({ fsModule: fs, env: { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot }, logger: { info() {}, error() {} } });
+            try {
+              assert.throws(() => fs.renameSync(source, destination));
+              assert.equal(fs.existsSync(source), false);
+              assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8')).swimmers[0].id, 'keep');
+            } finally {
+              installation.uninstall();
+              fs.rmSync(root, { recursive: true, force: true });
+            }
+          });
+
+          test('backup retention remains bounded across repeated protected writes', { concurrency: false }, () => {
+            const root = tempDir('athlyrax-backup-preprune-');
+            const storageRoot = path.join(root, 'storage');
+            const tenantDir = path.join(storageRoot, 'tenants', 'clubs', 'demo-company');
+            const destination = path.join(tenantDir, 'db.json');
+            writeJson(destination, { swimmers: [{ id: 'old' }], __meta: { tenantId: 'demo-company', storageRevision: 1 } });
+            const backupRoot = path.join(root, 'backups');
+            const env = { NODE_ENV: 'production', ATHLYRAX_STORAGE_ROOT: storageRoot, ATHLYRAX_SAFETY_BACKUP_ROOT: backupRoot, ATHLYRAX_SAFETY_MAX_BACKUPS: '2' };
+            const installation = installDataSafetyGuards({ fsModule: fs, env, logger: { info() {}, error() {} } });
+            try {
+              for (let revision = 1; revision <= 4; revision += 1) {
+                const current = JSON.parse(fs.readFileSync(destination, 'utf8'));
+                const source = path.join(tenantDir, `db.json.${revision}.tmp`);
+                writeJson(source, { ...current, swimmers: [{ id: `v${revision}` }] });
+                fs.renameSync(source, destination);
+              }
+              const preWriteRoot = path.join(backupRoot, 'pre-write');
+              const scope = fs.readdirSync(preWriteRoot)[0];
+              const files = fs.readdirSync(path.join(preWriteRoot, scope));
+              assert.ok(files.length <= 2, `expected bounded backups, found ${files.length}`);
+              assert.equal(JSON.parse(fs.readFileSync(destination, 'utf8')).swimmers[0].id, 'v4');
+            } finally {
+              installation.uninstall();
+              fs.rmSync(root, { recursive: true, force: true });
+            }
+          });
+          EOF
+      - name: Run targeted storage regressions
+        run: |
+          node --test tests/render-storage-write-fallback.test.mjs
+          node --test tests/storage-temp-cleanup-regression.test.mjs
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'Sigict'
+          git config user.email 'sergio.catania1@hotmail.com'
+          git add index.js scripts/data-safety-preload.mjs tests/storage-temp-cleanup-regression.test.mjs
+          git commit -m 'Prevent failed DB writes from exhausting storage'
+          git push origin HEAD:fix/storage-temp-leak-and-preprune
