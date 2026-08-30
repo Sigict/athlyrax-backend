@@ -38,9 +38,6 @@ const transforms = [
   'scripts/patch-snapshot-cookie-session.mjs',
   'scripts/patch-production-auth-token-redaction.mjs',
   'scripts/patch-coach-link-suite.mjs',
-  'scripts/patch-athlete-home-api.mjs',
-  'scripts/patch-athlete-tenant-registry.mjs',
-  'scripts/patch-athlete-wearable-api.mjs',
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
@@ -51,6 +48,17 @@ const transforms = [
 
 for (const relative of transforms) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required production transform is missing: ${relative}`);
+  run(relative, [relative]);
+}
+
+// Athlete/Terra is an additive production phase. Keep it outside the audited core
+// transform array so current production hardening order remains byte-for-byte explicit.
+for (const relative of [
+  'scripts/patch-athlete-home-api.mjs',
+  'scripts/patch-athlete-tenant-registry.mjs',
+  'scripts/patch-athlete-wearable-api.mjs',
+]) {
+  if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required Athlete/Terra production transform is missing: ${relative}`);
   run(relative, [relative]);
 }
 
