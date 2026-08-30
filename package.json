@@ -10,7 +10,7 @@
     "check:storage-safety": "node scripts/check-storage-safety.mjs",
     "audit:storage-paths": "node scripts/audit-storage-paths.mjs && node scripts/audit-production-transform-chain.mjs",
     "test:storage-safety": "node --test tests/storage-safety.test.mjs",
-    "test:data-safety": "node --test tests/data-safety.test.mjs",
+    "test:data-safety": "node --test tests/data-safety.test.mjs tests/render-storage-write-fallback.test.mjs",
     "test:persistence-integrity": "node --test tests/persistence-integrity.test.mjs",
     "test:auth-persistence-transaction": "node --test tests/auth-persistence-transaction.test.mjs",
     "test:auth-enumeration-safety": "node --test tests/auth-enumeration-safety.test.mjs",

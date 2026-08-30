@@ -66,8 +66,9 @@ function expectedTenantIdForDbPath(dbPath, env) {
   const relative = path.relative(tenantRoot, resolved);
   if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return '';
   const parts = relative.split(path.sep).filter(Boolean);
-  if (parts.length !== 2 || parts[1].toLowerCase() !== 'db.json') return '';
-  return normalizeTenantId(parts[0]);
+  if (parts.length === 2 && parts[1].toLowerCase() === 'db.json') return normalizeTenantId(parts[0]);
+  if (parts.length === 3 && parts[0].toLowerCase() === 'clubs' && parts[2].toLowerCase() === 'db.json') return normalizeTenantId(parts[1]);
+  return '';
 }
 function assertTenantIdentity(payload, destination, env, label) {
   const expected = expectedTenantIdForDbPath(destination, env);
@@ -146,10 +147,7 @@ function durableWriteBytes(destination, bytes, fsModule = fs) {
     try { fsModule.fsyncSync(directoryHandle); } finally { fsModule.closeSync(directoryHandle); }
   } catch {}
 }
-function backupFile(filePath, reason, env, maxFiles, fsModule = fs) {
-  if (!fsModule.existsSync(filePath)) return '';
-  const configuredRoot = String(env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();
-  const root = path.resolve(configuredRoot || path.join(path.dirname(filePath), 'safety-backups'));
+function backupFileAtRoot(filePath, reason, root, maxFiles, fsModule = fs) {
   const directory = path.join(root, reason, scopeToken(filePath));
   fsModule.mkdirSync(directory, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -165,6 +163,26 @@ function backupFile(filePath, reason, env, maxFiles, fsModule = fs) {
   }
   rotate(directory, maxFiles, fsModule);
   return destination;
+}
+function backupFile(filePath, reason, env, maxFiles, fsModule = fs) {
+  if (!fsModule.existsSync(filePath)) return '';
+  const configuredRoot = String(env.ATHLYRAX_SAFETY_BACKUP_ROOT || '').trim();
+  const preferredRoot = path.resolve(configuredRoot || path.join(path.dirname(filePath), 'safety-backups'));
+  try {
+    return backupFileAtRoot(filePath, reason, preferredRoot, maxFiles, fsModule);
+  } catch (preferredError) {
+    const storageRootRaw = String(env.ATHLYRAX_STORAGE_ROOT || '').trim();
+    if (!storageRootRaw) throw preferredError;
+    const fallbackRoot = path.join(path.resolve(storageRootRaw), '.athlyrax-emergency-backups');
+    if (fallbackRoot === preferredRoot) throw preferredError;
+    try {
+      return backupFileAtRoot(filePath, reason, fallbackRoot, maxFiles, fsModule);
+    } catch (fallbackError) {
+      const error = new Error(`Primary safety backup failed (${preferredError instanceof Error ? preferredError.message : String(preferredError)}); emergency primary-volume backup also failed (${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}).`);
+      error.code = 'ATHLYRAX_BACKUP_UNAVAILABLE';
+      throw error;
+    }
+  }
 }
 function writeRevisionToIncoming(sourcePath, payload, revision, expectedTenantId = '', fsModule = fs) {
   const rawMeta = payload?.__meta && typeof payload.__meta === 'object' ? payload.__meta : {};
