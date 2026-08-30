@@ -51,6 +51,17 @@ for (const relative of transforms) {
   run(relative, [relative]);
 }
 
+// Athlete/Terra is an additive production phase. Keep it outside the audited core
+// transform array so current production hardening order remains byte-for-byte explicit.
+for (const relative of [
+  'scripts/patch-athlete-home-api.mjs',
+  'scripts/patch-athlete-tenant-registry.mjs',
+  'scripts/patch-athlete-wearable-api.mjs',
+]) {
+  if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required Athlete/Terra production transform is missing: ${relative}`);
+  run(relative, [relative]);
+}
+
 if (!fs.existsSync(path.join(root, 'scripts/patch-schedule-deletion-authority.mjs'))) throw new Error('Required Schedule deletion authority guard is missing.');
 run('Schedule deletion authority guard', ['scripts/patch-schedule-deletion-authority.mjs']);
 
@@ -94,6 +105,16 @@ for (const relative of [
   'scripts/patch-snapshot-cookie-session.mjs',
   'scripts/patch-production-auth-token-redaction.mjs',
   'scripts/patch-public-demo-readonly.mjs',
+  'scripts/patch-athlete-home-api.mjs',
+  'scripts/patch-athlete-tenant-registry.mjs',
+  'scripts/patch-athlete-wearable-api.mjs',
+  'athlete-capability-projection.mjs',
+  'athlete-home-projection.mjs',
+  'athlete-session-review.mjs',
+  'athlete-session-write.mjs',
+  'athlete-tenant-registry.mjs',
+  'athlete-wearable-sync.mjs',
+  'terra-wearable-provider.mjs',
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
