@@ -117,7 +117,7 @@ test('missing production database cannot be silently recreated from an ordinary 
   writeJson(source, { swimmers: [] });
   withGuard(root, () => { assert.throws(() => fs.renameSync(source, destination), (error) => error?.code === 'ATHLYRAX_MISSING_DB_CREATE_BLOCKED'); }, { NODE_ENV: 'production', AUTH_SECRET: 'test-auth-secret-at-least-32-characters-long' });
   assert.equal(fs.existsSync(destination), false);
-  assert.equal(fs.existsSync(source), true);
+  assert.equal(fs.existsSync(source), false);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
