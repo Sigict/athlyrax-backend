@@ -13,11 +13,19 @@ jobs:
         with:
           node-version: 20
       - run: node scripts/patch-render-storage-write-fallback.mjs
-      - name: Commit direct source fix
+      - name: Wire regression into normal data-safety suite
         run: |
-          if git diff --quiet -- scripts/data-safety-preload.mjs; then exit 0; fi
+          node - <<'NODE'
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+          pkg.scripts['test:data-safety'] = 'node --test tests/data-safety.test.mjs tests/render-storage-write-fallback.test.mjs';
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+      - name: Commit direct source and test wiring
+        run: |
+          if git diff --quiet -- scripts/data-safety-preload.mjs package.json; then exit 0; fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add scripts/data-safety-preload.mjs
-          git commit -m 'Fix Render database backup fallback path'
+          git add scripts/data-safety-preload.mjs package.json
+          git commit -m 'Wire Render storage fallback into security suite'
           git push
