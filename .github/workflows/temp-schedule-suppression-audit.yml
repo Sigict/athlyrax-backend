@@ -1,0 +1,22 @@
+name: Temporary backend Schedule suppression audit
+
+on:
+  push:
+    branches:
+      - audit/schedule-writers-final
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  audit:
+    if: ${{ github.head_ref == 'audit/schedule-writers-final' || github.ref == 'refs/heads/audit/schedule-writers-final' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: audit/schedule-writers-final
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/_audit_schedule_suppression_final.mjs
