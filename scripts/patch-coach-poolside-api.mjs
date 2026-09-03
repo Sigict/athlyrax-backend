@@ -31,7 +31,7 @@ app.get('/coach/poolside', requireStrictAuth, (req, res) => {
 \t\tres.status(503).json({ error: 'Coach Poolside data is temporarily unavailable.' });
 \t\treturn;
 \t}
-\tres.status(200).json({ ok: true, ...buildCoachPoolsideProjection(db, { date: req.query?.date }) });
+\tres.status(200).json({ ok: true, csrfToken: String(req.auth?.csrf || ''), csrfHeaderName: AUTH_CSRF_HEADER_NAME, ...buildCoachPoolsideProjection(db, { date: req.query?.date }) });
 });
 
 `;
