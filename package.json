@@ -45,7 +45,7 @@
     "audit:planning-data-shape": "node scripts/audit-planning-data-shape.mjs storage/db.json",
     "test:timetable-legacy-lock": "node --test tests/timetable-legacy-lock.test.mjs",
     "test:production-auth-session": "node --test tests/production-auth-session-regression.test.mjs",
-    "test:coach-poolside": "node --test tests/coach-poolside-projection.test.mjs"
+    "test:coach-poolside": "node --test tests/coach-poolside-projection.test.mjs tests/coach-poolside-mutations.test.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
