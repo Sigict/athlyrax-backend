@@ -9,7 +9,7 @@ import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
-import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange } from './coach-poolside-mutations.mjs';
+import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from './coach-poolside-mutations.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -6251,7 +6251,7 @@ async function applyCoachPoolsideMutation(req, res, mutator) {
 			res.status(Number(output?.status || 400)).json({ error: String(output?.error || 'Poolside change was rejected.') });
 			return;
 		}
-		res.status(200).json({ ok: true, rows: output.rows, set: output.set });
+		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution });
 	} catch {
 		res.status(503).json({ error: 'Poolside change could not be saved.' });
 	}
@@ -6262,6 +6262,16 @@ app.post('/coach/poolside/sessions/:sessionId/attendance', requireStrictAuth, re
 		sessionId: req.params?.sessionId,
 		scheduleId: req.body?.scheduleId,
 		rows: req.body?.rows,
+		updatedBy: req.auth?.username,
+	}));
+});
+
+app.post('/coach/poolside/sessions/:sessionId/sets/:setId/executions', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachPoolsideExecution(db, {
+		sessionId: req.params?.sessionId,
+		setId: req.params?.setId,
+		swimmerId: req.body?.swimmerId,
+		execution: req.body?.execution,
 		updatedBy: req.auth?.username,
 	}));
 });
