@@ -6228,7 +6228,7 @@ app.get('/coach/poolside', requireStrictAuth, (req, res) => {
 		res.status(503).json({ error: 'Coach Poolside data is temporarily unavailable.' });
 		return;
 	}
-	res.status(200).json({ ok: true, ...buildCoachPoolsideProjection(db, { date: req.query?.date }) });
+	res.status(200).json({ ok: true, csrfToken: String(req.auth?.csrf || ''), csrfHeaderName: AUTH_CSRF_HEADER_NAME, ...buildCoachPoolsideProjection(db, { date: req.query?.date }) });
 });
 
 // ATHLYRAX_COACH_POOLSIDE_MUTATIONS_V1
