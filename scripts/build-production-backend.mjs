@@ -106,6 +106,7 @@ for (const relative of [
   'scripts/patch-athlete-wearable-api.mjs',
   'scripts/patch-coach-poolside-api.mjs',
   'coach-poolside-projection.mjs',
+  'coach-poolside-mutations.mjs',
   'athlete-capability-projection.mjs',
   'athlete-home-projection.mjs',
   'athlete-session-review.mjs',
