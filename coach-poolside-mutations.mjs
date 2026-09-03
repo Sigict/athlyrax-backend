@@ -86,3 +86,26 @@ export function applyCoachPoolsideSetChange(db = {}, input = {}) {
   };
   return { ok: true, db: { ...db, trainingSessionSets: next }, set: next[index] };
 }
+
+export function applyCoachPoolsideExecution(db = {}, input = {}) {
+  const sessionId = text(input.sessionId);
+  const setId = text(input.setId);
+  const swimmerId = text(input.swimmerId);
+  const execution = input.execution && typeof input.execution === 'object' ? input.execution : null;
+  if (!sessionId || !setId || !swimmerId || !execution) return { ok: false, status: 400, error: 'Canonical session, set, swimmer and execution are required.' };
+  const sets = list(db.trainingSessionSets);
+  const index = sets.findIndex((row) => text(row.id) === setId && parentSessionId(row) === sessionId);
+  if (index < 0) return { ok: false, status: 404, error: 'Canonical set was not found in this session.' };
+  if (!list(db.swimmers).some((row) => text(row.id) === swimmerId)) return { ok: false, status: 404, error: 'Swimmer was not found in this club.' };
+  const executionId = text(execution.executionId || execution.id);
+  if (!executionId) return { ok: false, status: 400, error: 'Execution ID is required.' };
+  const current = list(sets[index].poolsideExecutions);
+  const existingIndex = current.findIndex((row) => text(row.executionId || row.id) === executionId);
+  const row = { ...execution, executionId, sessionId, setId, swimmerId, recordedAt: text(execution.recordedAt) || new Date().toISOString(), recordedBy: text(input.updatedBy) };
+  const nextExecutions = current.slice();
+  if (existingIndex >= 0) nextExecutions[existingIndex] = row;
+  else nextExecutions.push(row);
+  const nextSets = sets.slice();
+  nextSets[index] = { ...nextSets[index], poolsideExecutions: nextExecutions, updatedAt: row.recordedAt, updatedBy: row.recordedBy };
+  return { ok: true, db: { ...db, trainingSessionSets: nextSets }, execution: row };
+}
