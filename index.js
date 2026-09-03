@@ -8,6 +8,7 @@ import { execFileSync } from 'child_process';
 import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
+import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -6207,6 +6208,26 @@ app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (re
 			details: error instanceof Error ? error.message : 'Unknown error',
 		});
 	}
+});
+
+// ATHLYRAX_COACH_POOLSIDE_PROJECTION_V1
+app.get('/coach/poolside', requireStrictAuth, (req, res) => {
+	const role = String(req.auth?.role || '').trim().toLowerCase();
+	if (!['software-owner', 'head-coach', 'assistant-coach', 'viewer'].includes(role)) {
+		res.status(403).json({ error: 'Coach account required.' });
+		return;
+	}
+	const tenantScope = resolveStoragePathsForRequest(req);
+	if (!tenantScope?.ok || !tenantScope?.storagePaths?.dbPath) {
+		res.status(Number(tenantScope?.status || tenantScope?.errorStatus || 403)).json(tenantScope?.body || { error: 'Tenant scope denied.' });
+		return;
+	}
+	const db = readJsonFile(tenantScope.storagePaths.dbPath);
+	if (!db || typeof db !== 'object' || Array.isArray(db)) {
+		res.status(503).json({ error: 'Coach Poolside data is temporarily unavailable.' });
+		return;
+	}
+	res.status(200).json({ ok: true, ...buildCoachPoolsideProjection(db, { date: req.query?.date }) });
 });
 
 // Serve db.json at /db
