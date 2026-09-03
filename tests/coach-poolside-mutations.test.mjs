@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange } from '../coach-poolside-mutations.mjs';
+import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from '../coach-poolside-mutations.mjs';
 
 const db = {
   schedule: [{ id: 'sch-1', trainingSessionId: 'sess-1' }],
   trainingSessions: [{ id: 'sess-1', scheduleId: 'sch-1' }],
   trainingSessionSets: [{ id: 'set-1', trainingSessionId: 'sess-1', reps: 8, sendoff: 60 }],
+  swimmers: [{ id: 'sw-1', name: 'A One' }],
   attendance: [{ id: 'att-1', sessionId: 'sess-1', scheduleId: 'sch-1', swimmerId: 'sw-1', status: 'absent', present: false }],
 };
 
@@ -35,4 +36,13 @@ test('Poolside refuses an unrelated set', () => {
   const result = applyCoachPoolsideSetChange(db, { sessionId: 'other', setId: 'set-1', reps: 10, sendoffSeconds: 65 });
   assert.equal(result.ok, false);
   assert.equal(result.status, 404);
+});
+
+test('Poolside result capture stays on the canonical set and is idempotent by execution ID', () => {
+  const first = applyCoachPoolsideExecution(db, { sessionId: 'sess-1', setId: 'set-1', swimmerId: 'sw-1', execution: { executionId: 'exec-1', distance: 25 } });
+  assert.equal(first.ok, true);
+  assert.equal(first.db.trainingSessionSets[0].poolsideExecutions.length, 1);
+  const second = applyCoachPoolsideExecution(first.db, { sessionId: 'sess-1', setId: 'set-1', swimmerId: 'sw-1', execution: { executionId: 'exec-1', distance: 50 } });
+  assert.equal(second.db.trainingSessionSets[0].poolsideExecutions.length, 1);
+  assert.equal(second.db.trainingSessionSets[0].poolsideExecutions[0].distance, 50);
 });
