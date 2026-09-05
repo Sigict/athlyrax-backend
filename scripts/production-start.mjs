@@ -17,6 +17,17 @@ if (!String(process.env.AUTH_PASSWORD_RESET_DELIVERY || '').trim()) {
   process.env.AUTH_PASSWORD_RESET_DELIVERY = 'smtp';
 }
 
+// ATHLYRAX_PRODUCTION_SESSION_TTL_FLOOR
+// The coach application is routinely left open across long working days and overnight.
+// Do not let the UI remain visibly authenticated while the backend session silently
+// expires after 12 hours and the next authoritative Planning write fails with 401.
+// Keep any explicitly longer operator value, but enforce a seven-day production floor.
+const MIN_PRODUCTION_AUTH_TTL_SECONDS = 7 * 24 * 60 * 60;
+const configuredAuthTtlSeconds = Number.parseInt(String(process.env.AUTH_TOKEN_TTL_SECONDS || '0'), 10) || 0;
+if (configuredAuthTtlSeconds < MIN_PRODUCTION_AUTH_TTL_SECONDS) {
+  process.env.AUTH_TOKEN_TTL_SECONDS = String(MIN_PRODUCTION_AUTH_TTL_SECONDS);
+}
+
 function migrationAlreadyCompleted(markerPath) {
   try {
     const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));

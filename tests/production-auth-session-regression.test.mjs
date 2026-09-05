@@ -42,6 +42,14 @@ function cookieHeaderFrom(response) {
   return `athlyrax_session=${session}; athlyrax_csrf=${csrf}`;
 }
 
+test('production start prevents the old 12-hour session expiry trap', () => {
+  const source = fs.readFileSync(path.resolve('scripts/production-start.mjs'), 'utf8');
+  assert.match(source, /ATHLYRAX_PRODUCTION_SESSION_TTL_FLOOR/);
+  assert.match(source, /const MIN_PRODUCTION_AUTH_TTL_SECONDS = 7 \* 24 \* 60 \* 60;/);
+  assert.match(source, /configuredAuthTtlSeconds < MIN_PRODUCTION_AUTH_TTL_SECONDS/);
+  assert.match(source, /process\.env\.AUTH_TOKEN_TTL_SECONDS = String\(MIN_PRODUCTION_AUTH_TTL_SECONDS\);/);
+});
+
 test('demo coach authority survives verification and logout cannot trap the browser', async (t) => {
   const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-auth-session-'));
   const port = await getFreePort();
