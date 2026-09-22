@@ -8,6 +8,7 @@ import { execFileSync } from 'child_process';
 import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
+import { sanitizeAttendanceState, sanitizeTrainingSessionSetState } from './canonical-data-cleanup.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from './coach-poolside-mutations.mjs';
 
@@ -6375,10 +6376,21 @@ app.get('/db', requireAuth, (req, res) => {
 			let responsePayload = data;
 			try {
 				const persistedShape = JSON.parse(String(data || '{}'));
-				const persistedSuppressions = Array.isArray(persistedShape?.__meta?.scheduleOccurrenceSuppressions)
-					? persistedShape.__meta.scheduleOccurrenceSuppressions
+				const setCleanup = sanitizeTrainingSessionSetState(persistedShape);
+				const attendanceCleanup = sanitizeAttendanceState(setCleanup.db);
+				let canonicalPersistedShape = attendanceCleanup.db;
+				if (setCleanup.changed || attendanceCleanup.changed) {
+					canonicalPersistedShape = applyOwnershipMetadataToDbShape(
+						canonicalPersistedShape,
+						persistedShape,
+						req.auth,
+					);
+					writeAtomicJsonFile(storagePaths.dbPath, canonicalPersistedShape);
+				}
+				const persistedSuppressions = Array.isArray(canonicalPersistedShape?.__meta?.scheduleOccurrenceSuppressions)
+					? canonicalPersistedShape.__meta.scheduleOccurrenceSuppressions
 					: [];
-				const readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(persistedShape, persistedSuppressions);
+				const readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(canonicalPersistedShape, persistedSuppressions);
 				responsePayload = JSON.stringify(readFiltered.dbShape);
 			} catch {
 				// Invalid db.json is handled by the storage safety layer; preserve the original response here.
@@ -6650,7 +6662,9 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				scheduleOccurrenceSuppressions: mergedScheduleOccurrenceSuppressions,
 			},
 		};
-		const ownershipStampedBody = applyOwnershipMetadataToDbShape(safeBody, currentDb, req.auth);
+		const setCleanup = sanitizeTrainingSessionSetState(safeBody);
+		const attendanceCleanup = sanitizeAttendanceState(setCleanup.db);
+		const ownershipStampedBody = applyOwnershipMetadataToDbShape(attendanceCleanup.db, currentDb, req.auth);
 
 		writeAtomicJsonFile(storagePaths.dbPath, ownershipStampedBody);
 
@@ -6668,6 +6682,8 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				...(Array.isArray(filtered.blockedResurrections) ? filtered.blockedResurrections : []),
 				...(Array.isArray(occurrenceFiltered.blockedResurrections) ? occurrenceFiltered.blockedResurrections : []),
 			],
+			trainingSessionSetCleanup: setCleanup.stats,
+			attendanceCleanup: attendanceCleanup.stats,
 			tombstoneCount: mergedTombstones.length,
 		};
 	})
@@ -6678,6 +6694,8 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				recoveredFixtureIds: result.recoveredFixtureIds,
 				staleWriteIgnored: result.staleWriteIgnored === true,
 				blockedResurrections: Array.isArray(result.blockedResurrections) ? result.blockedResurrections : [],
+				trainingSessionSetCleanup: result.trainingSessionSetCleanup || null,
+				attendanceCleanup: result.attendanceCleanup || null,
 				tombstoneCount: Number.isFinite(result.tombstoneCount) ? result.tombstoneCount : 0,
 			});
 		})
