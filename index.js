@@ -1575,6 +1575,7 @@ function buildAuthUserPayload(user) {
 		username: String(normalizedUser?.username || '').trim(),
 		role: resolveEffectiveAuthRole(normalizedUser),
 		tenantId: String(resolvedTenantId || '').trim(),
+		createdAt: String(normalizedUser?.createdAt || '').trim(),
 		onboardingRequired: Boolean(normalizedUser?.onboardingCompletedAt ? false : true),
 		billing: access.billing,
 		access,
