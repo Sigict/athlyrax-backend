@@ -83,6 +83,8 @@ run('final revision integrity guard', ['scripts/patch-revision-integrity.mjs']);
 run('final canonical demo tenant metadata repair guard', ['scripts/patch-demo-company-tenant-metadata-write.mjs']);
 run('final DB write stage diagnostics', ['scripts/patch-db-write-stage-diagnostics.mjs']);
 run('final ENOSPC primary DB recovery', ['scripts/patch-enospc-primary-db-recovery.mjs']);
+if (!fs.existsSync(path.join(root, 'scripts/patch-canonical-data-cleanup.mjs'))) throw new Error('Required canonical data cleanup guard is missing.');
+run('final canonical data cleanup', ['scripts/patch-canonical-data-cleanup.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
@@ -114,6 +116,8 @@ for (const relative of [
   'athlete-tenant-registry.mjs',
   'athlete-wearable-sync.mjs',
   'terra-wearable-provider.mjs',
+  'canonical-data-cleanup.mjs',
+  'scripts/patch-canonical-data-cleanup.mjs',
   'scripts/patch-client-ip-integrity.mjs',
   'scripts/patch-rate-limit-integrity.mjs',
   'scripts/patch-request-body-limits.mjs',
