@@ -190,6 +190,8 @@ const loginRateBuckets = new Map();
 const adminRateBuckets = new Map();
 const authPresenceByUser = new Map();
 const authPasswordResetByUser = new Map();
+const authPopupTickets = new Map();
+const AUTH_POPUP_TICKET_TTL_MS = 60 * 1000;
 const stripeClient = BILLING_STRIPE_SECRET_KEY
 	? new Stripe(BILLING_STRIPE_SECRET_KEY, { apiVersion: '2025-03-31.basil' })
 	: null;
@@ -2280,6 +2282,8 @@ function requireCsrf(req, res, next) {
 	// Logout is deliberately CSRF-exempt: forcing a user to sign out is not a privileged mutation,
 	// and the endpoint still requires a valid authenticated session before clearing its cookies.
 	if (method === 'POST' && String(req.path || '') === '/auth/logout') return next();
+	// Popup exchange is protected by a high-entropy, single-use, short-lived ticket.
+	if (method === 'POST' && String(req.path || '') === '/auth/popup-exchange') return next();
 	if (!req.auth) return next();
 	if (String(req.authSource || 'none') !== 'cookie') return next();
 	const headerToken = String(req.headers?.[AUTH_CSRF_HEADER_NAME] || '').trim();
@@ -4073,6 +4077,72 @@ app.post('/auth/password-reset/confirm', requireLoginRateLimit, (req, res) => {
 			details: error instanceof Error ? error.message : 'Unknown error',
 		});
 	}
+});
+
+app.get('/auth/popup-ticket', requireStrictAuth, (req, res) => {
+	const ticket = crypto.randomBytes(32).toString('hex');
+	const now = Date.now();
+	for (const [key, entry] of authPopupTickets.entries()) {
+		if (Number(entry?.expiresAtMs || 0) <= now) authPopupTickets.delete(key);
+	}
+	authPopupTickets.set(ticket, {
+		username: String(req.auth?.username || '').trim(),
+		tenantId: String(req.auth?.tenantId || '').trim(),
+		expiresAtMs: now + AUTH_POPUP_TICKET_TTL_MS,
+	});
+	appendAuthAuditEvent({
+		action: 'popup_auth_ticket_issued',
+		req,
+		status: 'success',
+		target: String(req.auth?.username || '').trim(),
+	});
+	res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+	res.status(200).json({ ticket, expiresInMs: AUTH_POPUP_TICKET_TTL_MS });
+});
+
+app.post('/auth/popup-exchange', (req, res) => {
+	const ticket = String(req.body?.ticket || '').trim();
+	if (!ticket) {
+		res.status(400).json({ error: 'Popup authentication ticket is required.' });
+		return;
+	}
+	const entry = authPopupTickets.get(ticket) || null;
+	authPopupTickets.delete(ticket);
+	if (!entry || Number(entry?.expiresAtMs || 0) <= Date.now()) {
+		appendAuthAuditEvent({
+			action: 'popup_auth_ticket_exchange',
+			req,
+			status: 'blocked',
+			reason: 'invalid_or_expired_ticket',
+		});
+		res.status(401).json({ error: 'Popup authentication ticket is invalid or expired.' });
+		return;
+	}
+	const user = findAuthUser(String(entry.username || '').trim());
+	if (!user || user?.isApproved === false) {
+		res.status(401).json({ error: 'Popup authentication session is no longer valid.' });
+		return;
+	}
+	const ticketTenantId = String(entry.tenantId || '').trim();
+	const currentTenantId = String(user?.tenantId || '').trim();
+	if (ticketTenantId && currentTenantId && ticketTenantId !== currentTenantId) {
+		res.status(401).json({ error: 'Popup authentication tenant no longer matches.' });
+		return;
+	}
+	const session = issueAuthToken(user);
+	setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
+	appendAuthAuditEvent({
+		action: 'popup_auth_ticket_exchange',
+		req,
+		status: 'success',
+		target: String(user.username || '').trim(),
+	});
+	res.status(200).json({
+		ok: true,
+		csrfToken: session.csrf,
+		csrfHeaderName: AUTH_CSRF_HEADER_NAME,
+		user: buildAuthUserPayload(user),
+	});
 });
 
 app.get('/auth/me', (req, res) => {

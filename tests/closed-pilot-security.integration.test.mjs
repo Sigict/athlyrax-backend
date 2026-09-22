@@ -136,6 +136,36 @@ test('cookie authentication works against canonical auth store', async () => {
   } finally { await server.stop(); }
 });
 
+test('one-time popup auth handoff creates a new secure session and rejects ticket reuse', async () => {
+  const server = await startServer();
+  try {
+    const session = await login(server.baseUrl, 'coachA', 'CoachA!Pass1234');
+    const issued = await request(server.baseUrl, '/auth/popup-ticket', { cookie: session.cookie });
+    assert.equal(issued.response.status, 200);
+    const ticket = String(issued.payload?.ticket || '').trim();
+    assert.match(ticket, /^[a-f0-9]{64}$/);
+
+    const exchanged = await request(server.baseUrl, '/auth/popup-exchange', {
+      method: 'POST',
+      body: { ticket },
+    });
+    assert.equal(exchanged.response.status, 200);
+    const popupCookie = cookieHeader(exchanged.response);
+    assert.ok(popupCookie.includes('athlyrax_session='), 'Expected popup exchange to issue a fresh auth session cookie');
+
+    const popupMe = await request(server.baseUrl, '/auth/me', { cookie: popupCookie });
+    assert.equal(popupMe.response.status, 200);
+    assert.equal(popupMe.payload?.user?.username, 'coachA');
+    assert.equal(popupMe.payload?.user?.tenantId, 'tenant-a');
+
+    const reused = await request(server.baseUrl, '/auth/popup-exchange', {
+      method: 'POST',
+      body: { ticket },
+    });
+    assert.equal(reused.response.status, 401);
+  } finally { await server.stop(); }
+});
+
 test('state-changing database requests require csrf', async () => {
   const server = await startServer();
   try {
