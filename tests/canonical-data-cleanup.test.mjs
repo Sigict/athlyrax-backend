@@ -9,8 +9,8 @@ import {
 test('training set cleanup removes template-library rows and exact logical duplicates without collapsing intentional order differences', () => {
   const db = {
     trainingSessionSets: [
-      { id: 'set-a-old', sessionId: 'ts-1', scheduleId: 'sch-1', order: 1, rounds: 1, reps: 8, distance: 50, stroke: 'free', energy: 'SP', updatedAt: '2026-09-20T10:00:00.000Z' },
-      { id: 'set-a-new', sessionId: 'ts-1', scheduleId: 'sch-1', order: 1, rounds: 1, reps: 8, distance: 50, stroke: 'free', energy: 'SP', updatedAt: '2026-09-22T10:00:00.000Z' },
+      { id: 'set-a-old', sessionId: 'ts-1', scheduleId: 'sch-1', order: 1, rounds: 1, reps: 8, distance: 50, stroke: 'free', energy: 'SP', ownerId: 'legacy-owner', source: 'import-v1', updatedAt: '2026-09-20T10:00:00.000Z' },
+      { id: 'set-a-new', sessionId: 'ts-1', scheduleId: 'sch-1', order: 1, rounds: 1, reps: 8, distance: 50, stroke: 'free', energy: 'SP', ownerId: 'current-owner', source: 'planner-v2', updatedAt: '2026-09-22T10:00:00.000Z' },
       { id: 'set-order-2', sessionId: 'ts-1', scheduleId: 'sch-1', order: 2, rounds: 1, reps: 8, distance: 50, stroke: 'free', energy: 'SP', updatedAt: '2026-09-22T10:00:00.000Z' },
       { id: 'template-a', sessionId: 'template-library', scheduleId: 'template-library', templateId: 'tmpl-1', templateKind: 'set', setName: 'Sprint', order: 1, rounds: 1, reps: 4, distance: 50, stroke: 'free', energy: 'SP' },
       { id: 'template-b', sessionId: 'template-library', scheduleId: 'template-library', templateId: 'tmpl-1', templateKind: 'set', setName: 'Sprint', order: 1, rounds: 1, reps: 4, distance: 50, stroke: 'free', energy: 'SP' },
@@ -25,7 +25,7 @@ test('training set cleanup removes template-library rows and exact logical dupli
   assert.equal(cleaned.changed, true);
   assert.equal(cleaned.stats.rawCount, 5);
   assert.equal(cleaned.stats.templateRowsMigrated, 2);
-  assert.equal(cleaned.stats.logicalDuplicatesRemoved, 1);
+  assert.equal(cleaned.stats.logicalDuplicatesRemoved, 1, 'hidden metadata must not stop semantic duplicate removal');
   assert.equal(cleaned.stats.canonicalCount, 2);
   assert.deepEqual(cleaned.db.trainingSessionSets.map((row) => row.id), ['set-a-new', 'set-order-2']);
   assert.deepEqual(cleaned.db.trainingSetBlocks[0].setIds, ['set-a-new', 'set-order-2']);
