@@ -14,19 +14,29 @@ function mutationTime(row) {
   return 0;
 }
 
-function stableSemanticValue(value) {
-  if (Array.isArray(value)) return value.map(stableSemanticValue);
-  if (!value || typeof value !== 'object') return value;
-  const ignored = new Set([
-    'id', 'createdAt', 'updatedAt', 'modifiedAt', 'savedAt',
-    'sessionId', 'trainingSessionId', 'scheduleId', 'trainingScheduleId',
-  ]);
-  const result = {};
-  for (const key of Object.keys(value).sort()) {
-    if (ignored.has(key) || String(key).startsWith('__')) continue;
-    result[key] = stableSemanticValue(value[key]);
+function normalizedSetField(row, ...keys) {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
   }
-  return result;
+  return '';
+}
+
+function canonicalSetSemantics(row) {
+  return {
+    order: Number(normalizedSetField(row, 'order', 'setOrder', 'sequence') || 0) || 0,
+    phase: text(normalizedSetField(row, 'phase', 'setPhase')).toLowerCase(),
+    rounds: Number(normalizedSetField(row, 'rounds', 'roundCount') || 0) || 0,
+    reps: Number(normalizedSetField(row, 'reps', 'repetitions') || 0) || 0,
+    distance: Number(normalizedSetField(row, 'distance', 'distancePerRep', 'repDistance') || 0) || 0,
+    stroke: text(normalizedSetField(row, 'stroke', 'strokeType')).toLowerCase(),
+    description: text(normalizedSetField(row, 'description', 'actualSet', 'setName', 'name')).toLowerCase(),
+    rest: text(normalizedSetField(row, 'rest', 'restInterval')).toLowerCase(),
+    sendOff: text(normalizedSetField(row, 'sendOff', 'sendoff', 'interval')).toLowerCase(),
+    energy: text(normalizedSetField(row, 'energy', 'energySystem', 'zone')).toLowerCase(),
+    modality: text(normalizedSetField(row, 'modality', 'mode')).toLowerCase(),
+    groupTag: text(normalizedSetField(row, 'groupTag', 'group', 'setGroup')).toLowerCase(),
+  };
 }
 
 export function isTemplateLibraryTrainingSet(row) {
@@ -39,7 +49,7 @@ export function trainingSessionSetLogicalSignature(row) {
   return JSON.stringify({
     sessionId: text(row?.sessionId || row?.trainingSessionId),
     scheduleId: text(row?.scheduleId || row?.trainingScheduleId),
-    semantic: stableSemanticValue(row),
+    semantic: canonicalSetSemantics(row),
   });
 }
 
