@@ -33,10 +33,11 @@ if (!source.includes(marker)) {
 \t\t\t\t);
 \t\t\t\twriteAtomicJsonFile(storagePaths.dbPath, canonicalPersistedShape);
 \t\t\t}
-\t\t\tconst persistedSuppressions = Array.isArray(canonicalPersistedShape?.__meta?.scheduleOccurrenceSuppressions)
-\t\t\t\t? canonicalPersistedShape.__meta.scheduleOccurrenceSuppressions
+\t\t\tparsedDatabase = canonicalPersistedShape;
+\t\t\tconst persistedSuppressions = Array.isArray(parsedDatabase?.__meta?.scheduleOccurrenceSuppressions)
+\t\t\t\t? parsedDatabase.__meta.scheduleOccurrenceSuppressions
 \t\t\t\t: [];
-\t\t\tconst readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(canonicalPersistedShape, persistedSuppressions);
+\t\t\tconst readFiltered = applyScheduleOccurrenceSuppressionsToDbShape(parsedDatabase, persistedSuppressions);
 \t\t\tlet responsePayload = JSON.stringify(readFiltered.dbShape);`;
 
   if (!source.includes(readAnchor)) {
