@@ -4659,6 +4659,57 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	}
 });
 
+app.delete('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {
+	const targetEmail = String(req.body?.email || '').trim().toLowerCase();
+	const targetCode = String(req.body?.code || '').trim().toUpperCase();
+	if (!targetEmail && !targetCode) {
+		res.status(400).json({ error: 'Invite email or code is required.' });
+		return;
+	}
+
+	cleanExpiredInvites();
+	const actor = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+	const actorIsPrimaryOwner = isPrimarySoftwareOwnerAccount(actor);
+	const actorTenantId = resolveTenantKeyFromUser(actor);
+	const matchingIndexes = [];
+	for (let index = 0; index < authInvites.length; index += 1) {
+		const invite = authInvites[index];
+		const emailMatches = targetEmail && String(invite?.targetEmail || '').trim().toLowerCase() === targetEmail;
+		const codeMatches = targetCode && String(invite?.code || '').trim().toUpperCase() === targetCode;
+		if (!emailMatches && !codeMatches) continue;
+		const inviteTenantId = resolveTenantKeyFromUser(invite);
+		if (!actorIsPrimaryOwner && inviteTenantId !== actorTenantId) continue;
+		matchingIndexes.push(index);
+	}
+
+	if (matchingIndexes.length === 0) {
+		res.status(404).json({ error: 'No active invite was found for this coach.' });
+		return;
+	}
+
+	const previous = [...authInvites];
+	const revoked = matchingIndexes.map((index) => authInvites[index]);
+	const remove = new Set(matchingIndexes);
+	authInvites.splice(0, authInvites.length, ...authInvites.filter((_row, index) => !remove.has(index)));
+	try {
+		persistAuthInvites();
+		appendAuthAuditEvent({
+			action: 'invite_revoked',
+			req,
+			status: 'success',
+			target: targetEmail || targetCode,
+			details: { count: revoked.length },
+		});
+		res.status(200).json({ ok: true, revoked: revoked.length });
+	} catch (error) {
+		authInvites.splice(0, authInvites.length, ...previous);
+		res.status(500).json({
+			error: 'Could not revoke invite.',
+			details: error instanceof Error ? error.message : 'Unknown error',
+		});
+	}
+});
+
 app.get('/auth/users', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (_req, res) => {
 	const req = _req;
 	if (isPrimarySoftwareOwnerAccount(req.auth)) {
