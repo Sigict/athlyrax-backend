@@ -22,7 +22,7 @@ async function startServer() {
 
   const users = [{
     username: 'demo.coach',
-    password: 'DemoCoach123!',
+    // Simulate a drifted persisted hash/password: the public demo credential must remain canonical.\n    password: 'DriftedDemoPassword987!',
     role: 'head-coach',
     tenantId: 'demo-company',
     clubId: 'demo-company',
@@ -100,7 +100,7 @@ function cookieHeader(response) {
   return rows.map((row) => String(row || '').split(';')[0].trim()).filter(Boolean).join('; ');
 }
 
-test('demo coach keeps head-coach write authority while remaining tenant-isolated', async () => {
+test('canonical demo credential recovers drifted demo auth while keeping tenant-isolated head-coach authority', async () => {
   const server = await startServer();
   try {
     const loginResponse = await fetch(`${server.baseUrl}/auth/login`, {

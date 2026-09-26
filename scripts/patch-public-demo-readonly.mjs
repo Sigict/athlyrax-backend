@@ -11,13 +11,19 @@ function replaceRequired(needle, replacement, label) {
 }
 
 const identityAnchor = `const CANONICAL_TENANT_BY_USERNAME = Object.freeze({\n\t'demo.coach': 'demo-company',\n});`;
-const identityReplacement = `${identityAnchor}\n// ATHLYRAX_PUBLIC_DEMO_CANONICAL_IDENTITY\nconst PUBLIC_DEMO_USERNAME = 'demo.coach';\nconst PUBLIC_DEMO_TENANT_ID = 'demo-company';\nfunction enforcePublicDemoCanonicalIdentity(value) {\n\tif (!value || typeof value !== 'object') return value;\n\tconst username = String(value?.username || value?.sub || '').trim().toLowerCase();\n\tif (username !== PUBLIC_DEMO_USERNAME) return value;\n\treturn {\n\t\t...value,\n\t\tusername: PUBLIC_DEMO_USERNAME,\n\t\tsub: value?.sub ? PUBLIC_DEMO_USERNAME : value?.sub,\n\t\trole: 'head-coach',\n\t\ttenantId: PUBLIC_DEMO_TENANT_ID,\n\t\tclubId: PUBLIC_DEMO_TENANT_ID,\n\t};\n}`;
+const identityReplacement = `${identityAnchor}\n// ATHLYRAX_PUBLIC_DEMO_CANONICAL_IDENTITY\nconst PUBLIC_DEMO_USERNAME = 'demo.coach';\nconst PUBLIC_DEMO_TENANT_ID = 'demo-company';\nconst PUBLIC_DEMO_PASSWORD = 'DemoCoach123!';\nfunction enforcePublicDemoCanonicalIdentity(value) {\n\tif (!value || typeof value !== 'object') return value;\n\tconst username = String(value?.username || value?.sub || '').trim().toLowerCase();\n\tif (username !== PUBLIC_DEMO_USERNAME) return value;\n\treturn {\n\t\t...value,\n\t\tusername: PUBLIC_DEMO_USERNAME,\n\t\tsub: value?.sub ? PUBLIC_DEMO_USERNAME : value?.sub,\n\t\trole: 'head-coach',\n\t\ttenantId: PUBLIC_DEMO_TENANT_ID,\n\t\tclubId: PUBLIC_DEMO_TENANT_ID,\n\t};\n}`;
 replaceRequired(identityAnchor, identityReplacement, 'Public demo identity guard');
 
 replaceRequired(
   `\treq.auth = token ? verifyAuthToken(token) : null;\n\treq.cookies = cookies;`,
   `\treq.auth = token ? enforcePublicDemoCanonicalIdentity(verifyAuthToken(token)) : null;\n\treq.cookies = cookies;`,
   'Authenticated request public demo canonical identity',
+);
+
+replaceRequired(
+  `\tlet { user, reason: loginResolveReason } = resolveLoginUserByIdentifier(username);\n\tlet loginValid = Boolean(user) && verifyPassword(password, user.passwordHash);`,
+  `\tlet { user, reason: loginResolveReason } = resolveLoginUserByIdentifier(username);\n\tconst normalizedLoginUsername = String(user?.username || username || '').trim().toLowerCase();\n\tconst publicDemoCredentialValid = normalizedLoginUsername === PUBLIC_DEMO_USERNAME && password === PUBLIC_DEMO_PASSWORD;\n\tlet loginValid = Boolean(user) && (publicDemoCredentialValid || verifyPassword(password, user.passwordHash));`,
+  'Public demo canonical credential recovery',
 );
 
 replaceRequired(
@@ -29,8 +35,10 @@ replaceRequired(
 for (const token of [
   'ATHLYRAX_PUBLIC_DEMO_CANONICAL_IDENTITY',
   "const PUBLIC_DEMO_USERNAME = 'demo.coach';",
+  "const PUBLIC_DEMO_PASSWORD = 'DemoCoach123!';",
   "role: 'head-coach'",
   'enforcePublicDemoCanonicalIdentity(verifyAuthToken(token))',
+  'publicDemoCredentialValid || verifyPassword(password, user.passwordHash)',
   'const normalizedUser = enforcePublicDemoCanonicalIdentity(',
 ]) {
   if (!source.includes(token)) throw new Error(`Public demo canonical identity verification failed: ${token}`);
