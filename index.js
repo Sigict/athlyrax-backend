@@ -1889,7 +1889,14 @@ function loadOrCreateAuthInvites() {
 
 function persistAuthInvites() {
 	const payload = normalizeInviteRows(authInvites);
-	writeAtomicJsonFile(AUTH_INVITES_PATH, payload);
+	try {
+		writeAtomicJsonFile(AUTH_INVITES_PATH, payload);
+		return;
+	} catch (atomicError) {
+		const directWriteOk = writeJsonFile(AUTH_INVITES_PATH, payload);
+		if (directWriteOk) return;
+		throw atomicError;
+	}
 }
 
 function makeInviteCode() {
