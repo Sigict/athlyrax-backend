@@ -33,7 +33,7 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
   for (const submittedRow of submitted) {
     const swimmerId = text(submittedRow.swimmerId || submittedRow.athleteId);
     const status = text(submittedRow.status).toLowerCase();
-    if (!swimmerId || !['present', 'absent', 'late', 'excused'].includes(status)) {
+    if (!swimmerId || !['present', 'absent', 'late', 'excused', 'unmarked'].includes(status)) {
       return { ok: false, status: 400, error: 'Attendance rows require swimmerId and a supported status.' };
     }
     const index = next.findIndex((row) =>
@@ -43,6 +43,10 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
         || (link.scheduleId && text(row.scheduleId) === link.scheduleId)
       )
     );
+    if (status === 'unmarked') {
+      if (index >= 0) next.splice(index, 1);
+      continue;
+    }
     const base = index >= 0 ? next[index] : {};
     const row = {
       ...base,
