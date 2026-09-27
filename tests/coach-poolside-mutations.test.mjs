@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from '../coach-poolside-mutations.mjs';
 
 const db = {
@@ -64,4 +65,47 @@ test('Poolside attendance accepts unmarked and removes the existing canonical ro
   assert.equal(result.ok, true);
   assert.equal(result.db.attendance.length, 0);
   assert.deepEqual(result.rows, []);
+});
+
+
+test('Poolside attendance scales by indexing one session instead of repeated full scans', () => {
+  const attendance = Array.from({ length: 5000 }, (_, index) => ({
+    id: `att-${index}`,
+    sessionId: index < 50 ? 'sess-1' : `sess-${index}`,
+    scheduleId: index < 50 ? 'sch-1' : `sch-${index}`,
+    swimmerId: `sw-${index}`,
+    status: 'absent',
+    present: false,
+  }));
+  const inputRows = Array.from({ length: 50 }, (_, index) => ({ swimmerId: `sw-${index}`, status: 'present' }));
+  const result = applyCoachPoolsideAttendance({ ...db, attendance }, {
+    sessionId: 'sess-1',
+    scheduleId: 'sch-1',
+    rows: inputRows,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.rows.length, 50);
+  assert.equal(result.db.attendance.length, 5000);
+});
+
+test('Poolside mutations use compact atomic DB persistence', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(source, /function writeAtomicJsonFileCompact/);
+  assert.match(source, /applyCoachPoolsideMutation[\s\S]{0,1200}writeAtomicJsonFileCompact\(tenantScope\.storagePaths\.dbPath, output\.db\)/);
+});
+
+
+test('Poolside attendance deduplicates repeated swimmer submissions and last status wins', () => {
+  const result = applyCoachPoolsideAttendance(db, {
+    sessionId: 'sess-1',
+    scheduleId: 'sch-1',
+    rows: [
+      { swimmerId: 'sw-1', status: 'absent' },
+      { swimmerId: 'sw-1', status: 'present' },
+    ],
+  });
+  assert.equal(result.ok, true);
+  const rows = result.db.attendance.filter((row) => row.swimmerId === 'sw-1' && row.scheduleId === 'sch-1');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'present');
 });
