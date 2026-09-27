@@ -2707,6 +2707,24 @@ function writeAtomicJsonFile(filePath, data) {
 	}
 }
 
+function writeAtomicJsonFileCompact(filePath, data) {
+	const dir = path.dirname(filePath);
+	fs.mkdirSync(dir, { recursive: true });
+	cleanupStaleAtomicTemps(filePath);
+	const tmpPath = path.join(
+		dir,
+		`${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
+	);
+	const serialized = JSON.stringify(data);
+	try {
+		fs.writeFileSync(tmpPath, serialized, 'utf8');
+		fs.renameSync(tmpPath, filePath);
+	} catch (error) {
+		try { fs.unlinkSync(tmpPath); } catch {}
+		throw error;
+	}
+}
+
 function rotateSnapshotFiles(snapshotDir = DB_SNAPSHOT_DIR) {
 	if (!fs.existsSync(snapshotDir)) return;
 	const snapshotFiles = fs.readdirSync(snapshotDir)
@@ -6367,7 +6385,7 @@ async function applyCoachPoolsideMutation(req, res, mutator) {
 			if (!currentDb || typeof currentDb !== 'object' || Array.isArray(currentDb)) throw new Error('Coach Poolside database is unavailable.');
 			output = mutator(currentDb);
 			if (!output?.ok) return;
-			writeAtomicJsonFile(tenantScope.storagePaths.dbPath, output.db);
+			writeAtomicJsonFileCompact(tenantScope.storagePaths.dbPath, output.db);
 		});
 		if (!output?.ok) {
 			res.status(Number(output?.status || 400)).json({ error: String(output?.error || 'Poolside change was rejected.') });
