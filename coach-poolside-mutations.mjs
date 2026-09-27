@@ -41,6 +41,7 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
   const actor = text(input.updatedBy);
   const existing = list(db.attendance);
   const submittedBySwimmerId = new Map(normalizedSubmitted.map((row) => [row.swimmerId, row]));
+  const uniqueSubmitted = Array.from(submittedBySwimmerId.values());
   const existingTargetBySwimmerId = new Map();
 
   const matchesLinkedSession = (row) => (
@@ -62,7 +63,7 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
   });
 
   const changedRows = [];
-  for (const { swimmerId, status } of normalizedSubmitted) {
+  for (const { swimmerId, status } of uniqueSubmitted) {
     if (status === 'unmarked') continue;
     const base = existingTargetBySwimmerId.get(swimmerId) || {};
     const row = {
