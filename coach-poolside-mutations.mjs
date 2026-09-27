@@ -26,28 +26,45 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
   if (!link?.sessionId && !link?.scheduleId) return { ok: false, status: 404, error: 'Canonical session was not found.' };
   const submitted = list(input.rows);
   if (!submitted.length) return { ok: false, status: 400, error: 'At least one attendance row is required.' };
+
+  const normalizedSubmitted = submitted.map((submittedRow) => {
+    const swimmerId = text(submittedRow.swimmerId || submittedRow.athleteId);
+    const status = text(submittedRow.status).toLowerCase();
+    if (!swimmerId || !['present', 'absent', 'late', 'excused', 'unmarked'].includes(status)) return null;
+    return { swimmerId, status };
+  });
+  if (normalizedSubmitted.some((row) => !row)) {
+    return { ok: false, status: 400, error: 'Attendance rows require swimmerId and a supported status.' };
+  }
+
   const now = text(input.now) || new Date().toISOString();
   const actor = text(input.updatedBy);
   const existing = list(db.attendance);
-  const next = existing.slice();
-  for (const submittedRow of submitted) {
-    const swimmerId = text(submittedRow.swimmerId || submittedRow.athleteId);
-    const status = text(submittedRow.status).toLowerCase();
-    if (!swimmerId || !['present', 'absent', 'late', 'excused', 'unmarked'].includes(status)) {
-      return { ok: false, status: 400, error: 'Attendance rows require swimmerId and a supported status.' };
-    }
-    const index = next.findIndex((row) =>
-      text(row.swimmerId || row.athleteId) === swimmerId
-      && (
-        (link.sessionId && text(row.sessionId || row.trainingSessionId) === link.sessionId)
-        || (link.scheduleId && text(row.scheduleId) === link.scheduleId)
-      )
-    );
-    if (status === 'unmarked') {
-      if (index >= 0) next.splice(index, 1);
-      continue;
-    }
-    const base = index >= 0 ? next[index] : {};
+  const submittedBySwimmerId = new Map(normalizedSubmitted.map((row) => [row.swimmerId, row]));
+  const existingTargetBySwimmerId = new Map();
+
+  const matchesLinkedSession = (row) => (
+    (link.sessionId && text(row.sessionId || row.trainingSessionId) === link.sessionId)
+    || (link.scheduleId && text(row.scheduleId) === link.scheduleId)
+  );
+
+  for (const row of existing) {
+    if (!matchesLinkedSession(row)) continue;
+    const swimmerId = text(row.swimmerId || row.athleteId);
+    if (!swimmerId || !submittedBySwimmerId.has(swimmerId)) continue;
+    existingTargetBySwimmerId.set(swimmerId, row);
+  }
+
+  const retained = existing.filter((row) => {
+    if (!matchesLinkedSession(row)) return true;
+    const swimmerId = text(row.swimmerId || row.athleteId);
+    return !submittedBySwimmerId.has(swimmerId);
+  });
+
+  const changedRows = [];
+  for (const { swimmerId, status } of normalizedSubmitted) {
+    if (status === 'unmarked') continue;
+    const base = existingTargetBySwimmerId.get(swimmerId) || {};
     const row = {
       ...base,
       id: text(base.id) || `attendance:${link.sessionId || link.scheduleId}:${swimmerId}`,
@@ -60,10 +77,11 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
       updatedAt: now,
       updatedBy: actor,
     };
-    if (index >= 0) next[index] = row;
-    else next.push(row);
+    retained.push(row);
+    changedRows.push(row);
   }
-  return { ok: true, db: { ...db, attendance: next }, rows: next.filter((row) => submitted.some((item) => text(item.swimmerId) === text(row.swimmerId)) && ((link.sessionId && text(row.sessionId || row.trainingSessionId) === link.sessionId) || (link.scheduleId && text(row.scheduleId) === link.scheduleId))) };
+
+  return { ok: true, db: { ...db, attendance: retained }, rows: changedRows };
 }
 
 export function applyCoachPoolsideSetChange(db = {}, input = {}) {
