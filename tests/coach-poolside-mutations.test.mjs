@@ -93,3 +93,19 @@ test('Poolside mutations use compact atomic DB persistence', () => {
   assert.match(source, /function writeAtomicJsonFileCompact/);
   assert.match(source, /applyCoachPoolsideMutation[\s\S]{0,1200}writeAtomicJsonFileCompact\(tenantScope\.storagePaths\.dbPath, output\.db\)/);
 });
+
+
+test('Poolside attendance deduplicates repeated swimmer submissions and last status wins', () => {
+  const result = applyCoachPoolsideAttendance(db, {
+    sessionId: 'sess-1',
+    scheduleId: 'sch-1',
+    rows: [
+      { swimmerId: 'sw-1', status: 'absent' },
+      { swimmerId: 'sw-1', status: 'present' },
+    ],
+  });
+  assert.equal(result.ok, true);
+  const rows = result.db.attendance.filter((row) => row.swimmerId === 'sw-1' && row.scheduleId === 'sch-1');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'present');
+});
