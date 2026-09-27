@@ -46,3 +46,22 @@ test('Poolside result capture stays on the canonical set and is idempotent by ex
   assert.equal(second.db.trainingSessionSets[0].poolsideExecutions.length, 1);
   assert.equal(second.db.trainingSessionSets[0].poolsideExecutions[0].distance, 50);
 });
+
+
+test('Poolside attendance accepts unmarked and removes the existing canonical row', () => {
+  const seeded = {
+    ...db,
+    attendance: [
+      { id: 'att-1', sessionId: 'sess-1', trainingSessionId: 'sess-1', scheduleId: 'sch-1', swimmerId: 'sw-1', status: 'present', present: true },
+    ],
+  };
+  const result = applyCoachPoolsideAttendance(seeded, {
+    sessionId: 'sess-1',
+    scheduleId: 'sch-1',
+    rows: [{ swimmerId: 'sw-1', status: 'unmarked' }],
+    updatedBy: 'coach',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.db.attendance.length, 0);
+  assert.deepEqual(result.rows, []);
+});
