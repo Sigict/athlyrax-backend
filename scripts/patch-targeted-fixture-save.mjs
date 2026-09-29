@@ -6,8 +6,10 @@ const indexPath = path.join(root, 'index.js');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const mutationImport = "import { applyTargetedFixtureSave } from './targeted-fixture-save.mjs';";
-const importAnchor = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from './coach-poolside-mutations.mjs';";
+const legacyImportAnchor = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from './coach-poolside-mutations.mjs';";
+const canonicalResultImportAnchor = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult } from './coach-poolside-mutations.mjs';";
 if (!source.includes(mutationImport)) {
+  const importAnchor = source.includes(canonicalResultImportAnchor) ? canonicalResultImportAnchor : legacyImportAnchor;
   if (!source.includes(importAnchor)) throw new Error('Targeted fixture import anchor is missing.');
   source = source.replace(importAnchor, importAnchor + '\n' + mutationImport);
 }
