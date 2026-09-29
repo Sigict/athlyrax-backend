@@ -10,6 +10,7 @@ import helmet from 'helmet';
 import Stripe from 'stripe';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
+import { applyCoachObservation } from './coach-observations.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -6391,7 +6392,7 @@ async function applyCoachPoolsideMutation(req, res, mutator) {
 			res.status(Number(output?.status || 400)).json({ error: String(output?.error || 'Poolside change was rejected.') });
 			return;
 		}
-		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution, result: output.result, event: output.event, fixture: output.fixture });
+		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution, result: output.result, event: output.event, fixture: output.fixture, observation: output.observation });
 	} catch {
 		res.status(503).json({ error: 'Poolside change could not be saved.' });
 	}
@@ -6437,6 +6438,24 @@ app.post('/coach/poolside/competitions/:fixtureId/events/:eventId/evidence', req
 		coachNotes: req.body?.coachNotes,
 		videoAnalyses: req.body?.videoAnalyses,
 		sourceKind: req.body?.sourceKind || 'coach',
+		source: req.body?.source || 'coach-poolside',
+		updatedBy: req.auth?.username,
+	}));
+});
+
+app.post('/coach/observations', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachObservation(db, {
+		...req.body,
+		source: req.body?.source || 'athlyrax-software',
+		updatedBy: req.auth?.username,
+	}));
+});
+
+app.post('/coach/poolside/sessions/:sessionId/swimmers/:swimmerId/observations', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachObservation(db, {
+		...req.body,
+		sessionId: req.params?.sessionId,
+		swimmerId: req.params?.swimmerId,
 		source: req.body?.source || 'coach-poolside',
 		updatedBy: req.auth?.username,
 	}));
