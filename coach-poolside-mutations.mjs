@@ -132,3 +132,56 @@ export function applyCoachPoolsideExecution(db = {}, input = {}) {
   nextSets[index] = { ...nextSets[index], poolsideExecutions: nextExecutions, updatedAt: row.recordedAt, updatedBy: row.recordedBy };
   return { ok: true, db: { ...db, trainingSessionSets: nextSets }, execution: row };
 }
+
+
+function normalizeCanonicalResultRep(rep = {}) {
+  const splits = list(rep?.splits).map((split) => ({
+    ...split,
+    time: text(split?.time),
+    strokeCount: text(split?.strokeCount),
+  }));
+  return {
+    ...rep,
+    overallTime: text(rep?.overallTime),
+    overallStrokeCount: text(rep?.overallStrokeCount),
+    computedTotalTime: text(rep?.computedTotalTime),
+    computedStrokeCount: text(rep?.computedStrokeCount),
+    splits,
+  };
+}
+
+export function applyCoachPoolsideCanonicalResult(db = {}, input = {}) {
+  const sessionId = text(input.sessionId);
+  const setId = text(input.setId);
+  const swimmerId = text(input.swimmerId);
+  const reps = list(input.reps).map(normalizeCanonicalResultRep);
+  if (!sessionId || !setId || !swimmerId) {
+    return { ok: false, status: 400, error: 'Canonical session, set and swimmer are required.' };
+  }
+  if (!reps.length) return { ok: false, status: 400, error: 'At least one result rep is required.' };
+  const sets = list(db.trainingSessionSets);
+  const index = sets.findIndex((row) => text(row.id) === setId && parentSessionId(row) === sessionId);
+  if (index < 0) return { ok: false, status: 404, error: 'Canonical set was not found in this session.' };
+  if (!list(db.swimmers).some((row) => text(row.id) === swimmerId)) {
+    return { ok: false, status: 404, error: 'Swimmer was not found in this club.' };
+  }
+  const now = text(input.now) || new Date().toISOString();
+  const currentResults = sets[index]?.resultsBySwimmer && typeof sets[index].resultsBySwimmer === 'object'
+    ? sets[index].resultsBySwimmer
+    : {};
+  const nextResult = {
+    ...(currentResults[swimmerId] && typeof currentResults[swimmerId] === 'object' ? currentResults[swimmerId] : {}),
+    reps,
+    source: text(input.source) || 'coach-poolside',
+    updatedAt: now,
+    updatedBy: text(input.updatedBy),
+  };
+  const nextSets = sets.slice();
+  nextSets[index] = {
+    ...nextSets[index],
+    resultsBySwimmer: { ...currentResults, [swimmerId]: nextResult },
+    updatedAt: now,
+    updatedBy: text(input.updatedBy),
+  };
+  return { ok: true, db: { ...db, trainingSessionSets: nextSets }, result: nextResult, set: nextSets[index] };
+}
