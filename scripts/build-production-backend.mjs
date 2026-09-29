@@ -23,7 +23,6 @@ const transforms = [
   'scripts/patch-operational-integrity.mjs',
   'scripts/patch-runtime-data-retention.mjs',
   'scripts/patch-revision-integrity.mjs',
-  'scripts/patch-db-put-committed-response.mjs',
   'scripts/patch-auth-tenant-integrity.mjs',
   'scripts/patch-migration-validation.mjs',
   'scripts/patch-runtime-auth-billing-safety.mjs',
@@ -133,6 +132,7 @@ for (const relative of [
   'scripts/patch-canonical-schedule-delete-occurrence.mjs',
   'scripts/patch-retire-legacy-training-schedules.mjs',
   'scripts/patch-revision-integrity.mjs',
+  'scripts/patch-db-put-committed-response.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
