@@ -68,6 +68,10 @@ read('tests/snapshot-cookie-session.test.mjs');
 read('tests/production-auth-token-redaction.test.mjs');
 read('tests/stripe-webhook-processing-availability.test.mjs');
 read('tests/coach-link-transaction.test.mjs');
+const committedDbPatch = read('scripts/patch-db-put-committed-response.mjs');
+for (const token of ['ATHLYRAX_PUT_RETURNS_COMMITTED_DB_V1', 'db: readJsonFile(storagePaths.dbPath),']) {
+  if (!committedDbPatch.includes(token)) failures.push(`scripts/patch-db-put-committed-response.mjs: missing ${token}`);
+}
 
 const build = read('scripts/build-production-backend.mjs');
 const transformArrayMatch = build.match(/const transforms = \[([\s\S]*?)\n\];/);
@@ -94,7 +98,7 @@ for (const token of ['ATHLYRAX_COACH_LINK_SUITE_V1','ATHLYRAX_SWIMMER_PROFILE_SY
   if (!coachSuite.includes(token)) failures.push(`scripts/patch-coach-link-suite.mjs: missing suite verification token ${token}`);
 }
 
-for (const required of ["run('storage/path audit', ['scripts/audit-storage-paths.mjs']);","run('production transform-chain audit', ['scripts/audit-production-transform-chain.mjs']);","run(`${relative} syntax check`, ['--check', relative]);",'ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK']) {
+for (const required of ["run('storage/path audit', ['scripts/audit-storage-paths.mjs']);","run('production transform-chain audit', ['scripts/audit-production-transform-chain.mjs']);","run('final committed DB response guard', ['scripts/patch-db-put-committed-response.mjs']);","run(`${relative} syntax check`, ['--check', relative]);",'ATHLYRAX_PRODUCTION_BACKEND_BUILD_OK']) {
   if (!build.includes(required)) failures.push(`scripts/build-production-backend.mjs: missing build guard ${required}`);
 }
 
