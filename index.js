@@ -6671,6 +6671,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				recoveredTargets: 0,
 				recoveredFixtureIds: 0,
 				staleWriteIgnored: true,
+				committedDb: currentDb,
 			};
 		}
 
@@ -6739,6 +6740,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				...(Array.isArray(occurrenceFiltered.blockedResurrections) ? occurrenceFiltered.blockedResurrections : []),
 			],
 			tombstoneCount: mergedTombstones.length,
+			committedDb: ownershipStampedBody,
 		};
 	})
 		.then((result) => {
@@ -6749,6 +6751,9 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 				staleWriteIgnored: result.staleWriteIgnored === true,
 				blockedResurrections: Array.isArray(result.blockedResurrections) ? result.blockedResurrections : [],
 				tombstoneCount: Number.isFinite(result.tombstoneCount) ? result.tombstoneCount : 0,
+				db: result.committedDb && typeof result.committedDb === 'object' && !Array.isArray(result.committedDb)
+					? result.committedDb
+					: null,
 			});
 		})
 		.catch((error) => {
