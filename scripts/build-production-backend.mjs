@@ -23,6 +23,7 @@ const transforms = [
   'scripts/patch-operational-integrity.mjs',
   'scripts/patch-runtime-data-retention.mjs',
   'scripts/patch-revision-integrity.mjs',
+  'scripts/patch-db-put-committed-response.mjs',
   'scripts/patch-auth-tenant-integrity.mjs',
   'scripts/patch-migration-validation.mjs',
   'scripts/patch-runtime-auth-billing-safety.mjs',
@@ -85,6 +86,8 @@ run('final DB write stage diagnostics', ['scripts/patch-db-write-stage-diagnosti
 run('final ENOSPC primary DB recovery', ['scripts/patch-enospc-primary-db-recovery.mjs']);
 if (!fs.existsSync(path.join(root, 'scripts/patch-canonical-data-cleanup.mjs'))) throw new Error('Required canonical data cleanup guard is missing.');
 run('final canonical data cleanup', ['scripts/patch-canonical-data-cleanup.mjs']);
+if (!fs.existsSync(path.join(root, 'scripts/patch-db-put-committed-response.mjs'))) throw new Error('Required committed DB response guard is missing.');
+run('final committed DB response guard', ['scripts/patch-db-put-committed-response.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
