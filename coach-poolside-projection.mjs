@@ -81,6 +81,33 @@ export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
       return sessionIds.has(ref) || canonicalSessions.some((session) => text(session.scheduleId) === ref);
     })
     .map((row) => ({ id: text(row.id), sessionId: text(row.sessionId || row.trainingSessionId), scheduleId: text(row.scheduleId), swimmerId: text(row.swimmerId || row.athleteId), status: text(row.status || (row.present === false ? 'absent' : 'present')).toLowerCase() }));
+  const coachObservations = rows(db.coachObservations)
+    .filter((row) => {
+      const observationDate = text(row.date || row.createdAt).slice(0, 10);
+      if (observationDate && observationDate !== selectedDate) return false;
+      const swimmerId = text(row.swimmerId || row.athleteId);
+      if (swimmerId && !swimmers.some((swimmer) => swimmer.id === swimmerId)) return false;
+      const observationSessionId = text(row.sessionId || row.trainingSessionId);
+      const observationScheduleId = text(row.scheduleId || row.trainingScheduleId);
+      if (!observationSessionId && !observationScheduleId) return true;
+      return sessionIds.has(observationSessionId)
+        || canonicalSessions.some((session) => text(session.scheduleId) === observationScheduleId);
+    })
+    .map((row) => ({
+      id: text(row.id),
+      swimmerId: text(row.swimmerId || row.athleteId),
+      sessionId: text(row.sessionId || row.trainingSessionId),
+      scheduleId: text(row.scheduleId || row.trainingScheduleId),
+      setId: text(row.setId || row.trainingSetId),
+      date: text(row.date || row.createdAt).slice(0, 10),
+      mainFocus: text(row.mainFocus || row.focus),
+      notes: text(row.notes || row.note || row.coachNotes),
+      coachId: text(row.coachId || row.updatedBy),
+      coachName: text(row.coachName),
+      source: text(row.source),
+      createdAt: text(row.createdAt),
+      updatedAt: text(row.updatedAt),
+    }));
   return {
     date: selectedDate,
     sessions: canonicalSessions.map((session) => ({
@@ -98,5 +125,6 @@ export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
     })),
     swimmers,
     attendance,
+    coachObservations,
   };
 }
