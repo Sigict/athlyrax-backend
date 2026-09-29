@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
-import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from '../coach-poolside-mutations.mjs';
+import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult } from '../coach-poolside-mutations.mjs';
 
 const db = {
   schedule: [{ id: 'sch-1', trainingSessionId: 'sess-1' }],
@@ -108,4 +108,31 @@ test('Poolside attendance deduplicates repeated swimmer submissions and last sta
   const rows = result.db.attendance.filter((row) => row.swimmerId === 'sw-1' && row.scheduleId === 'sch-1');
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, 'present');
+});
+
+
+test('coach poolside canonical result writes resultsBySwimmer', () => {
+  const db = {
+    trainingSessions: [{ id: 'session-1', scheduleId: 'schedule-1' }],
+    trainingSessionSets: [{ id: 'set-1', sessionId: 'session-1', resultsBySwimmer: {} }],
+    swimmers: [{ id: 'sw-1', name: 'Swimmer One' }],
+  };
+  const result = applyCoachPoolsideCanonicalResult(db, {
+    sessionId: 'session-1',
+    setId: 'set-1',
+    swimmerId: 'sw-1',
+    reps: [
+      { overallTime: '30.10', overallStrokeCount: '17', splits: [{ time: '14.80', strokeCount: '8' }, { time: '15.30', strokeCount: '9' }] },
+      { overallTime: '30.40', overallStrokeCount: '18', splits: [] },
+    ],
+    source: 'poolside-document-import',
+    now: '2026-09-29T12:00:00.000Z',
+  });
+  assert.equal(result.ok, true);
+  const saved = result.db.trainingSessionSets[0].resultsBySwimmer['sw-1'];
+  assert.equal(saved.reps.length, 2);
+  assert.equal(saved.reps[0].overallTime, '30.10');
+  assert.equal(saved.reps[0].splits[1].strokeCount, '9');
+  assert.equal(saved.source, 'poolside-document-import');
+  assert.equal(result.db.trainingSessionSets[0].poolsideExecutions, undefined);
 });

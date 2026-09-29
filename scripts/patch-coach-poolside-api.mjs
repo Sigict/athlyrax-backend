@@ -6,13 +6,16 @@ const indexPath = path.join(root, 'index.js');
 let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const projectionImport = "import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';";
-const mutationImport = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from './coach-poolside-mutations.mjs';";
+const legacyMutationImport = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from './coach-poolside-mutations.mjs';";
+const mutationImport = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult } from './coach-poolside-mutations.mjs';";
 const importAnchor = "import Stripe from 'stripe';";
 if (!source.includes(projectionImport)) {
   if (!source.includes(importAnchor)) throw new Error('Coach Poolside import anchor is missing.');
   source = source.replace(importAnchor, importAnchor + '\n' + projectionImport);
 }
-if (!source.includes(mutationImport)) {
+if (source.includes(legacyMutationImport)) {
+  source = source.replace(legacyMutationImport, mutationImport);
+} else if (!source.includes(mutationImport)) {
   source = source.replace(projectionImport, projectionImport + '\n' + mutationImport);
 }
 
@@ -78,6 +81,17 @@ app.post('/coach/poolside/sessions/:sessionId/attendance', requireStrictAuth, re
 		sessionId: req.params?.sessionId,
 		scheduleId: req.body?.scheduleId,
 		rows: req.body?.rows,
+		updatedBy: req.auth?.username,
+	}));
+});
+
+app.post('/coach/poolside/sessions/:sessionId/sets/:setId/results', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachPoolsideCanonicalResult(db, {
+		sessionId: req.params?.sessionId,
+		setId: req.params?.setId,
+		swimmerId: req.body?.swimmerId,
+		reps: req.body?.reps,
+		source: req.body?.source,
 		updatedBy: req.auth?.username,
 	}));
 });
