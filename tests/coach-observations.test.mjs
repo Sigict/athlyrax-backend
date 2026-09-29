@@ -33,3 +33,26 @@ test('poolside and software endpoints share the same observation mutation', () =
   assert.match(source, /app\.post\('\/coach\/poolside\/sessions\/:sessionId\/swimmers\/:swimmerId\/observations'/);
   assert.ok((source.match(/applyCoachObservation\(db,/g) || []).length >= 2);
 });
+
+
+test('poolside projection exposes canonical swimmer observations for the selected day', async () => {
+  const { buildCoachPoolsideProjection } = await import('../coach-poolside-projection.mjs');
+  const db = {
+    schedule: [{ id: 'sch-1', scheduleDate: '2026-09-29', squadIds: ['sq-1'] }],
+    trainingSessions: [{ id: 'sess-1', scheduleId: 'sch-1', squadIds: ['sq-1'] }],
+    swimmers: [{ id: 'sw-1', firstName: 'Test', lastName: 'Swimmer', currentSquadId: 'sq-1' }],
+    coachObservations: [{
+      id: 'obs-1',
+      swimmerId: 'sw-1',
+      sessionId: 'sess-1',
+      scheduleId: 'sch-1',
+      date: '2026-09-29',
+      notes: 'Individual note',
+      source: 'athlyrax-software',
+    }],
+  };
+  const projection = buildCoachPoolsideProjection(db, { date: '2026-09-29' });
+  assert.equal(projection.coachObservations.length, 1);
+  assert.equal(projection.coachObservations[0].swimmerId, 'sw-1');
+  assert.equal(projection.coachObservations[0].notes, 'Individual note');
+});
