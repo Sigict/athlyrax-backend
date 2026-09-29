@@ -7,7 +7,9 @@ let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const projectionImport = "import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';";
 const legacyMutationImport = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution } from './coach-poolside-mutations.mjs';";
-const mutationImport = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult } from './coach-poolside-mutations.mjs';";
+const canonicalMutationImport = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult } from './coach-poolside-mutations.mjs';";
+const competitionMutationImport = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';";
+const mutationImport = "import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';";
 const importAnchor = "import Stripe from 'stripe';";
 if (!source.includes(projectionImport)) {
   if (!source.includes(importAnchor)) throw new Error('Coach Poolside import anchor is missing.');
@@ -15,6 +17,10 @@ if (!source.includes(projectionImport)) {
 }
 if (source.includes(legacyMutationImport)) {
   source = source.replace(legacyMutationImport, mutationImport);
+} else if (source.includes(canonicalMutationImport)) {
+  source = source.replace(canonicalMutationImport, mutationImport);
+} else if (source.includes(competitionMutationImport)) {
+  source = source.replace(competitionMutationImport, mutationImport);
 } else if (!source.includes(mutationImport)) {
   source = source.replace(projectionImport, projectionImport + '\n' + mutationImport);
 }
@@ -70,7 +76,7 @@ async function applyCoachPoolsideMutation(req, res, mutator) {
 			res.status(Number(output?.status || 400)).json({ error: String(output?.error || 'Poolside change was rejected.') });
 			return;
 		}
-		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution });
+		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution, result: output.result, event: output.event, fixture: output.fixture });
 	} catch {
 		res.status(503).json({ error: 'Poolside change could not be saved.' });
 	}
@@ -112,6 +118,22 @@ app.post('/coach/poolside/sessions/:sessionId/sets/:setId', requireStrictAuth, r
 		setId: req.params?.setId,
 		reps: req.body?.reps,
 		sendoffSeconds: req.body?.sendoffSeconds,
+		updatedBy: req.auth?.username,
+	}));
+});
+
+app.post('/coach/poolside/competitions/:fixtureId/events/:eventId/evidence', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachPoolsideCompetitionEvidence(db, {
+		fixtureId: req.params?.fixtureId,
+		eventId: req.params?.eventId,
+		eventN: req.body?.eventN,
+		swimmerId: req.body?.swimmerId,
+		entryTime: req.body?.entryTime,
+		totalTime: req.body?.totalTime,
+		coachNotes: req.body?.coachNotes,
+		videoAnalyses: req.body?.videoAnalyses,
+		sourceKind: req.body?.sourceKind || 'coach',
+		source: req.body?.source || 'coach-poolside',
 		updatedBy: req.auth?.username,
 	}));
 });
