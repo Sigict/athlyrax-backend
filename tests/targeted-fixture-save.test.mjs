@@ -35,6 +35,10 @@ test('targeted fixture save updates only canonical fixture data', () => {
     attendeeIds: ['sw1','sw2'],
     events: [{ id: 'ev1', eventN: '2', attendeeIds: ['sw2'] }],
     notes: 'note',
+    licenceNumber: '3ER262007',
+    officialFixtureUrl: 'https://www.swimmingresults.org/licensed_meets/',
+    officialResultsUrl: 'https://www.swimmingresults.org/index.php',
+    officialSource: 'Swim England',
   });
   assert.equal(result.ok, true);
   assert.equal(result.fixture.name, 'New Gala');
@@ -46,6 +50,10 @@ test('targeted fixture save updates only canonical fixture data', () => {
   assert.deepEqual(result.fixture.coverCoachIds, ['c3']);
   assert.equal(result.fixture.coverCoachId, 'c3');
   assert.equal(result.fixture.venue, 'New Pool');
+  assert.equal(result.fixture.licenceNumber, '3ER262007');
+  assert.equal(result.fixture.licenseNumber, '3ER262007');
+  assert.equal(result.fixture.officialReference, '3ER262007');
+  assert.equal(result.fixture.officialSource, 'Swim England');
   assert.ok(result.db.venues.some((row) => row.name === 'New Pool'));
   assert.deepEqual(result.db.swimmers, db.swimmers);
 });
