@@ -9,7 +9,7 @@ import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
-import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
+import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
