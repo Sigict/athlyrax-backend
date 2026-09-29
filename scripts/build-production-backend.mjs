@@ -56,6 +56,7 @@ for (const relative of [
   'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-athlete-wearable-api.mjs',
   'scripts/patch-coach-poolside-api.mjs',
+  'scripts/patch-targeted-fixture-save.mjs',
 ]) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required Athlete/Terra production transform is missing: ${relative}`);
   run(relative, [relative]);
@@ -109,8 +110,10 @@ for (const relative of [
   'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-athlete-wearable-api.mjs',
   'scripts/patch-coach-poolside-api.mjs',
+  'scripts/patch-targeted-fixture-save.mjs',
   'coach-poolside-projection.mjs',
   'coach-poolside-mutations.mjs',
+  'targeted-fixture-save.mjs',
   'athlete-capability-projection.mjs',
   'athlete-home-projection.mjs',
   'athlete-session-review.mjs',
