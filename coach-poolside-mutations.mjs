@@ -185,3 +185,117 @@ export function applyCoachPoolsideCanonicalResult(db = {}, input = {}) {
   };
   return { ok: true, db: { ...db, trainingSessionSets: nextSets }, result: nextResult, set: nextSets[index] };
 }
+
+
+function competitionRef(row = {}) {
+  return text(row.id || row._id || row.fixtureId || row.fixtureReference);
+}
+
+function competitionEventNumber(row = {}) {
+  return text(row.eventN || row.eventNumber || row.number);
+}
+
+function normalizeCompetitionVideoEvidence(value, source, now, actor) {
+  return list(value).map((row, index) => {
+    const item = row && typeof row === 'object' ? row : { note: text(row) };
+    return {
+      ...item,
+      id: text(item.id || item.videoId) || `competition-video:${now}:${index + 1}`,
+      source: text(item.source) || source,
+      recordedAt: text(item.recordedAt || item.createdAt) || now,
+      recordedBy: text(item.recordedBy) || actor,
+    };
+  });
+}
+
+export function applyCoachPoolsideCompetitionEvidence(db = {}, input = {}) {
+  const fixtureId = text(input.fixtureId || input.fixtureReference);
+  const eventId = text(input.eventId);
+  const eventN = text(input.eventN || input.eventNumber);
+  const swimmerId = text(input.swimmerId);
+  if (!fixtureId || (!eventId && !eventN) || !swimmerId) {
+    return { ok: false, status: 400, error: 'Competition, event and swimmer are required.' };
+  }
+  if (!list(db.swimmers).some((row) => text(row.id) === swimmerId)) {
+    return { ok: false, status: 404, error: 'Swimmer was not found in this club.' };
+  }
+
+  const fixtures = list(db.fixtures);
+  const fixtureIndex = fixtures.findIndex((row) => competitionRef(row) === fixtureId);
+  if (fixtureIndex < 0) return { ok: false, status: 404, error: 'Competition was not found.' };
+
+  const currentFixture = fixtures[fixtureIndex] && typeof fixtures[fixtureIndex] === 'object' ? fixtures[fixtureIndex] : {};
+  const events = list(currentFixture.events).map((row) => ({ ...row }));
+  const eventIndex = events.findIndex((row) => (
+    (eventId && text(row.id) === eventId)
+    || (eventN && competitionEventNumber(row) === eventN)
+  ));
+  if (eventIndex < 0) return { ok: false, status: 404, error: 'Competition event was not found.' };
+
+  const now = text(input.now) || new Date().toISOString();
+  const actor = text(input.updatedBy);
+  const sourceKind = ['official', 'coach', 'other'].includes(text(input.sourceKind)) ? text(input.sourceKind) : 'coach';
+  const source = text(input.source) || (sourceKind === 'coach' ? 'coach-poolside' : sourceKind);
+  const currentEvent = events[eventIndex];
+  const resultsBySwimmer = currentEvent.resultsBySwimmer && typeof currentEvent.resultsBySwimmer === 'object'
+    ? { ...currentEvent.resultsBySwimmer }
+    : {};
+  const previous = resultsBySwimmer[swimmerId] && typeof resultsBySwimmer[swimmerId] === 'object'
+    ? resultsBySwimmer[swimmerId]
+    : {};
+  const evidenceBySource = previous.evidenceBySource && typeof previous.evidenceBySource === 'object'
+    ? { ...previous.evidenceBySource }
+    : {};
+  const previousSourceEvidence = evidenceBySource[sourceKind] && typeof evidenceBySource[sourceKind] === 'object'
+    ? evidenceBySource[sourceKind]
+    : {};
+  const totalTime = text(input.totalTime || input.resultTime);
+  const entryTime = text(input.entryTime) || text(previous.entryTime);
+  const coachNotes = text(input.coachNotes || input.notes);
+  const videos = normalizeCompetitionVideoEvidence(input.videoAnalyses || input.videos, source, now, actor);
+
+  evidenceBySource[sourceKind] = {
+    ...previousSourceEvidence,
+    ...(totalTime ? { totalTime } : {}),
+    ...(entryTime ? { entryTime } : {}),
+    ...(coachNotes ? { coachNotes } : {}),
+    ...(videos.length ? { videoAnalyses: [...list(previousSourceEvidence.videoAnalyses), ...videos] } : {}),
+    source,
+    updatedAt: now,
+    updatedBy: actor,
+  };
+
+  const officialTime = text(evidenceBySource.official?.totalTime);
+  const coachTime = text(evidenceBySource.coach?.totalTime);
+  const mergedCoachNotes = text(evidenceBySource.coach?.coachNotes || previous.coachNotes);
+  const mergedVideos = list(evidenceBySource.coach?.videoAnalyses);
+
+  const nextResult = {
+    ...previous,
+    ...(entryTime ? { entryTime } : {}),
+    totalTime: officialTime || coachTime || totalTime || text(previous.totalTime),
+    officialTime,
+    coachTime,
+    coachNotes: mergedCoachNotes,
+    videoAnalyses: mergedVideos,
+    evidenceBySource,
+    updatedAt: now,
+    updatedBy: actor,
+  };
+
+  resultsBySwimmer[swimmerId] = nextResult;
+  const attendeeIds = Array.from(new Set([...list(currentEvent.attendeeIds), swimmerId].map(text).filter(Boolean)));
+  events[eventIndex] = { ...currentEvent, attendeeIds, resultsBySwimmer, updatedAt: now, updatedBy: actor };
+
+  const fixtureAttendeeIds = Array.from(new Set(events.flatMap((row) => list(row.attendeeIds)).map(text).filter(Boolean)));
+  const nextFixtures = fixtures.slice();
+  nextFixtures[fixtureIndex] = { ...currentFixture, events, attendeeIds: fixtureAttendeeIds, updatedAt: now, updatedBy: actor };
+
+  return {
+    ok: true,
+    db: { ...db, fixtures: nextFixtures },
+    result: nextResult,
+    event: events[eventIndex],
+    fixture: nextFixtures[fixtureIndex],
+  };
+}

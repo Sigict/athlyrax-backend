@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
-import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult } from '../coach-poolside-mutations.mjs';
+import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from '../coach-poolside-mutations.mjs';
 
 const db = {
   schedule: [{ id: 'sch-1', trainingSessionId: 'sess-1' }],
@@ -135,4 +135,56 @@ test('coach poolside canonical result writes resultsBySwimmer', () => {
   assert.equal(saved.reps[0].splits[1].strokeCount, '9');
   assert.equal(saved.source, 'poolside-document-import');
   assert.equal(result.db.trainingSessionSets[0].poolsideExecutions, undefined);
+});
+
+
+test('coach poolside competition evidence keeps official and coach results separate and carries notes/video', () => {
+  const seeded = {
+    swimmers: [{ id: 'sw-1', name: 'Swimmer One' }],
+    fixtures: [{
+      id: 'fx-1',
+      events: [{
+        id: 'evt-7',
+        eventN: '7',
+        attendeeIds: ['sw-1'],
+        resultsBySwimmer: {
+          'sw-1': {
+            entryTime: '1:05.50',
+            officialTime: '1:04.80',
+            totalTime: '1:04.80',
+            evidenceBySource: {
+              official: { totalTime: '1:04.80', source: 'official' },
+            },
+          },
+        },
+      }],
+    }],
+  };
+  const result = applyCoachPoolsideCompetitionEvidence(seeded, {
+    fixtureId: 'fx-1',
+    eventId: 'evt-7',
+    swimmerId: 'sw-1',
+    totalTime: '1:04.92',
+    coachNotes: 'Held stroke rate through final 25.',
+    videoAnalyses: [{ id: 'vid-1', fileName: 'race.mp4', speedMs: 1.54 }],
+    sourceKind: 'coach',
+    source: 'coach-poolside-video-analysis',
+    updatedBy: 'coach',
+    now: '2026-09-29T14:30:00.000Z',
+  });
+  assert.equal(result.ok, true);
+  const saved = result.db.fixtures[0].events[0].resultsBySwimmer['sw-1'];
+  assert.equal(saved.officialTime, '1:04.80');
+  assert.equal(saved.coachTime, '1:04.92');
+  assert.equal(saved.totalTime, '1:04.80');
+  assert.equal(saved.coachNotes, 'Held stroke rate through final 25.');
+  assert.equal(saved.videoAnalyses.length, 1);
+  assert.equal(saved.videoAnalyses[0].speedMs, 1.54);
+  assert.equal(saved.evidenceBySource.coach.source, 'coach-poolside-video-analysis');
+});
+
+test('coach poolside exposes targeted competition evidence endpoint', () => {
+  const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(source, /\/coach\/poolside\/competitions\/:fixtureId\/events\/:eventId\/evidence/);
+  assert.match(source, /applyCoachPoolsideCompetitionEvidence/);
 });
