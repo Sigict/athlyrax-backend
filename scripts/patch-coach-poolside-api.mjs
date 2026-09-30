@@ -33,7 +33,7 @@ if (!source.includes(projectionMarker)) {
   const projectionRoute = String.raw`// ATHLYRAX_COACH_POOLSIDE_PROJECTION_V1
 app.get('/coach/poolside', requireStrictAuth, (req, res) => {
 	const role = String(req.auth?.role || '').trim().toLowerCase();
-	if (!['software-owner', 'head-coach', 'assistant-coach', 'viewer'].includes(role)) {
+	if (!['software-owner', 'head-coach', 'assistant-coach', 'coach', 'viewer'].includes(role)) {
 		res.status(403).json({ error: 'Coach account required.' });
 		return;
 	}
