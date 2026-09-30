@@ -130,7 +130,7 @@ app.patch('/feedback/:id/decision', requireStrictAuth, requireSoftwareOwnerRole,
 	}
 	const id = String(req.params?.id || '').trim();
 	const decision = String(req.body?.decision || '').trim().toLowerCase();
-	if (!id || !['accepted', 'rejected', 'deferred', 'pending'].includes(decision)) {
+	if (!id || !['fix', 'archive', 'accepted', 'rejected', 'deferred', 'pending'].includes(decision)) {
 		res.status(400).json({ error: 'Valid feedback id and decision required.' });
 		return;
 	}
@@ -149,7 +149,7 @@ app.patch('/feedback/:id/decision', requireStrictAuth, requireSoftwareOwnerRole,
 				const rows = feedbackStoredRows(filePath);
 				const index = rows.findIndex((item) => String(item.id) === id);
 				if (index < 0) continue;
-				rows[index] = { ...rows[index], decision, status: decision, decisionBy: String(req.auth?.username || ''), decisionAt: new Date().toISOString() };
+				rows[index] = { ...rows[index], decision, status: decision === 'fix' ? 'fix-queued' : decision === 'archive' ? 'archived' : decision, decisionBy: String(req.auth?.username || ''), decisionAt: new Date().toISOString() };
 				writeAtomicJsonFile(filePath, rows);
 				updated = rows[index];
 				break;
