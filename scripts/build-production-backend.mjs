@@ -56,6 +56,7 @@ for (const relative of [
   'scripts/patch-athlete-tenant-registry.mjs',
   'scripts/patch-athlete-wearable-api.mjs',
   'scripts/patch-coach-poolside-api.mjs',
+  'scripts/patch-coach-feedback-email.mjs',
   'scripts/patch-targeted-fixture-save.mjs',
 ]) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Required Athlete/Terra production transform is missing: ${relative}`);
@@ -83,6 +84,8 @@ run('public demo read-only guard', ['scripts/patch-public-demo-readonly.mjs']);
 run('final revision integrity guard', ['scripts/patch-revision-integrity.mjs']);
 run('final canonical demo tenant metadata repair guard', ['scripts/patch-demo-company-tenant-metadata-write.mjs']);
 run('final DB write stage diagnostics', ['scripts/patch-db-write-stage-diagnostics.mjs']);
+if (!fs.existsSync(path.join(root, 'scripts/patch-coach-feedback-email.mjs'))) throw new Error('Required persisted coach feedback and notification patch missing.');
+run('persisted coach feedback and SMTP notification patch', ['scripts/patch-coach-feedback-email.mjs']);
 run('final ENOSPC primary DB recovery', ['scripts/patch-enospc-primary-db-recovery.mjs']);
 if (!fs.existsSync(path.join(root, 'scripts/patch-canonical-data-cleanup.mjs'))) throw new Error('Required canonical data cleanup guard is missing.');
 run('final canonical data cleanup', ['scripts/patch-canonical-data-cleanup.mjs']);
