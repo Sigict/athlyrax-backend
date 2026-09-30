@@ -137,6 +137,8 @@ for (const relative of [
   'scripts/patch-retire-legacy-training-schedules.mjs',
   'scripts/patch-revision-integrity.mjs',
   'scripts/patch-db-put-committed-response.mjs',
+  'feedback-routes.mjs',
+  'scripts/patch-feedback-routes.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
