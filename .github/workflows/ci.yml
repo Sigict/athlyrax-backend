@@ -20,6 +20,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Verify durable feedback inbox and SMTP owner notification contract
+        run: node --test tests/feedback-owner-email.test.mjs
       - name: Reject source-controlled runtime storage
         run: node scripts/verify-repository-runtime-storage.mjs
       - name: Audit production dependencies
