@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{3,32}$/;
-const ALLOWED_ROLES = new Set(['software-owner', 'head-coach', 'assistant-coach', 'viewer', 'swimmer']);
+const ALLOWED_ROLES = new Set(['software-owner', 'head-coach', 'assistant-coach', 'coach', 'viewer', 'swimmer']);
 const CANONICAL_TENANT_PATTERN = /^[a-z0-9_-]+$/;
 
 function clean(value) { return String(value ?? '').trim(); }
