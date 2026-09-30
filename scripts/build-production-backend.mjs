@@ -88,6 +88,8 @@ if (!fs.existsSync(path.join(root, 'scripts/patch-canonical-data-cleanup.mjs')))
 run('final canonical data cleanup', ['scripts/patch-canonical-data-cleanup.mjs']);
 if (!fs.existsSync(path.join(root, 'scripts/patch-db-put-committed-response.mjs'))) throw new Error('Required committed DB response guard is missing.');
 run('final committed DB response guard', ['scripts/patch-db-put-committed-response.mjs']);
+if (!fs.existsSync(path.join(root, 'scripts/patch-feedback-owner-email.mjs'))) throw new Error('Required durable feedback/owner notification guard is missing.');
+run('final tenant-scoped Feedback API and email notification', ['scripts/patch-feedback-owner-email.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
@@ -136,6 +138,7 @@ for (const relative of [
   'scripts/patch-retire-legacy-training-schedules.mjs',
   'scripts/patch-revision-integrity.mjs',
   'scripts/patch-db-put-committed-response.mjs',
+  'scripts/patch-feedback-owner-email.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
