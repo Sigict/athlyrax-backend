@@ -174,7 +174,7 @@ const DEFAULT_AUTH_USERS = [
 		: []),
 ];
 const DEMO_SEED_USERNAMES = new Set(['headcoach', 'assistant', 'viewer']);
-const WRITE_ALLOWED_ROLES = new Set(['software-owner', 'head-coach', 'assistant-coach']);
+const WRITE_ALLOWED_ROLES = new Set(['software-owner', 'head-coach', 'assistant-coach', 'coach']);
 const ADMIN_ALLOWED_ROLES = new Set(['software-owner', 'head-coach']);
 const DEFAULT_ALLOWED_ORIGINS = [
 	'http://localhost:5173',
@@ -4221,7 +4221,7 @@ app.get('/auth/guard', (req, res) => {
 
 	const user = findAuthUser(req.auth.username) || req.auth;
 	const role = String(user?.role || req.auth.role || '').trim().toLowerCase();
-	const coachRoles = new Set(['software-owner', 'head-coach', 'assistant-coach', 'viewer']);
+	const coachRoles = new Set(['software-owner', 'head-coach', 'assistant-coach', 'coach', 'viewer']);
 	const isAllowed = audience === 'coach' ? coachRoles.has(role) : role === 'swimmer';
 
 	if (!isAllowed) {
@@ -4591,7 +4591,7 @@ app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateL
 	}
 
 	const role = String(req.body?.role || 'assistant-coach').trim() || 'assistant-coach';
-	if (!['assistant-coach', 'viewer', 'swimmer', 'head-coach'].includes(role)) {
+	if (!['assistant-coach', 'coach', 'viewer', 'swimmer', 'head-coach'].includes(role)) {
 		res.status(400).json({ error: 'Invite role is not allowed.' });
 		return;
 	}
