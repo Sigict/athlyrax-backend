@@ -88,6 +88,8 @@ if (!fs.existsSync(path.join(root, 'scripts/patch-canonical-data-cleanup.mjs')))
 run('final canonical data cleanup', ['scripts/patch-canonical-data-cleanup.mjs']);
 if (!fs.existsSync(path.join(root, 'scripts/patch-db-put-committed-response.mjs'))) throw new Error('Required committed DB response guard is missing.');
 run('final committed DB response guard', ['scripts/patch-db-put-committed-response.mjs']);
+if (!fs.existsSync(path.join(root, 'feedback-routes.mjs'))) throw new Error('Required feedback route module is missing.');
+run('feedback notification integration', ['scripts/patch-feedback-notification.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
@@ -136,6 +138,8 @@ for (const relative of [
   'scripts/patch-retire-legacy-training-schedules.mjs',
   'scripts/patch-revision-integrity.mjs',
   'scripts/patch-db-put-committed-response.mjs',
+  'feedback-routes.mjs',
+  'scripts/patch-feedback-notification.mjs',
 ]) {
   run(`${relative} syntax check`, ['--check', relative]);
 }
