@@ -88,6 +88,7 @@ if (!fs.existsSync(path.join(root, 'scripts/patch-canonical-data-cleanup.mjs')))
 run('final canonical data cleanup', ['scripts/patch-canonical-data-cleanup.mjs']);
 if (!fs.existsSync(path.join(root, 'scripts/patch-db-put-committed-response.mjs'))) throw new Error('Required committed DB response guard is missing.');
 run('final committed DB response guard', ['scripts/patch-db-put-committed-response.mjs']);
+run('feedback durable tenant inbox and notification routes', ['scripts/patch-feedback-routes.mjs']);
 
 for (const relative of [
   'scripts/data-safety-preload.mjs',
