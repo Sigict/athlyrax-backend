@@ -20,7 +20,8 @@ test('production build installs feedback once with owner email and a safe coach 
   assert.match(source, /app\.patch\('\/feedback\/:id\/decision', requireStrictAuth/);
   assert.match(source, /canViewInbox: false/);
   assert.match(source, /canViewInbox: true/);
-  assert.match(source, /isPrimarySoftwareOwnerAccount\(req\.auth\)/);
+  assert.match(source, /requireSoftwareOwnerRole/);
+  assert.match(source, /String\(req\.auth\?\.role \|\| ''\)\.trim\(\) !== 'software-owner'/);
   assert.match(source, /feedbackPathForTenant = \(storagePaths\)/);
   assert.match(source, /feedbackPathForTenant\(paths\)/);
   assert.match(source, /getAuthResetMailTransport\(\)\.sendMail/);
