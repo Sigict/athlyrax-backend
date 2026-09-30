@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 
-const ALLOWED_INVITE_ROLES = new Set(['assistant-coach', 'viewer', 'swimmer', 'head-coach']);
+const ALLOWED_INVITE_ROLES = new Set(['assistant-coach', 'coach', 'viewer', 'swimmer', 'head-coach']);
 const TENANT_PATTERN = /^[a-z0-9_-]+$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
