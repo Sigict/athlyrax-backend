@@ -18,6 +18,8 @@ test('production build installs feedback once with owner email and a safe coach 
   assert.match(source, /app\.post\('\/feedback', requireStrictAuth/);
   assert.match(source, /app\.get\('\/feedback', requireStrictAuth/);
   assert.match(source, /app\.patch\('\/feedback\/:id\/decision', requireStrictAuth/);
+  assert.match(source, /\['fix', 'archive', 'accepted', 'rejected', 'deferred', 'pending'\]/);
+  assert.match(source, /status: decision === 'fix' \? 'fix-queued' : decision === 'archive' \? 'archived' : decision/);
   assert.match(source, /canViewInbox: false/);
   assert.match(source, /canViewInbox: true/);
   assert.match(source, /requireSoftwareOwnerRole/);
