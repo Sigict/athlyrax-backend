@@ -63,8 +63,8 @@ async function notifyFeedbackRecipient(row) {
 
 // A coach may submit feedback, but may not view the owner inbox. Return the
 // *empty* safe view expected by the shared frontend, not a noisy 403.
-app.get('/feedback', requireStrictAuth, (req, res) => {
-	if (!isPrimarySoftwareOwnerAccount(req.auth)) {
+app.get('/feedback', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
+	if (String(req.auth?.role || '').trim() !== 'software-owner') {
 		res.status(200).json({ ok: true, rows: [], canViewInbox: false });
 		return;
 	}
@@ -124,7 +124,7 @@ app.post('/feedback', requireStrictAuth, requireAdminRateLimit, async (req, res)
 });
 
 app.patch('/feedback/:id/decision', requireStrictAuth, requireSoftwareOwnerRole, requireAdminRateLimit, async (req, res) => {
-	if (!isPrimarySoftwareOwnerAccount(req.auth)) {
+	if (String(req.auth?.role || '').trim() !== 'software-owner') {
 		res.status(403).json({ error: 'Only the primary software owner can review feedback.' });
 		return;
 	}
