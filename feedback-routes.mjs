@@ -190,5 +190,6 @@ export function installFeedbackRoutes({
   // start after deployment/restart; never silently count email as successful.
   const worker = setInterval(() => { void retryPending(); }, Math.max(60000, Number(retryIntervalMs) || 300000));
   worker.unref?.();
+  setImmediate(() => { void retryPending(); });
   if (!smtpReady) console.warn('[feedback] SMTP notification unavailable; messages will still be saved.');
 }
