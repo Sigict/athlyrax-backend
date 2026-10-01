@@ -3760,8 +3760,12 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 	const isApproved = true;
 	const effectiveSwimClub = String(usableInvite?.swimClub || swimClub).trim();
 	const effectiveTeamName = String(usableInvite?.teamName || teamName).trim();
+	// New coach signups own one workspace; a team or squad is never required or created at signup.
+	// Invited legacy users keep their existing team/tenant resolution for compatibility.
 	const tenantId = normalizeTenantId(usableInvite?.tenantId)
-		|| resolveTenantKeyFromUser({ username, role, swimClub: effectiveSwimClub, teamName: effectiveTeamName });
+		|| (usableInvite
+			? resolveTenantKeyFromUser({ username, role, swimClub: effectiveSwimClub, teamName: effectiveTeamName })
+			: normalizeTenantId(`workspace-${username}`));
 
 	if (!usableInvite) {
 		const tenantHasMembers = getTenantUsersByTenantId(tenantId)
