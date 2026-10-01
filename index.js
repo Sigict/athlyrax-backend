@@ -1793,6 +1793,9 @@ function normalizeAuthUserRows(rows) {
 			const teamName = String(row?.teamName || '').trim();
 			const city = String(row?.city || '').trim();
 			const country = String(row?.country || '').trim();
+			const pilotConsent = row?.pilotConsent === true;
+			const pilotConsentVersion = pilotConsent ? String(row?.pilotConsentVersion || '').trim() : '';
+			const pilotConsentAt = pilotConsent ? String(row?.pilotConsentAt || '').trim() : '';
 			const isApproved = row?.isApproved !== false;
 			const onboardingCompletedAt = String(row?.onboardingCompletedAt || '').trim();
 			const referralCode = String(row?.referralCode || '').trim().toUpperCase();
@@ -1823,6 +1826,9 @@ function normalizeAuthUserRows(rows) {
 				teamName,
 				city,
 				country,
+				pilotConsent,
+				pilotConsentVersion,
+				pilotConsentAt,
 				isApproved,
 				onboardingCompletedAt,
 				referralCode,
@@ -3641,6 +3647,14 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 	const city = String(req.body?.city || '').trim();
 	const country = String(req.body?.country || '').trim();
 	const inviteCode = String(req.body?.inviteCode || '').trim();
+	const pilotConsent = req.body?.researchConsent === true;
+	const pilotConsentVersion = pilotConsent && String(req.body?.researchConsentVersion || '').trim() === 'athlyrax-pilot-research-consent-v1'
+		? 'athlyrax-pilot-research-consent-v1'
+		: '';
+	if (pilotConsent && !pilotConsentVersion) {
+		res.status(400).json({ error: 'Reload the current pilot consent statement and try again.' });
+		return;
+	}
 	if (!password) {
 		appendAuthAuditEvent({
 			action: 'register_failed',
@@ -3807,6 +3821,9 @@ app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 		teamName: effectiveTeamName,
 		city,
 		country,
+		pilotConsent,
+		pilotConsentVersion,
+		pilotConsentAt: pilotConsent ? new Date().toISOString() : '',
 		isApproved,
 		onboardingCompletedAt: '',
 		referralCode: usableInvite ? String(usableInvite?.code || '').trim().toUpperCase() : '',

@@ -111,6 +111,8 @@ export function buildSignupLegalAcceptanceRecord({ req, responsePayload, accepte
     swimClub,
     teamName,
     role: cleanText(responseUser?.role, 80),
+    pilotConsent: body?.researchConsent === true,
+    pilotConsentVersion: body?.researchConsent === true ? cleanText(body?.researchConsentVersion, 100) : '',
     documentVersions: { ...REQUIRED_SIGNUP_LEGAL_VERSIONS },
     confirmations: {
       authorisedClubRepresentativeAndDpa: Boolean(swimClub) && body?.dpaAccepted === true,

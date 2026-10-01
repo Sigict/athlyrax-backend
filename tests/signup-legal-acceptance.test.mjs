@@ -62,6 +62,17 @@ test('signup accepts independent coaches without club or team while enforcing te
   assert.equal(validateSignupLegalAcceptance(validBody()).ok, true);
 });
 
+test('pilot consent defaults to false and the durable journal records positive opt-in version', () => {
+  const withoutConsent = buildSignupLegalAcceptanceRecord({ req: { body: validBody(), headers: {} } });
+  assert.equal(withoutConsent.pilotConsent, false);
+  assert.equal(withoutConsent.pilotConsentVersion, '');
+  const withConsent = buildSignupLegalAcceptanceRecord({
+    req: { body: { ...validBody(), researchConsent: true, researchConsentVersion: 'athlyrax-pilot-research-consent-v1' }, headers: {} },
+  });
+  assert.equal(withConsent.pilotConsent, true);
+  assert.equal(withConsent.pilotConsentVersion, 'athlyrax-pilot-research-consent-v1');
+});
+
 test('acceptance record contains account, tenant, versions and proxy-observed request evidence', () => {
   const record = buildSignupLegalAcceptanceRecord({
     req: {
