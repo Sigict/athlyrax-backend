@@ -66,19 +66,13 @@ export function validateSignupLegalAcceptance(body) {
     ? source.legalDocumentVersions
     : {};
   const swimClub = cleanText(source?.swimClub, 180);
-  const teamName = cleanText(source?.teamName, 180);
-
-  if (!swimClub || !teamName) {
+  // Club/organisation is optional for independent coaches; squads are created after registration.
+  if (source.dpaAccepted !== true || (swimClub && source.clubDataProtectionConfirmed !== true)) {
     return {
       ok: false,
-      error: 'Swim club and team name are required for the Data Processing Agreement.',
-    };
-  }
-
-  if (source.dpaAccepted !== true || source.clubDataProtectionConfirmed !== true) {
-    return {
-      ok: false,
-      error: 'You must accept the AthlyraX Data Processing Agreement and confirm the club data-protection requirements.',
+      error: swimClub
+        ? 'Accept the AthlyraX Data Processing Agreement and confirm the club data-protection requirements.'
+        : 'Accept the AthlyraX Terms and Data Processing Agreement.',
     };
   }
 
@@ -103,7 +97,7 @@ export function buildSignupLegalAcceptanceRecord({ req, responsePayload, accepte
   const swimClub = cleanText(responseUser?.swimClub || body?.swimClub, 180);
   const teamName = cleanText(responseUser?.teamName || body?.teamName, 180);
   const tenantId = cleanText(responseUser?.tenantId, 180)
-    || `${normalizeTenantPart(swimClub, 'club')}__${normalizeTenantPart(teamName, `user-${normalizeTenantPart(username, 'unknown')}`)}`;
+    || `workspace-${normalizeTenantPart(username, 'unknown')}`;
   const timestamp = cleanText(acceptedAt, 60) || new Date().toISOString();
 
   return {
@@ -119,8 +113,9 @@ export function buildSignupLegalAcceptanceRecord({ req, responsePayload, accepte
     role: cleanText(responseUser?.role, 80),
     documentVersions: { ...REQUIRED_SIGNUP_LEGAL_VERSIONS },
     confirmations: {
-      authorisedClubRepresentativeAndDpa: true,
-      clubLawfulBasisAndPrivacyInformation: true,
+      authorisedClubRepresentativeAndDpa: Boolean(swimClub) && body?.dpaAccepted === true,
+      termsAndDataProcessingAgreement: body?.dpaAccepted === true,
+      clubLawfulBasisAndPrivacyInformation: Boolean(swimClub) && body?.clubDataProtectionConfirmed === true,
     },
     ipAddress: resolveRequestIp(req),
     userAgent: cleanText(req?.headers?.['user-agent'], 500),
