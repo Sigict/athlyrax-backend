@@ -20,6 +20,11 @@ test('production build installs feedback once with owner email and a safe coach 
   assert.match(source, /app\.patch\('\/feedback\/:id\/decision', requireStrictAuth/);
   assert.match(source, /canViewInbox: false/);
   assert.match(source, /canViewInbox: true/);
+  assert.match(source, /done: 'accepted'/, 'Done must be recognised by the deployed route');
+  assert.match(source, /archive: 'accepted'/, 'Archive must be recognised by the deployed route');
+  assert.match(source, /fix: 'deferred'/, 'Fix must be recognised by the deployed route');
+  assert.match(source, /req\.body\?\.feedbackId/, 'A canonical body feedback id may be used as a fallback');
+  assert.match(source, /Feedback id is required/, 'A missing ID must be reported separately from invalid decisions');
   assert.match(source, /requireSoftwareOwnerRole/);
   assert.match(source, /String\(req\.auth\?\.role \|\| ''\)\.trim\(\) !== 'software-owner'/);
   assert.match(source, /feedbackPathForTenant = \(storagePaths\)/);

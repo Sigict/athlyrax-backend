@@ -128,10 +128,16 @@ app.patch('/feedback/:id/decision', requireStrictAuth, requireSoftwareOwnerRole,
 		res.status(403).json({ error: 'Only the primary software owner can review feedback.' });
 		return;
 	}
-	const id = String(req.params?.id || '').trim();
-	const decision = String(req.body?.decision || '').trim().toLowerCase();
-	if (!id || !['accepted', 'rejected', 'deferred', 'pending'].includes(decision)) {
-		res.status(400).json({ error: 'Valid feedback id and decision required.' });
+	const id = String(req.params?.id || req.body?.feedbackId || req.body?.feedback_id || '').trim();
+	const incomingDecision = String(req.body?.decision || '').trim().toLowerCase();
+	// Accept both the owner-inbox UI values and the stored decision vocabulary.
+	const decision = ({ done: 'accepted', archive: 'accepted', fix: 'deferred' })[incomingDecision] || incomingDecision;
+	if (!id) {
+		res.status(400).json({ error: 'Feedback id is required. Refresh the inbox and try again.' });
+		return;
+	}
+	if (!['accepted', 'rejected', 'deferred', 'pending'].includes(decision)) {
+		res.status(400).json({ error: 'Unsupported feedback decision.' });
 		return;
 	}
 	const files = [path.join(STORAGE_ROOT, FEEDBACK_MESSAGES_FILENAME)];
