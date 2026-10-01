@@ -49,11 +49,12 @@ function withLegalEnv(values, run) {
   return result;
 }
 
-test('signup legal confirmation, club identity and current versions are mandatory', () => {
+test('signup accepts independent coaches without club or team while enforcing terms', () => {
   assert.equal(validateSignupLegalAcceptance({}).ok, false);
-  assert.equal(validateSignupLegalAcceptance({ ...validBody(), swimClub: '' }).ok, false);
-  assert.equal(validateSignupLegalAcceptance({ ...validBody(), teamName: '' }).ok, false);
-  assert.equal(validateSignupLegalAcceptance({ ...validBody(), dpaAccepted: false }).ok, false);
+  assert.equal(validateSignupLegalAcceptance({ ...validBody(), teamName: '' }).ok, true);
+  assert.equal(validateSignupLegalAcceptance({ ...validBody(), swimClub: '', teamName: '', clubDataProtectionConfirmed: false }).ok, true);
+  assert.equal(validateSignupLegalAcceptance({ ...validBody(), swimClub: '', dpaAccepted: false }).ok, false);
+  assert.equal(validateSignupLegalAcceptance({ ...validBody(), clubDataProtectionConfirmed: false }).ok, false);
   assert.equal(validateSignupLegalAcceptance({
     ...validBody(),
     legalDocumentVersions: { ...REQUIRED_SIGNUP_LEGAL_VERSIONS, dataProcessingAgreement: 'old' },
@@ -86,6 +87,7 @@ test('acceptance record contains account, tenant, versions and proxy-observed re
   assert.equal(record.username, 'coach.one');
   assert.equal(record.tenantId, 'example-club__performance-squad');
   assert.equal(record.stage, 'completed');
+  assert.equal(record.confirmations.termsAndDataProcessingAgreement, true);
   assert.equal(record.ipAddress, '203.0.113.9');
   assert.notEqual(record.ipAddress, '198.51.100.99');
   assert.equal(record.userAgent, 'AthlyraX Test Browser');
