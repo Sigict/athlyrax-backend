@@ -52,6 +52,33 @@ function readyMarkerMatchesStorageRoot(markerPath, storageRoot) {
   }
 }
 
+function pruneSafetyAuditRetention(backupRoot, keepCount = 12) {
+  const archiveDir = path.join(path.resolve(backupRoot), 'auth-audit-retention');
+  try {
+    if (!fs.existsSync(archiveDir)) return { removed: 0, bytes: 0 };
+    const files = fs.readdirSync(archiveDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => {
+        const fullPath = path.join(archiveDir, entry.name);
+        const stat = fs.statSync(fullPath);
+        return { fullPath, mtime: stat.mtimeMs, size: stat.size };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    let removed = 0;
+    let bytes = 0;
+    for (const stale of files.slice(Math.max(1, keepCount))) {
+      try {
+        fs.unlinkSync(stale.fullPath);
+        removed += 1;
+        bytes += Number(stale.size || 0);
+      } catch {}
+    }
+    return { removed, bytes };
+  } catch {
+    return { removed: 0, bytes: 0 };
+  }
+}
+
 function runChecked(label, args) {
   const result = spawnSync(process.execPath, args, {
     cwd: sourceRoot,
@@ -124,6 +151,10 @@ if (approval === APPROVAL) {
 
 const runtimeConfiguration = resolveStorageConfiguration(process.env, sourceRoot);
 if (runtimeConfiguration.failures.length > 0) throw new Error(runtimeConfiguration.failures.join('\n'));
+const safetyPrune = pruneSafetyAuditRetention(runtimeConfiguration.backupRoot, 12);
+if (safetyPrune.removed > 0) {
+  console.log(`[storage-recovery] Removed ${safetyPrune.removed} stale safety audit archive(s), reclaimed ${safetyPrune.bytes} bytes.`);
+}
 const demoRecovery = restoreBundledDemoTenantIfNeeded({
   sourceRoot,
   storageRoot: runtimeConfiguration.storageRoot,
