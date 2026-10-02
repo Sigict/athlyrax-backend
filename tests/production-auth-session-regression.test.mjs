@@ -93,7 +93,7 @@ test('demo coach authority survives verification and logout cannot trap the brow
   const again = await fetch(`${baseUrl}/auth/me`, { headers: { cookie } });
   assert.equal(again.status, 200, 'resumed session must remain available');
   const auditPath = path.join(storageRoot, 'auth-audit', 'events.jsonl');
-  const auditRows = fs.readFileSync(auditPath, 'utf8').split(/\\r?\\n/).filter(Boolean).map(line => JSON.parse(line));
+  const auditRows = fs.readFileSync(auditPath, 'utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
   const accountEvents = auditRows.filter(row => row.target === 'demo.coach');
   assert.equal(accountEvents.filter(row => row.action === 'login_success').length, 1, 'password sign-in remains a distinct event');
   assert.equal(accountEvents.filter(row => row.action === 'authenticated_access').length, 1, 'repeated /auth/me must record daily authenticated access only once');
