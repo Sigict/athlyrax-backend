@@ -1,6 +1,10 @@
 import test from 'node:test';
+import express from 'express';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
-import { normalizeWebsitePath, normalizeSource, applyWebsiteEvent, websiteSummary } from '../website-analytics.mjs';
+import { normalizeWebsitePath, normalizeSource, applyWebsiteEvent, websiteSummary, registerWebsiteAnalytics } from '../website-analytics.mjs';
 
 test('website path allowlist excludes private app and arbitrary paths', () => {
   assert.equal(normalizeWebsitePath('/software.html?x=1'), '/software');
@@ -36,4 +40,40 @@ test('owner summary dates, windows and totals are independently labelled', () =>
   assert.equal(summary.trend.length, 7);
   assert.equal(summary.trend.at(-1).date, '2026-10-02');
   assert.equal(websiteSummary(data, 999, new Date('2026-10-02T00:00:00Z')).periodDays, 30);
+});
+
+test('public collection requires origin and consent; owner reporting is authenticated', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-web-analytics-'));
+  const app = express();
+  app.use(express.json({ limit: '1kb' }));
+  registerWebsiteAnalytics(app, {
+    storageRoot: tmp,
+    requireStrictAuth: (req, res, next) => req.headers['x-test-auth'] === 'yes' ? next() : res.status(401).end(),
+    requireSoftwareOwnerRole: (req, res, next) => req.headers['x-test-owner'] === 'yes' ? next() : res.status(403).end(),
+    resolveClientKey: () => 'test-rate-bucket',
+  });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise(resolve => server.once('listening', resolve));
+    const root = 'http://127.0.0.1:' + server.address().port;
+    const payload = { event: 'page_view', path: '/software', consent: true, source: '' };
+    const request = (origin, body = payload) => fetch(root + '/website-analytics/collect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });
+    assert.equal((await request('https://invalid.example')).status, 403);
+    assert.equal((await request('https://athlyrax.com', { ...payload, consent: false })).status, 400);
+    assert.equal((await request('https://athlyrax.com', { ...payload, path: '/api/db' })).status, 400);
+    assert.equal((await request('https://athlyrax.com')).status, 204);
+    assert.equal((await fetch(root + '/website-analytics/owner-summary')).status, 401);
+    assert.equal((await fetch(root + '/website-analytics/owner-summary', { headers: { 'x-test-auth': 'yes' } })).status, 403);
+    const ok = await fetch(root + '/website-analytics/owner-summary?days=7', { headers: { 'x-test-auth': 'yes', 'x-test-owner': 'yes' } });
+    assert.equal(ok.status, 200);
+    assert.match(ok.headers.get('cache-control') || '', /no-store/);
+    const report = await ok.json();
+    assert.equal(report.totals.pageViews, 1);
+    assert.deepEqual(report.topPages[0], { name: '/software', count: 1 });
+    const raw = fs.readFileSync(path.join(tmp, 'website-analytics-aggregate.json'), 'utf8');
+    assert.doesNotMatch(raw, /test-rate-bucket|x-test-auth|visitorId/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
