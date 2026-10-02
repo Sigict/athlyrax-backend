@@ -90,6 +90,16 @@ test('demo coach authority survives verification and logout cannot trap the brow
   const meBody = await me.json();
   assert.equal(meBody?.user?.role, 'head-coach', 'verified session must not collapse demo.coach back to viewer');
 
+  const again = await fetch(`${baseUrl}/auth/me`, { headers: { cookie } });
+  assert.equal(again.status, 200, 'resumed session must remain available');
+  const auditPath = path.join(storageRoot, 'auth-audit', 'events.jsonl');
+  const auditRows = fs.readFileSync(auditPath, 'utf8').split(/\\r?\\n/).filter(Boolean).map(line => JSON.parse(line));
+  const accountEvents = auditRows.filter(row => row.target === 'demo.coach');
+  assert.equal(accountEvents.filter(row => row.action === 'login_success').length, 1, 'password sign-in remains a distinct event');
+  assert.equal(accountEvents.filter(row => row.action === 'authenticated_access').length, 1, 'repeated /auth/me must record daily authenticated access only once');
+  assert.equal(accountEvents.find(row => row.action === 'authenticated_access')?.details?.source, 'existing_or_new_authenticated_session');
+  assert.ok(!fs.readFileSync(auditPath, 'utf8').includes(cookie.split(';')[0]), 'never persist session cookies in audit events');
+
   const logout = await fetch(`${baseUrl}/auth/logout`, {
     method: 'POST',
     headers: { cookie },
