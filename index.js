@@ -8,6 +8,7 @@ import { execFileSync } from 'child_process';
 import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
+import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
 import { applyCoachObservation } from './coach-observations.mjs';
@@ -337,6 +338,8 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 	}
 });
 
+// This anonymous collection route must never inherit the larger application JSON body allowance.
+app.use('/website-analytics/collect', express.json({ limit: '1kb' }));
 app.use(express.json({ limit: '25mb' }));
 app.use(helmet());
 
@@ -4604,6 +4607,8 @@ app.post('/auth/presence/ping', requireStrictAuth, (req, res) => {
 app.get('/auth/presence/summary', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
 	res.status(200).json(getAuthPresenceSummary());
 });
+
+registerWebsiteAnalytics(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole, resolveClientKey });
 
 app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {
 	if (!AUTH_ALLOW_COACH_INVITES) {

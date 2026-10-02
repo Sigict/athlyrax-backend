@@ -95,6 +95,7 @@ run('final committed DB response guard', ['scripts/patch-db-put-committed-respon
 for (const relative of [
   'scripts/data-safety-preload.mjs',
   'index.js',
+  'website-analytics.mjs',
   'scripts/storage-path-contract.mjs',
   'scripts/migrate-storage-once.mjs',
   'scripts/approve-storage-layout.mjs',
