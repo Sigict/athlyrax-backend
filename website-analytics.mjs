@@ -61,7 +61,7 @@ export function websiteSummary(data, days = 30, today = new Date()) {
     trend.push({ date, pageViews: Number(row.pageViews || 0), estimatedSessions: Number(row.estimatedSessions || 0), enquiryClicks: Number(row.enquiryClicks || 0) });
   }
   const sortCounts = (obj) => Object.entries(obj).sort((a,b) => b[1] - a[1]).slice(0, 12).map(([name, count]) => ({ name, count }));
-  return { periodDays: windowDays, collectedFrom: data.startedAt || null, totals: { pageViews: totals.pageViews, estimatedSessions: totals.estimatedSessions, enquiryClicks: totals.enquiryClicks }, topPages: sortCounts(totals.pages), sources: sortCounts(totals.sources), trend, methodology: 'Consented first-party events only. Estimated sessions are browser-session starts, not unique people. Enquiry clicks are not completed enquiries. Bots, blockers and disabled consent affect counts. Not comparable directly to Netlify CDN analytics.' };
+  return { periodDays: windowDays, collectedFrom: data.startedAt || null, totals: { pageViews: totals.pageViews, estimatedSessions: totals.estimatedSessions, enquiryClicks: totals.enquiryClicks }, topPages: sortCounts(totals.pages), sources: sortCounts(totals.sources), trend, methodology: 'First-party aggregate statistical events; visitors can opt out. Estimated sessions are browser-session starts, not unique people. Enquiry clicks are not completed enquiries. Bots, blockers and visitor objections affect counts. Not comparable directly to Netlify CDN analytics.' };
 }
 
 export function registerWebsiteAnalytics(app, { storageRoot, requireStrictAuth, requireSoftwareOwnerRole, resolveClientKey }) {
@@ -100,7 +100,7 @@ export function registerWebsiteAnalytics(app, { storageRoot, requireStrictAuth, 
     if (Number(req.headers['content-length'] || 0) > 900) return res.status(413).end();
     const data = req.body;
     if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length > 4 ||
-        data.consent !== true || !EVENTS.has(data.event)) return res.status(400).json({ error: 'Invalid analytics event.' });
+        (data.consent !== true && data.purpose !== 'statistics') || !EVENTS.has(data.event)) return res.status(400).json({ error: 'Invalid analytics event.' });
     const ip = String(resolveClientKey(req) || 'unknown');
     const now = Date.now();
     const item = rate.get(ip);
