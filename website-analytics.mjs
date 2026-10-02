@@ -110,9 +110,9 @@ export function registerWebsiteAnalytics(app, { storageRoot, requireStrictAuth, 
     if (rate.size > 2000) for (const [key, b] of rate) if (now > b.until) rate.delete(key);
     if (bucket.count > 35) return res.status(429).end();
     const day = new Date().toISOString().slice(0, 10);
-    const store = read();
+    const store = structuredClone(read());
     if (!applyWebsiteEvent(store, data, day)) return res.status(400).json({ error: 'Invalid page or event.' });
-    try { persist(store); } catch { return res.status(503).json({ error: 'Analytics storage unavailable.' }); }
+    try { persist(store); snapshot = store; } catch { return res.status(503).json({ error: 'Analytics storage unavailable.' }); }
     return res.status(204).end();
   });
   app.get('/website-analytics/owner-summary', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
