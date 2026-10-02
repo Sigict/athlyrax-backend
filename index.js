@@ -191,6 +191,8 @@ const allowedOrigins = parseAllowedOrigins();
 const loginRateBuckets = new Map();
 const adminRateBuckets = new Map();
 const authPresenceByUser = new Map();
+// One daily access record per authenticated account/process; no session token stored.
+const authDailyAccessRecorded = new Map();
 const authPasswordResetByUser = new Map();
 const authPopupTickets = new Map();
 const AUTH_POPUP_TICKET_TTL_MS = 60 * 1000;
@@ -2454,8 +2456,10 @@ function appendAuthAuditEvent({ action, req, status = 'info', target = '', reaso
 		rotateAuthAuditIfNeeded();
 		fs.appendFileSync(AUTH_AUDIT_ACTIVE_PATH, `${JSON.stringify(payload)}\n`, 'utf8');
 		createAuthAuditBackupIfDue();
+		return true;
 	} catch {
-		// Best-effort logging only.
+		// Audit logging remains best effort; never block authentication on a disk error.
+		return false;
 	}
 }
 
@@ -2492,7 +2496,10 @@ function readAuthAuditEvents(limit = 250, filters = {}) {
 		for (const line of lines) {
 			try {
 				const parsed = JSON.parse(line);
-				if (actionFilter && String(parsed?.action || '').toLowerCase() !== actionFilter) continue;
+				const parsedAction = String(parsed?.action || '').toLowerCase();
+				if (actionFilter === 'account_access_history') {
+					if (!['login_success', 'authenticated_access', 'register_success'].includes(parsedAction)) continue;
+				} else if (actionFilter && parsedAction !== actionFilter) continue;
 				if (statusFilter && String(parsed?.status || '').toLowerCase() !== statusFilter) continue;
 				if (actorFilter && String(parsed?.actor || '').toLowerCase().indexOf(actorFilter) === -1) continue;
 				if (queryFilter) {
@@ -4203,6 +4210,23 @@ app.get('/auth/me', (req, res) => {
 		return;
 	}
 
+	// A returning coach may never POST /auth/login: a valid cookie restores /auth/me.
+	// Record genuine authenticated access separately from password sign-ins, at most
+	// once per account per UTC day per process, without storing cookies or tokens.
+	const accessUsername = String(req.auth.username || '').trim().toLowerCase();
+	const accessDate = new Date().toISOString().slice(0, 10);
+	if (accessUsername && authDailyAccessRecorded.get(accessUsername) !== accessDate) {
+		const user = findAuthUser(req.auth.username) || req.auth;
+		const saved = appendAuthAuditEvent({
+			action: 'authenticated_access', req, status: 'success',
+			actor: accessUsername, actorRole: String(user?.role || req.auth.role || 'unknown'),
+			target: accessUsername,
+			details: { source: 'existing_or_new_authenticated_session',
+				swimClub: String(user?.swimClub || '').trim(),
+				teamName: String(user?.teamName || '').trim() },
+		});
+		if (saved) authDailyAccessRecorded.set(accessUsername, accessDate);
+	}
 	res.status(200).json({
 		authRequired: true,
 		authenticated: true,
