@@ -338,6 +338,8 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 	}
 });
 
+// This anonymous collection route must never inherit the larger application JSON body allowance.
+app.use('/website-analytics/collect', express.json({ limit: '1kb' }));
 app.use(express.json({ limit: '25mb' }));
 app.use(helmet());
 
