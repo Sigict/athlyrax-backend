@@ -42,7 +42,7 @@ test('owner summary dates, windows and totals are independently labelled', () =>
   assert.equal(websiteSummary(data, 999, new Date('2026-10-02T00:00:00Z')).periodDays, 30);
 });
 
-test('public collection requires origin and consent; owner reporting is authenticated', async () => {
+test('public statistical collection requires origin and valid purpose; owner reporting is authenticated', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-web-analytics-'));
   const app = express();
   app.use(express.json({ limit: '1kb' }));
@@ -60,6 +60,8 @@ test('public collection requires origin and consent; owner reporting is authenti
     const request = (origin, body = payload) => fetch(root + '/website-analytics/collect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });
     assert.equal((await request('https://invalid.example')).status, 403);
     assert.equal((await request('https://athlyrax.com', { ...payload, consent: false })).status, 400);
+    assert.equal((await request('https://athlyrax.com', { event: 'page_view', path: '/software', purpose: 'statistics', source: '' })).status, 204);
+    assert.equal((await request('https://athlyrax.com', { event: 'page_view', path: '/software', purpose: 'marketing' })).status, 400);
     assert.equal((await request('https://athlyrax.com', { ...payload, path: '/api/db' })).status, 400);
     assert.equal((await request('https://athlyrax.com')).status, 204);
     assert.equal((await fetch(root + '/website-analytics/owner-summary')).status, 401);
@@ -68,8 +70,8 @@ test('public collection requires origin and consent; owner reporting is authenti
     assert.equal(ok.status, 200);
     assert.match(ok.headers.get('cache-control') || '', /no-store/);
     const report = await ok.json();
-    assert.equal(report.totals.pageViews, 1);
-    assert.deepEqual(report.topPages[0], { name: '/software', count: 1 });
+    assert.equal(report.totals.pageViews, 2);
+    assert.deepEqual(report.topPages[0], { name: '/software', count: 2 });
     const raw = fs.readFileSync(path.join(tmp, 'website-analytics-aggregate.json'), 'utf8');
     assert.doesNotMatch(raw, /test-rate-bucket|x-test-auth|visitorId/);
   } finally {
