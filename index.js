@@ -9,6 +9,7 @@ import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
+import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
 import { applyCoachObservation } from './coach-observations.mjs';
@@ -4608,6 +4609,8 @@ app.post('/auth/logout', requireStrictAuth, (req, res) => {
 	});
 	res.status(200).json({ ok: true, revocationPersisted });
 });
+
+installOperationalPilotRoutes({app, storageRoot: STORAGE_ROOT, readJsonFile, writeAtomicJsonFile, enqueueWrite, requireStrictAuth, requireSoftwareOwnerRole, appendAuthAuditEvent});
 
 app.get('/auth/audit/events', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
 	const limit = Number.parseInt(String(req.query?.limit || '250'), 10) || 250;
