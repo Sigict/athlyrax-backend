@@ -50,6 +50,18 @@ test('production start prevents the old 12-hour session expiry trap', () => {
   assert.match(source, /process\.env\.AUTH_TOKEN_TTL_SECONDS = String\(MIN_PRODUCTION_AUTH_TTL_SECONDS\);/);
 });
 
+test('daily authenticated access survives backend restarts and owner history hides restart duplicates', () => {
+  const source = fs.readFileSync(path.resolve('index.js'), 'utf8');
+  assert.match(source, /function hasPersistedAuthenticatedAccessForDate\(/,
+    'daily access deduplication must consult retained audit storage, not only process memory');
+  assert.match(source, /hasPersistedAuthenticatedAccessForDate\(accessUsername, accessDate\)/,
+    'recordAuthenticatedAccess must check the persisted daily record before appending another event');
+  assert.match(source, /actionFilter === 'account_access_history' \? new Set\(\) : null/,
+    'owner account history must collapse historical same-day authenticated-access duplicates');
+  assert.match(source, /accountAccessDailySeen\.has\(dailyKey\)/,
+    'account history deduplication must key authenticated access by account and day');
+});
+
 test('demo coach authority survives verification and logout cannot trap the browser', async (t) => {
   const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-auth-session-'));
   const port = await getFreePort();
