@@ -84,10 +84,12 @@ test('demo coach authority survives verification and logout cannot trap the brow
   const loginBody = await login.json();
   assert.equal(loginBody?.user?.role, 'head-coach');
   const cookie = cookieHeaderFrom(login);
+  const csrf = (login.headers.get('set-cookie') || '').match(/athlyrax_csrf=([^;,]+)/)?.[1] || '';
+  assert.ok(csrf, 'login must expose CSRF token for authenticated POST requests');
 
   const presence = await fetch(`${baseUrl}/auth/presence/ping`, {
     method: 'POST',
-    headers: { cookie },
+    headers: { cookie, 'x-csrf-token': csrf },
   });
   assert.equal(presence.status, 200, 'a connected authenticated user must be able to publish presence');
 
