@@ -2464,11 +2464,30 @@ function appendAuthAuditEvent({ action, req, status = 'info', target = '', reaso
 	}
 }
 
+function hasPersistedAuthenticatedAccessForDate(username, accessDate) {
+	const normalizedUsername = String(username || '').trim().toLowerCase();
+	const normalizedDate = String(accessDate || '').trim();
+	if (!normalizedUsername || !normalizedDate) return false;
+	const rows = readAuthAuditEvents(AUTH_AUDIT_FETCH_MAX_ROWS, {
+		action: 'authenticated_access',
+		actor: normalizedUsername,
+	});
+	return rows.some((row) => {
+		const rowUsername = String(row?.target || row?.actor || '').trim().toLowerCase();
+		const rowDate = String(row?.at || '').slice(0, 10);
+		return rowUsername === normalizedUsername && rowDate === normalizedDate && String(row?.status || '') === 'success';
+	});
+}
+
 function recordAuthenticatedAccess(req, source = 'authenticated_session') {
 	const accessUsername = String(req?.auth?.username || '').trim().toLowerCase();
 	if (!accessUsername) return false;
 	const accessDate = new Date().toISOString().slice(0, 10);
 	if (authDailyAccessRecorded.get(accessUsername) === accessDate) return false;
+	if (hasPersistedAuthenticatedAccessForDate(accessUsername, accessDate)) {
+		authDailyAccessRecorded.set(accessUsername, accessDate);
+		return false;
+	}
 	const user = findAuthUser(req.auth.username) || req.auth;
 	const saved = appendAuthAuditEvent({
 		action: 'authenticated_access',
@@ -2509,6 +2528,7 @@ function readAuthAuditEvents(limit = 250, filters = {}) {
 
 	const allPaths = [AUTH_AUDIT_ACTIVE_PATH, ...archivePaths].filter((filePath) => fs.existsSync(filePath));
 	const rows = [];
+	const accountAccessDailySeen = actionFilter === 'account_access_history' ? new Set() : null;
 	for (const filePath of allPaths) {
 		let raw = '';
 		try {
@@ -2539,6 +2559,15 @@ function readAuthAuditEvents(limit = 250, filters = {}) {
 						String(parsed?.ip || ''),
 					].join(' ').toLowerCase();
 					if (text.indexOf(queryFilter) === -1) continue;
+				}
+				if (accountAccessDailySeen && parsedAction === 'authenticated_access') {
+					const dailyUsername = String(parsed?.target || parsed?.actor || '').trim().toLowerCase();
+					const dailyDate = String(parsed?.at || '').slice(0, 10);
+					const dailyKey = dailyUsername && dailyDate ? `${dailyUsername}::${dailyDate}` : '';
+					if (dailyKey) {
+						if (accountAccessDailySeen.has(dailyKey)) continue;
+						accountAccessDailySeen.add(dailyKey);
+					}
 				}
 				rows.push(parsed);
 			} catch {
