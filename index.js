@@ -2464,6 +2464,29 @@ function appendAuthAuditEvent({ action, req, status = 'info', target = '', reaso
 	}
 }
 
+function recordAuthenticatedAccess(req, source = 'authenticated_session') {
+	const accessUsername = String(req?.auth?.username || '').trim().toLowerCase();
+	if (!accessUsername) return false;
+	const accessDate = new Date().toISOString().slice(0, 10);
+	if (authDailyAccessRecorded.get(accessUsername) === accessDate) return false;
+	const user = findAuthUser(req.auth.username) || req.auth;
+	const saved = appendAuthAuditEvent({
+		action: 'authenticated_access',
+		req,
+		status: 'success',
+		actor: accessUsername,
+		actorRole: String(user?.role || req.auth.role || 'unknown'),
+		target: accessUsername,
+		details: {
+			source: String(source || 'authenticated_session'),
+			swimClub: String(user?.swimClub || '').trim(),
+			teamName: String(user?.teamName || '').trim(),
+		},
+	});
+	if (saved) authDailyAccessRecorded.set(accessUsername, accessDate);
+	return Boolean(saved);
+}
+
 function readAuthAuditEvents(limit = 250, filters = {}) {
 	const requested = Number.parseInt(limit, 10);
 	const safeLimit = Math.min(AUTH_AUDIT_FETCH_MAX_ROWS, Math.max(1, Number.isFinite(requested) ? requested : 250));
@@ -4211,23 +4234,7 @@ app.get('/auth/me', (req, res) => {
 		return;
 	}
 
-	// A returning coach may never POST /auth/login: a valid cookie restores /auth/me.
-	// Record genuine authenticated access separately from password sign-ins, at most
-	// once per account per UTC day per process, without storing cookies or tokens.
-	const accessUsername = String(req.auth.username || '').trim().toLowerCase();
-	const accessDate = new Date().toISOString().slice(0, 10);
-	if (accessUsername && authDailyAccessRecorded.get(accessUsername) !== accessDate) {
-		const user = findAuthUser(req.auth.username) || req.auth;
-		const saved = appendAuthAuditEvent({
-			action: 'authenticated_access', req, status: 'success',
-			actor: accessUsername, actorRole: String(user?.role || req.auth.role || 'unknown'),
-			target: accessUsername,
-			details: { source: 'existing_or_new_authenticated_session',
-				swimClub: String(user?.swimClub || '').trim(),
-				teamName: String(user?.teamName || '').trim() },
-		});
-		if (saved) authDailyAccessRecorded.set(accessUsername, accessDate);
-	}
+	recordAuthenticatedAccess(req, 'existing_or_new_authenticated_session');
 	res.status(200).json({
 		authRequired: true,
 		authenticated: true,
@@ -4627,7 +4634,12 @@ app.get('/auth/audit/events', requireStrictAuth, requireSoftwareOwnerRole, (req,
 });
 
 app.post('/auth/presence/ping', requireStrictAuth, (req, res) => {
-	authPresenceByUser.set(String(req.auth?.username || ''), Date.now());
+	const username = String(req.auth?.username || '').trim();
+	authPresenceByUser.set(username, Date.now());
+	// Presence is proof of a live authenticated connection. Record it through the
+	// same once-per-account/day audit path so an account cannot appear online while
+	// being absent from Account Access History.
+	recordAuthenticatedAccess(req, 'presence_ping');
 	res.status(200).json({ ok: true });
 });
 

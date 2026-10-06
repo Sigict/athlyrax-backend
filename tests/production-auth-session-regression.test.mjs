@@ -84,6 +84,14 @@ test('demo coach authority survives verification and logout cannot trap the brow
   const loginBody = await login.json();
   assert.equal(loginBody?.user?.role, 'head-coach');
   const cookie = cookieHeaderFrom(login);
+  const csrf = (login.headers.get('set-cookie') || '').match(/athlyrax_csrf=([^;,]+)/)?.[1] || '';
+  assert.ok(csrf, 'login must expose CSRF token for authenticated POST requests');
+
+  const presence = await fetch(`${baseUrl}/auth/presence/ping`, {
+    method: 'POST',
+    headers: { cookie, 'x-csrf-token': csrf },
+  });
+  assert.equal(presence.status, 200, 'a connected authenticated user must be able to publish presence');
 
   const me = await fetch(`${baseUrl}/auth/me`, { headers: { cookie } });
   assert.equal(me.status, 200);
@@ -96,8 +104,9 @@ test('demo coach authority survives verification and logout cannot trap the brow
   const auditRows = fs.readFileSync(auditPath, 'utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
   const accountEvents = auditRows.filter(row => row.target === 'demo.coach');
   assert.equal(accountEvents.filter(row => row.action === 'login_success').length, 1, 'password sign-in remains a distinct event');
-  assert.equal(accountEvents.filter(row => row.action === 'authenticated_access').length, 1, 'repeated /auth/me must record daily authenticated access only once');
-  assert.equal(accountEvents.find(row => row.action === 'authenticated_access')?.details?.source, 'existing_or_new_authenticated_session');
+  assert.equal(accountEvents.filter(row => row.action === 'authenticated_access').length, 1, 'presence plus repeated /auth/me must record daily authenticated access only once');
+  assert.equal(accountEvents.find(row => row.action === 'authenticated_access')?.details?.source, 'presence_ping',
+    'presence must create the daily access record when it is the first proof of connection');
   assert.ok(!fs.readFileSync(auditPath, 'utf8').includes(cookie.split(';')[0]), 'never persist session cookies in audit events');
 
   const logout = await fetch(`${baseUrl}/auth/logout`, {
