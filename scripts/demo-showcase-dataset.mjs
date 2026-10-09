@@ -341,13 +341,14 @@ function buildTests(mainSwimmers) {
         ['8x25 Free', Math.max(12.0, base * 0.23 - improvement * 0.10)],
         ['8x50 Free', Math.max(27.0, base * 0.51 - improvement * 0.24)],
         ['8x100 Free', base + 4.2 - improvement * 0.55],
-        ['25 Max Free', Math.max(11.2, base * 0.21 - improvement * 0.13)],
-        ['50 Max Free', Math.max(23.4, base * 0.46 - improvement * 0.28)],
-        ['75 Max Free', Math.max(37.0, base * 0.72 - improvement * 0.50)],
-        ['100 Max Free', base - improvement * 1.05],
+        ['25m Max', Math.max(11.2, base * 0.21 - improvement * 0.13)],
+        ['50m Max', Math.max(23.4, base * 0.46 - improvement * 0.28)],
+        ['75m Max', Math.max(37.0, base * 0.72 - improvement * 0.50)],
+        ['100m Max', base - improvement * 1.05],
       ];
       specs.forEach(([testName, seconds], testIndex) => {
         const repeatability = String(testName).startsWith('8x');
+        const maxBattery = /^(25|50|75|100)m Max$/.test(String(testName));
         const plannerWeek = blockIndex === 0 ? 1 : 5;
         const linkedScheduleId = `${PREFIX}schedule_perf_a_w${plannerWeek}_s4`;
         const linkedSessionId = `${PREFIX}session_perf_a_w${plannerWeek}_s4`;
@@ -357,7 +358,10 @@ function buildTests(mainSwimmers) {
           squadId: squadDefinitions[0].id, squadIds: [squadDefinitions[0].id],
           scheduleId: linkedScheduleId, trainingScheduleId: linkedScheduleId,
           sessionId: linkedSessionId, trainingSessionId: linkedSessionId,
-          date, category: 'Swimming', testType: repeatability ? 'Repeatability Test' : 'Pool Test',
+          date, category: 'Swimming',
+          templateId: repeatability ? 'builtin-test-repeatability' : (maxBattery ? 'builtin-test-max' : ''),
+          templateName: repeatability ? 'Repeatability' : (maxBattery ? 'Max' : ''),
+          testType: repeatability ? 'Repeatability Test' : (maxBattery ? 'Max Test' : 'Pool Test'),
           testName, metric: testName, resultTime: secToTime(seconds), resultValue: secToTime(seconds), resultUnit: 'time',
           repResults: repeatability ? Array.from({ length: 8 }, (_, rep) => ({
             rep: rep + 1, overallTime: secToTime(seconds + rep * (0.18 + swimmerIndex * 0.01)),
