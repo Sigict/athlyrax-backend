@@ -26,7 +26,7 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
 
   const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   assert.equal(db.__meta.tenantId, 'demo-company');
-  assert.equal(db.__meta.demoSeed.version, 5);
+  assert.equal(db.__meta.demoSeed.version, 6);
   assert.equal(db.__meta.storageRevision, 8);
   assert.equal(db.squads.length, 3);
   assert.equal(db.coaches.length, 3);
@@ -42,6 +42,14 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
   const ameliaCompetitionResults = db.fixtures.flatMap((fixture) => (fixture.events || []).map((event) => event.resultsBySwimmer?.[amelia.id]).filter(Boolean));
   assert.equal(ameliaCompetitionResults.length, 6);
   assert.equal(ameliaCompetitionResults.filter((row) => row.pb === true).length, 3);
+  const ameliaHundreds = db.fixtures
+    .flatMap((fixture) => fixture.events
+      .filter((event) => event.distance === 100 && event.stroke === 'Free')
+      .map((event) => event.resultsBySwimmer?.[amelia.id])
+      .filter(Boolean));
+  assert.deepEqual(ameliaHundreds.map((row) => row.resultValue), ['1:04.35','1:04.30','1:02.95']);
+  assert.ok(ameliaHundreds.every((row) => row.resultValue === row.resultTime && row.resultTime === row.time && row.time === row.result));
+  assert.equal(db.squads.find((row) => row.name === 'Performance B')?.sortOrder, 2);
   assert.equal(db.trainingSessionSets.filter((row) => row.isTestSet === true).length, 2);
   assert.equal(db.tests.filter((row) => row.scheduleId && row.sessionId).length, 144);
   const maxRows = db.tests.filter((row) => row.templateId === 'builtin-test-max');
