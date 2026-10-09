@@ -33,7 +33,7 @@ const asArray = (value) => Array.isArray(value) ? value : [];
 
 const squadDefinitions = [
   { id: `${PREFIX}perf_a`, name: 'Performance A', code: 'PERF-A', category: 'Performance', trainingLevel: 'Performance', ageRange: '15–18', maxCapacity: 16, sortOrder: 1, order: 1 },
-  { id: `${PREFIX}perf_b`, name: 'Performance B', code: 'PERF-B', category: 'Performance', trainingLevel: 'Competitive', ageRange: '13–16', maxCapacity: 18, sortOrder: 4, order: 4 },
+  { id: `${PREFIX}perf_b`, name: 'Performance B', code: 'PERF-B', category: 'Performance', trainingLevel: 'Competitive', ageRange: '13–16', maxCapacity: 18, sortOrder: 2, order: 2 },
   { id: `${PREFIX}development`, name: 'Development', code: 'DEV', category: 'Development', trainingLevel: 'Development', ageRange: '10–13', maxCapacity: 20, sortOrder: 3, order: 3 },
 ];
 
@@ -45,14 +45,16 @@ const coachDefinitions = [
 
 const swimmerNames = {
   [`${PREFIX}perf_a`]: [
+    // Final value is a canonical 100 Free-equivalent baseline used consistently
+    // by Max tests and demo competition results. It is NOT the swimmer's main-event PB.
     ['Mia','Carter','Female','2010-02-14','100 Free',61.80],
-    ['Noah','Bennett','Male','2009-09-22','100 Free',56.10],
-    ['Sofia','Martinez','Female','2010-06-05','200 Free',132.40],
+    ['Noah','Bennett','Male','2009-09-22','100 Free',57.20],
+    ['Sofia','Martinez','Female','2010-06-05','200 Free',63.80],
     ['Leo','Hughes','Male','2008-11-19','100 Fly',59.60],
-    ['Amelia','Foster','Female','2009-04-03','100 Back',67.20],
-    ['Ethan','Ward','Male','2009-12-30','200 IM',128.80],
-    ['Isla','Murphy','Female','2010-01-27','100 Breast',75.40],
-    ['Lucas','Price','Male','2008-07-11','50 Free',24.90],
+    ['Amelia','Foster','Female','2009-04-03','100 Back',64.20],
+    ['Ethan','Ward','Male','2009-12-30','200 IM',59.00],
+    ['Isla','Murphy','Female','2010-01-27','100 Breast',65.40],
+    ['Lucas','Price','Male','2008-07-11','50 Free',56.20],
   ],
   [`${PREFIX}perf_b`]: [
     ['Grace','Turner','Female','2011-03-17','100 Free',66.40],
@@ -410,8 +412,10 @@ function buildCompetitions(mainSwimmers) {
           ? base100 + meet.delta + variation
           : base100 * 0.47 + meet.delta * 0.38 + variation * 0.25;
         const firstHalf = event.distance === 100 ? seconds * 0.485 : seconds;
+        const resultTime = secToTime(seconds);
         resultsBySwimmer[swimmer.id] = {
-          time: secToTime(seconds), result: secToTime(seconds), pb: meetIndex > 0 && seconds < (event.distance === 100 ? base100 : base100 * 0.47),
+          time: resultTime, result: resultTime, resultTime, resultValue: resultTime,
+          pb: meetIndex > 0 && seconds < (event.distance === 100 ? base100 : base100 * 0.47),
           rank: String(1 + ((swimmerIndex + eventIndex + meetIndex) % 6)),
           splits: event.distance === 100 ? [secToTime(firstHalf), secToTime(seconds)] : [secToTime(seconds)],
           segmentTimes: event.distance === 100 ? [secToTime(firstHalf), secToTime(seconds - firstHalf)] : [secToTime(seconds)],
