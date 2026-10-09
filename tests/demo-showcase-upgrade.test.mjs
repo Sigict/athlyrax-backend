@@ -26,7 +26,7 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
 
   const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   assert.equal(db.__meta.tenantId, 'demo-company');
-  assert.equal(db.__meta.demoSeed.version, 1);
+  assert.equal(db.__meta.demoSeed.version, 2);
   assert.equal(db.__meta.storageRevision, 8);
   assert.equal(db.squads.length, 3);
   assert.equal(db.coaches.length, 3);
