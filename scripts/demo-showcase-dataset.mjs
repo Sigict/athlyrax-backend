@@ -368,7 +368,7 @@ function buildCompetitions(mainSwimmers) {
           : base100 * 0.47 + meet.delta * 0.38 + variation * 0.25;
         const firstHalf = event.distance === 100 ? seconds * 0.485 : seconds;
         resultsBySwimmer[swimmer.id] = {
-          time: secToTime(seconds), result: secToTime(seconds), pb: meetIndex > 0 && swimmerIndex !== 4,
+          time: secToTime(seconds), result: secToTime(seconds), pb: meetIndex > 0 && seconds < (event.distance === 100 ? base100 : base100 * 0.47),
           rank: String(1 + ((swimmerIndex + eventIndex + meetIndex) % 6)),
           splits: event.distance === 100 ? [secToTime(firstHalf), secToTime(seconds)] : [secToTime(seconds)],
           segmentTimes: event.distance === 100 ? [secToTime(firstHalf), secToTime(seconds - firstHalf)] : [secToTime(seconds)],
