@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildDemoTenantSeed } from './demo-showcase-dataset.mjs';
 
-export const DEMO_SHOWCASE_VERSION = 4;
+export const DEMO_SHOWCASE_VERSION = 5;
 const TENANT_ID = 'demo-company';
 
 function safeJson(filePath) {
