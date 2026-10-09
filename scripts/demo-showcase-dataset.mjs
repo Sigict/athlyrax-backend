@@ -333,38 +333,57 @@ function buildTests(mainSwimmers) {
       const improvement = blockIndex * (0.7 + swimmerIndex * 0.04);
       const base = Number(swimmer.demoBaseline100);
       const specs = [
-        ['1x25 Free', Math.max(11.4, base * 0.215 - improvement * 0.12)],
-        ['1x50 Free', Math.max(23.8, base * 0.47 - improvement * 0.30)],
-        ['1x100 Free', base - improvement],
-        ['1x200 Free', base * 2.12 - improvement * 1.7],
-        ['1x400 Free', base * 4.45 - improvement * 3.0],
-        ['8x25 Free', Math.max(12.0, base * 0.23 - improvement * 0.10)],
-        ['8x50 Free', Math.max(27.0, base * 0.51 - improvement * 0.24)],
-        ['8x100 Free', base + 4.2 - improvement * 0.55],
-        ['25 Max Free', Math.max(11.2, base * 0.21 - improvement * 0.13)],
-        ['50 Max Free', Math.max(23.4, base * 0.46 - improvement * 0.28)],
-        ['75 Max Free', Math.max(37.0, base * 0.72 - improvement * 0.50)],
-        ['100 Max Free', base - improvement * 1.05],
+        { testName:'M25 · 1x25 Max Effort', templateId:'builtin-test-max', templateName:'Max', testType:'Max Test', distance:25, reps:1, seconds:Math.max(11.4, base * 0.215 - improvement * 0.12) },
+        { testName:'M50 · 1x50 Max Effort', templateId:'builtin-test-max', templateName:'Max', testType:'Max Test', distance:50, reps:1, seconds:Math.max(23.8, base * 0.47 - improvement * 0.30) },
+        { testName:'M100 · 1x100 Max Effort', templateId:'builtin-test-max', templateName:'Max', testType:'Max Test', distance:100, reps:1, seconds:base - improvement },
+        { testName:'M200 · 1x200 Max Effort', templateId:'builtin-test-max', templateName:'Max', testType:'Max Test', distance:200, reps:1, seconds:base * 2.12 - improvement * 1.7 },
+        { testName:'M400 · 1x400 Max Effort', templateId:'builtin-test-max', templateName:'Max', testType:'Max Test', distance:400, reps:1, seconds:base * 4.45 - improvement * 3.0 },
+        { testName:'8x25 Repeatability', templateId:'builtin-test-repeatability', templateName:'Repeatability', testType:'Repeatability Test', distance:25, reps:8, seconds:Math.max(12.0, base * 0.23 - improvement * 0.10) },
+        { testName:'8x50 Repeatability', templateId:'builtin-test-repeatability', templateName:'Repeatability', testType:'Repeatability Test', distance:50, reps:8, seconds:Math.max(27.0, base * 0.51 - improvement * 0.24) },
+        { testName:'8x100 Repeatability', templateId:'builtin-test-repeatability', templateName:'Repeatability', testType:'Repeatability Test', distance:100, reps:8, seconds:base + 4.2 - improvement * 0.55 },
+        { testName:'5x400 Aerobic / Durability Check', templateId:'builtin-test-aerobic-durability', templateName:'Aerobic / Durability Check', testType:'Aerobic / Durability Check', distance:400, reps:5, seconds:base * 4.62 - improvement * 2.2 },
       ];
-      specs.forEach(([testName, seconds], testIndex) => {
-        const repeatability = String(testName).startsWith('8x');
+      specs.forEach((spec, testIndex) => {
         const plannerWeek = blockIndex === 0 ? 1 : 5;
         const linkedScheduleId = `${PREFIX}schedule_perf_a_w${plannerWeek}_s4`;
         const linkedSessionId = `${PREFIX}session_perf_a_w${plannerWeek}_s4`;
+        const repCount = Math.max(1, Number(spec.reps || 1));
+        const repDrift = spec.templateName === 'Repeatability'
+          ? (0.18 + swimmerIndex * 0.01)
+          : (spec.templateName === 'Aerobic / Durability Check' ? (0.75 + swimmerIndex * 0.04) : 0);
+        const repResults = Array.from({ length: repCount }, (_, rep) => ({
+          rep: rep + 1,
+          overallTime: secToTime(spec.seconds + rep * repDrift),
+          overallStrokeCount: Math.max(12, Math.round((spec.distance / 25) * (8.5 + swimmerIndex * 0.22) + (rep > 0 ? Math.floor(rep / 2) : 0))),
+        }));
         rows.push({
-          id: `${PREFIX}test_${swimmerIndex + 1}_${blockIndex + 1}_${testIndex + 1}`, swimmerId: swimmer.id,
+          id: `${PREFIX}test_${swimmerIndex + 1}_${blockIndex + 1}_${testIndex + 1}`,
+          swimmerId: swimmer.id,
           swimmerName: swimmer.name || swimmer.fullName || [swimmer.firstName, swimmer.lastName].filter(Boolean).join(' '),
-          squadId: squadDefinitions[0].id, squadIds: [squadDefinitions[0].id],
-          scheduleId: linkedScheduleId, trainingScheduleId: linkedScheduleId,
-          sessionId: linkedSessionId, trainingSessionId: linkedSessionId,
-          date, category: 'Swimming', testType: repeatability ? 'Repeatability Test' : 'Pool Test',
-          testName, metric: testName, resultTime: secToTime(seconds), resultValue: secToTime(seconds), resultUnit: 'time',
-          repResults: repeatability ? Array.from({ length: 8 }, (_, rep) => ({
-            rep: rep + 1, overallTime: secToTime(seconds + rep * (0.18 + swimmerIndex * 0.01)),
-            overallStrokeCount: 34 + swimmerIndex + Math.floor(rep / 3),
-          })) : [],
-          attendeeIds: [swimmer.id], notes: blockIndex === 0 ? 'Start-of-cycle benchmark' : 'Specific-phase retest',
-          ...ownerScope, createdAt: iso(date), updatedAt: iso(date),
+          squadId: squadDefinitions[0].id,
+          squadIds: [squadDefinitions[0].id],
+          scheduleId: linkedScheduleId,
+          trainingScheduleId: linkedScheduleId,
+          sessionId: linkedSessionId,
+          trainingSessionId: linkedSessionId,
+          date,
+          category: 'Swimming',
+          templateId: spec.templateId,
+          templateName: spec.templateName,
+          testType: spec.testType,
+          testName: spec.testName,
+          metric: spec.testName,
+          distance: spec.distance,
+          plannedReps: repCount,
+          resultTime: secToTime(spec.seconds),
+          resultValue: secToTime(spec.seconds),
+          resultUnit: 'time',
+          repResults,
+          attendeeIds: [swimmer.id],
+          notes: blockIndex === 0 ? 'Start-of-cycle benchmark' : 'Specific-phase retest',
+          ...ownerScope,
+          createdAt: iso(date),
+          updatedAt: iso(date),
         });
       });
     });
