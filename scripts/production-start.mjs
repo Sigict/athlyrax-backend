@@ -6,6 +6,7 @@ import { resolveStorageConfiguration } from './storage-safety-lib.mjs';
 import { canonicalStoragePaths, restoreBundledDemoTenantIfNeeded } from './storage-path-contract.mjs';
 import { readActiveMigrationTransaction } from './migration-transaction-state.mjs';
 import { cleanupDemoPlanningStorage } from './cleanup-demo-planning-storage.mjs';
+import { upgradeDemoShowcaseTenant } from './upgrade-demo-showcase-tenant.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
 const READY_MARKER_APPROVAL = 'CREATE_READY_MARKER';
@@ -163,6 +164,15 @@ const demoRecovery = restoreBundledDemoTenantIfNeeded({
 });
 if (demoRecovery.restored) {
   console.log(`[storage] Verified synthetic demo tenant recovery completed (${demoRecovery.bytes} bytes).`);
+}
+
+const demoShowcaseUpgrade = upgradeDemoShowcaseTenant({
+  storageRoot: runtimeConfiguration.storageRoot,
+  backupRoot: runtimeConfiguration.backupRoot,
+  logger: console,
+});
+if (demoShowcaseUpgrade.changed) {
+  console.log(`[demo-showcase] Persistent demo tenant upgraded and backed up before replacement: ${demoShowcaseUpgrade.backupPath}`);
 }
 
 const demoPlanningCleanup = cleanupDemoPlanningStorage({
