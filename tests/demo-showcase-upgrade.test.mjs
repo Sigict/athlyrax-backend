@@ -1,0 +1,45 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { upgradeDemoShowcaseTenant } from '../scripts/upgrade-demo-showcase-tenant.mjs';
+
+test('demo showcase upgrade replaces legacy demo data once and backs it up', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-demo-showcase-'));
+  const storageRoot = path.join(root, 'storage');
+  const backupRoot = path.join(root, 'backup');
+  const dbPath = path.join(storageRoot, 'tenants', 'demo-company', 'db.json');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.mkdirSync(backupRoot, { recursive: true });
+
+  fs.writeFileSync(dbPath, JSON.stringify({
+    __meta: { tenantId: 'demo-company', storageRevision: 7 },
+    swimmers: [{ id: 'real-person-data', name: 'Must Not Survive' }],
+    squads: [{ id: 'legacy-squad', swimmerIds: ['real-person-data'] }],
+  }, null, 2));
+
+  const first = upgradeDemoShowcaseTenant({ storageRoot, backupRoot, logger: { log() {} } });
+  assert.equal(first.changed, true);
+  assert.ok(first.backupPath);
+  assert.equal(fs.existsSync(first.backupPath), true);
+
+  const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+  assert.equal(db.__meta.tenantId, 'demo-company');
+  assert.equal(db.__meta.demoSeed.version, 1);
+  assert.equal(db.__meta.storageRevision, 8);
+  assert.equal(db.squads.length, 3);
+  assert.equal(db.coaches.length, 3);
+  assert.equal(db.swimmers.length, 20);
+  assert.equal(db.swimmers.some((row) => row.id === 'real-person-data'), false);
+  assert.equal(db.squads.some((row) => row.id === 'legacy-squad'), false);
+  assert.equal(db.squads.find((row) => row.name === 'Performance A').swimmerIds.length, 8);
+  assert.equal(db.fixtures.length, 3);
+  assert.equal(db.tests.length, 192);
+
+  const second = upgradeDemoShowcaseTenant({ storageRoot, backupRoot, logger: { log() {} } });
+  assert.equal(second.changed, false);
+  assert.equal(second.reason, 'already-current');
+
+  fs.rmSync(root, { recursive: true, force: true });
+});
