@@ -32,9 +32,9 @@ const secToTime = (seconds) => {
 const asArray = (value) => Array.isArray(value) ? value : [];
 
 const squadDefinitions = [
-  { id: `${PREFIX}perf_a`, name: 'Performance A', code: 'PERF-A', trainingLevel: 'Performance', ageRange: '15–18', maxCapacity: 16 },
-  { id: `${PREFIX}perf_b`, name: 'Performance B', code: 'PERF-B', trainingLevel: 'Competitive', ageRange: '13–16', maxCapacity: 18 },
-  { id: `${PREFIX}development`, name: 'Development', code: 'DEV', trainingLevel: 'Development', ageRange: '10–13', maxCapacity: 20 },
+  { id: `${PREFIX}perf_a`, name: 'Performance A', code: 'PERF-A', category: 'Performance', trainingLevel: 'Performance', ageRange: '15–18', maxCapacity: 16, sortOrder: 1, order: 1 },
+  { id: `${PREFIX}perf_b`, name: 'Performance B', code: 'PERF-B', category: 'Performance', trainingLevel: 'Competitive', ageRange: '13–16', maxCapacity: 18, sortOrder: 4, order: 4 },
+  { id: `${PREFIX}development`, name: 'Development', code: 'DEV', category: 'Development', trainingLevel: 'Development', ageRange: '10–13', maxCapacity: 20, sortOrder: 3, order: 3 },
 ];
 
 const coachDefinitions = [
@@ -118,7 +118,7 @@ function buildPlannerWeeks() {
     return {
       id: `${PREFIX}planner_week_${index + 1}`, squadId: squadDefinitions[0].id, weekStart, weekStartKey: weekStart,
       phase: phase.phase, cyclePhase: phase.phase, automaticCycleBlock: phase.block, cycleBlock: phase.block,
-      plannedVolume: index === 0 ? 26000 : index <= 4 ? 34000 + index * 1000 : index <= 8 ? 32000 - (index - 5) * 1000 : 24000 - (index - 9) * 3500,
+      plannedVolume: index === 0 ? 20800 : index <= 4 ? 27200 : index <= 8 ? 24800 : 17200,
       targetCompetition: index >= 8 ? 'AthlyraX Autumn Target Meet' : '',
       ...ownerScope, createdAt: iso(weekStart), updatedAt: iso(weekStart),
     };
@@ -207,11 +207,37 @@ function buildSessions(mainSwimmers) {
       });
 
       const resultMap = sessionSetResults(mainSwimmers, week, sessionIndex);
-      const setTemplates = [
-        { suffix: 'tech', setName: '8x50 Technical Control', reps: 8, distance: 50, stroke: 'Free', energy: 'Technique', setType: 'main' },
-        { suffix: 'aer', setName: '6x100 Aerobic Repeatability', reps: 6, distance: 100, stroke: 'Free', energy: phase.phase === 'SPECIFIC' ? 'EN3' : 'EN2', setType: 'main' },
-        { suffix: 'speed', setName: '8x25 Speed Expression', reps: 8, distance: 25, stroke: 'Free', energy: 'SP', setType: 'main' },
-      ];
+      const setTemplates = phase.phase === 'INTRO'
+        ? [
+          { suffix: 'warm', setName: '12x100 Aerobic Warm Up', reps: 12, distance: 100, stroke: 'Free', energy: 'EN1', setType: 'main' },
+          { suffix: 'main', setName: '20x100 Technical Aerobic', reps: 20, distance: 100, stroke: 'Free', energy: 'EN2', setType: 'main' },
+          { suffix: 'skill', setName: '12x100 Skill Transfer', reps: 12, distance: 100, stroke: 'Choice', energy: 'EN1', setType: 'main' },
+          { suffix: 'kick', setName: '8x50 Kick / Skills', reps: 8, distance: 50, stroke: 'Choice', energy: 'EN2', setType: 'main' },
+          { suffix: 'speed', setName: '16x25 Speed Skills', reps: 16, distance: 25, stroke: 'Free', energy: 'SP', setType: 'main' },
+        ]
+        : phase.phase === 'AEROBIC'
+        ? [
+          { suffix: 'warm', setName: '12x100 EN1 Build', reps: 12, distance: 100, stroke: 'Free', energy: 'EN1', setType: 'main' },
+          { suffix: 'main', setName: '32x100 Aerobic Capacity', reps: 32, distance: 100, stroke: 'Free', energy: 'EN2', setType: 'main' },
+          { suffix: 'threshold', setName: '16x100 Threshold Control', reps: 16, distance: 100, stroke: 'Free', energy: 'EN3', setType: 'main' },
+          { suffix: 'skill', setName: '8x50 Technical Control', reps: 8, distance: 50, stroke: 'Choice', energy: 'EN1', setType: 'main' },
+          { suffix: 'speed', setName: '16x25 Speed Maintenance', reps: 16, distance: 25, stroke: 'Free', energy: 'SP', setType: 'main' },
+        ]
+        : phase.phase === 'SPECIFIC'
+        ? [
+          { suffix: 'warm', setName: '10x100 EN1 Preparation', reps: 10, distance: 100, stroke: 'Free', energy: 'EN1', setType: 'main' },
+          { suffix: 'main', setName: '28x100 Race Specific Aerobic', reps: 28, distance: 100, stroke: 'Free', energy: 'EN3', setType: 'main' },
+          { suffix: 'pace', setName: '14x100 Race Pace', reps: 14, distance: 100, stroke: 'Free', energy: 'EN3', setType: 'main' },
+          { suffix: 'power', setName: '12x50 Power / Breakout', reps: 12, distance: 50, stroke: 'Choice', energy: 'LP', setType: 'main' },
+          { suffix: 'speed', setName: '16x25 Speed Expression', reps: 16, distance: 25, stroke: 'Free', energy: 'SP', setType: 'main' },
+        ]
+        : [
+          { suffix: 'warm', setName: '8x100 EN1 Preparation', reps: 8, distance: 100, stroke: 'Free', energy: 'EN1', setType: 'main' },
+          { suffix: 'pace', setName: '18x100 Race Pace Quality', reps: 18, distance: 100, stroke: 'Free', energy: 'EN3', setType: 'main' },
+          { suffix: 'easy', setName: '8x100 Recovery Control', reps: 8, distance: 100, stroke: 'Choice', energy: 'EN1', setType: 'main' },
+          { suffix: 'power', setName: '10x50 Power', reps: 10, distance: 50, stroke: 'Choice', energy: 'LP', setType: 'main' },
+          { suffix: 'speed', setName: '16x25 Speed Expression', reps: 16, distance: 25, stroke: 'Free', energy: 'SP', setType: 'main' },
+        ];
       setTemplates.forEach((set, setIndex) => {
         trainingSessionSets.push({
           id: `${PREFIX}set_w${week + 1}_s${sessionIndex + 1}_${set.suffix}`, sessionId, trainingSessionId: sessionId,
@@ -226,13 +252,24 @@ function buildSessions(mainSwimmers) {
       });
 
       mainSwimmers.forEach((swimmer, swimmerIndex) => {
-        if (date > '2026-10-09') return;
-        const missed = (week === 3 && swimmerIndex === 2 && sessionIndex === 1) || (week === 5 && swimmerIndex === 5 && sessionIndex === 3);
-        const partial = week === 4 && swimmerIndex === 6 && sessionIndex === 2;
+        const isShowcaseSwimmer = String(swimmer?.firstName || '').trim() === 'Amelia' && String(swimmer?.lastName || '').trim() === 'Foster';
+        if (date > '2026-10-09' && !isShowcaseSwimmer) return;
+        const missed = !isShowcaseSwimmer && (
+          (week === 1 && swimmerIndex === 1 && sessionIndex === 2)
+          || (week === 2 && swimmerIndex === 3 && sessionIndex === 0)
+          || (week === 3 && swimmerIndex === 2 && sessionIndex === 1)
+          || (week === 4 && swimmerIndex === 0 && sessionIndex === 3)
+          || (week === 5 && swimmerIndex === 5 && sessionIndex === 3)
+        );
+        const partial = !isShowcaseSwimmer && (
+          (week === 2 && swimmerIndex === 6 && sessionIndex === 1)
+          || (week === 4 && swimmerIndex === 6 && sessionIndex === 2)
+          || (week === 5 && swimmerIndex === 7 && sessionIndex === 0)
+        );
         attendance.push({
           id: `${PREFIX}att_w${week + 1}_s${sessionIndex + 1}_${swimmerIndex + 1}`, swimmerId: swimmer.id, scheduleId, sessionId,
           status: missed ? 'Absent' : partial ? 'Partial' : 'Present', present: !missed, attended: !missed,
-          volumeSwam: missed ? 0 : partial ? Math.round(plannedVolume * 0.62) : plannedVolume - ((swimmerIndex + week) % 3) * 100,
+          volumeSwam: missed ? 0 : partial ? Math.round(plannedVolume * 0.62) : isShowcaseSwimmer ? plannedVolume : Math.max(0, plannedVolume - (((swimmerIndex + week + sessionIndex) % 5) * 150)),
           volumeTotal: plannedVolume, date, notes: missed ? 'Demo absence' : partial ? 'Left early — demo variation' : '',
           ...ownerScope, createdAt: iso(date), updatedAt: iso(date),
         });
@@ -401,7 +438,7 @@ export function buildDemoTenantSeed() {
       tenant: TENANT_ID,
       primaryAccount: ACCOUNT_SCOPE,
       owner: ACCOUNT_SCOPE,
-      demoSeed: { version: 1, tenantId: TENANT_ID, generatedAt: '2026-10-09T11:45:00.000Z', prefix: PREFIX },
+      demoSeed: { version: 2, tenantId: TENANT_ID, generatedAt: '2026-10-09T14:30:00.000Z', prefix: PREFIX },
       updatedAt: '2026-10-09T11:45:00.000Z',
     },
     squads,
@@ -411,6 +448,10 @@ export function buildDemoTenantSeed() {
     sessionTypes: timetable.sessionTypes,
     timetables: timetable.timetables,
     timetableSlots: timetable.timetableSlots,
+    seasons: [
+      { id: `${PREFIX}season_2025`, year: 2025, label: '2025/26', name: '2025/26', startDate: '2025-09-01', endDate: '2026-08-31', ...ownerScope },
+      { id: `${PREFIX}season_2026`, year: 2026, label: '2026/27', name: '2026/27', startDate: '2026-09-01', endDate: '2027-08-31', ...ownerScope },
+    ],
     trainingPlannerWeeks: buildPlannerWeeks(),
     schedule: sessions.schedule,
     trainingSessions: sessions.trainingSessions,
@@ -424,7 +465,7 @@ export function buildDemoTenantSeed() {
 }
 
 const COLLECTION_KEYS = [
-  'squads','coaches','swimmers','venues','sessionTypes','timetables','timetableSlots','trainingPlannerWeeks',
+  'squads','coaches','swimmers','venues','sessionTypes','timetables','timetableSlots','seasons','trainingPlannerWeeks',
   'schedule','trainingSessions','trainingSessionSets','attendance','tests','fixtures','coachObservations','swimmerAnalyses',
 ];
 
