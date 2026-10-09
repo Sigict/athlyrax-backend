@@ -26,7 +26,7 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
 
   const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   assert.equal(db.__meta.tenantId, 'demo-company');
-  assert.equal(db.__meta.demoSeed.version, 2);
+  assert.equal(db.__meta.demoSeed.version, 3);
   assert.equal(db.__meta.storageRevision, 8);
   assert.equal(db.squads.length, 3);
   assert.equal(db.coaches.length, 3);
@@ -36,6 +36,12 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
   assert.equal(db.squads.find((row) => row.name === 'Performance A').swimmerIds.length, 8);
   assert.equal(db.fixtures.length, 3);
   assert.equal(db.tests.length, 192);
+  const amelia = db.swimmers.find((row) => row.name === 'Amelia Foster');
+  assert.ok(amelia);
+  assert.equal(db.tests.filter((row) => row.swimmerId === amelia.id).length, 24);
+  const ameliaCompetitionResults = db.fixtures.flatMap((fixture) => (fixture.events || []).map((event) => event.resultsBySwimmer?.[amelia.id]).filter(Boolean));
+  assert.equal(ameliaCompetitionResults.length, 6);
+  assert.equal(ameliaCompetitionResults.filter((row) => row.pb === true).length, 3);
 
   const second = upgradeDemoShowcaseTenant({ storageRoot, backupRoot, logger: { log() {} } });
   assert.equal(second.changed, false);
