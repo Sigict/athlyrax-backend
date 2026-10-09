@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { mergeDemoTenantSeed } from './demo-showcase-dataset.mjs';
+import { buildDemoTenantSeed } from './demo-showcase-dataset.mjs';
 
 export const DEMO_SHOWCASE_VERSION = 1;
 const TENANT_ID = 'demo-company';
@@ -41,11 +41,13 @@ export function upgradeDemoShowcaseTenant({ storageRoot, backupRoot, logger = co
   const backupPath = path.join(backupDir, `demo-company-before-showcase-v${DEMO_SHOWCASE_VERSION}-${stamp}.json`);
   fsModule.copyFileSync(dbPath, backupPath);
 
-  const merged = mergeDemoTenantSeed(current);
+  const merged = buildDemoTenantSeed();
+  const previousRevision = Number(current?.__meta?.storageRevision || 0);
   merged.__meta = {
     ...(merged.__meta || {}),
     tenantId: TENANT_ID,
     tenant: TENANT_ID,
+    storageRevision: previousRevision + 1,
     demoSeed: {
       ...(merged.__meta?.demoSeed || {}),
       version: DEMO_SHOWCASE_VERSION,
