@@ -238,6 +238,23 @@ function buildSessions(mainSwimmers) {
           { suffix: 'power', setName: '10x50 Power', reps: 10, distance: 50, stroke: 'Choice', energy: 'LP', setType: 'main' },
           { suffix: 'speed', setName: '16x25 Speed Expression', reps: 16, distance: 25, stroke: 'Free', energy: 'SP', setType: 'main' },
         ];
+      if (date === '2026-09-05' || date === '2026-10-03') {
+        trainingSessionSets.push({
+          id: `${PREFIX}set_w${week + 1}_s${sessionIndex + 1}_test_battery`,
+          sessionId, trainingSessionId: sessionId,
+          scheduleId, trainingScheduleId: scheduleId,
+          squadId: squadDefinitions[0].id, squadIds: [squadDefinitions[0].id],
+          setName: date === '2026-09-05' ? 'Start-of-cycle Test Battery' : 'Specific-phase Retest Battery',
+          description: 'Canonical AthlyraX test battery marker linked to recorded test results',
+          setType: 'test', isTestSet: true, isTest: true,
+          phase: phase.phase, stroke: 'Free', modality: 'Swim', rounds: 1, reps: 0, distance: 0,
+          plannedVolume: 0, totalVolume: 0, setTimeSeconds: 0, totalTimeSec: 0,
+          scheduleDate: date, date, energy: '', energySystem: '',
+          resultsBySwimmer: {},
+          ...ownerScope, createdAt: iso(date), updatedAt: iso(date),
+        });
+      }
+
       setTemplates.forEach((set, setIndex) => {
         trainingSessionSets.push({
           id: `${PREFIX}set_w${week + 1}_s${sessionIndex + 1}_${set.suffix}`, sessionId, trainingSessionId: sessionId,
@@ -331,9 +348,16 @@ function buildTests(mainSwimmers) {
       ];
       specs.forEach(([testName, seconds], testIndex) => {
         const repeatability = String(testName).startsWith('8x');
+        const plannerWeek = blockIndex === 0 ? 1 : 5;
+        const linkedScheduleId = `${PREFIX}schedule_perf_a_w${plannerWeek}_s4`;
+        const linkedSessionId = `${PREFIX}session_perf_a_w${plannerWeek}_s4`;
         rows.push({
           id: `${PREFIX}test_${swimmerIndex + 1}_${blockIndex + 1}_${testIndex + 1}`, swimmerId: swimmer.id,
-          squadId: squadDefinitions[0].id, date, testType: repeatability ? 'Repeatability Test' : 'Pool Test',
+          swimmerName: swimmer.name || swimmer.fullName || [swimmer.firstName, swimmer.lastName].filter(Boolean).join(' '),
+          squadId: squadDefinitions[0].id, squadIds: [squadDefinitions[0].id],
+          scheduleId: linkedScheduleId, trainingScheduleId: linkedScheduleId,
+          sessionId: linkedSessionId, trainingSessionId: linkedSessionId,
+          date, category: 'Swimming', testType: repeatability ? 'Repeatability Test' : 'Pool Test',
           testName, metric: testName, resultTime: secToTime(seconds), resultValue: secToTime(seconds), resultUnit: 'time',
           repResults: repeatability ? Array.from({ length: 8 }, (_, rep) => ({
             rep: rep + 1, overallTime: secToTime(seconds + rep * (0.18 + swimmerIndex * 0.01)),
