@@ -26,7 +26,7 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
 
   const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   assert.equal(db.__meta.tenantId, 'demo-company');
-  assert.equal(db.__meta.demoSeed.version, 4);
+  assert.equal(db.__meta.demoSeed.version, 5);
   assert.equal(db.__meta.storageRevision, 8);
   assert.equal(db.squads.length, 3);
   assert.equal(db.coaches.length, 3);
@@ -44,6 +44,9 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
   assert.equal(ameliaCompetitionResults.filter((row) => row.pb === true).length, 3);
   assert.equal(db.trainingSessionSets.filter((row) => row.isTestSet === true).length, 2);
   assert.equal(db.tests.filter((row) => row.scheduleId && row.sessionId).length, 192);
+  const maxRows = db.tests.filter((row) => row.templateId === 'builtin-test-max');
+  assert.equal(maxRows.length, 64);
+  assert.deepEqual([...new Set(maxRows.map((row) => row.testName))].sort(), ['100m Max','25m Max','50m Max','75m Max']);
 
   const second = upgradeDemoShowcaseTenant({ storageRoot, backupRoot, logger: { log() {} } });
   assert.equal(second.changed, false);
