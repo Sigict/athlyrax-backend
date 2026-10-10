@@ -411,7 +411,7 @@ function buildCompetitions(mainSwimmers) {
       const resultsBySwimmer = {};
       mainSwimmers.forEach((swimmer, swimmerIndex) => {
         const base100 = Number(swimmer.demoBaseline100);
-        const variation = swimmerIndex === 4 && meetIndex === 1 ? 0.75 : swimmerIndex === 6 ? 0.25 : 0;
+        const variation = swimmerIndex === 4 && meet.id === 'prep' ? 0.75 : swimmerIndex === 6 ? 0.25 : 0;
         const seconds = event.distance === 100
           ? base100 + meet.delta + variation
           : base100 * 0.47 + meet.delta * 0.38 + variation * 0.25;
