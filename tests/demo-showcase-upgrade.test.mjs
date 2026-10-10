@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { upgradeDemoShowcaseTenant } from '../scripts/upgrade-demo-showcase-tenant.mjs';
 
-test('demo showcase upgrade replaces legacy demo data once and backs it up', () => {
+test('demo showcase upgrade repairs evidence without replacing existing data', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-demo-showcase-'));
   const storageRoot = path.join(root, 'storage');
   const backupRoot = path.join(root, 'backup');
@@ -26,14 +26,14 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
 
   const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   assert.equal(db.__meta.tenantId, 'demo-company');
-  assert.equal(db.__meta.demoSeed.version, 6);
+  assert.equal(db.__meta.demoSeed.version, 7);
   assert.equal(db.__meta.storageRevision, 8);
-  assert.equal(db.squads.length, 3);
-  assert.equal(db.coaches.length, 3);
-  assert.equal(db.swimmers.length, 20);
-  assert.equal(db.swimmers.some((row) => row.id === 'real-person-data'), false);
-  assert.equal(db.squads.some((row) => row.id === 'legacy-squad'), false);
-  assert.equal(db.squads.find((row) => row.name === 'Performance A').swimmerIds.length, 8);
+  assert.equal(db.squads.length, 1);
+  assert.equal(db.coaches?.length || 0, 0);
+  assert.equal(db.swimmers.length, 1);
+  assert.equal(db.swimmers.some((row) => row.id === 'real-person-data'), true);
+  assert.equal(db.squads.some((row) => row.id === 'legacy-squad'), true);
+  assert.deepEqual(db.squads[0].swimmerIds, ['real-person-data']);
   assert.equal(db.fixtures.length, 3);
   assert.equal(db.tests.length, 144);
   const amelia = db.swimmers.find((row) => row.name === 'Amelia Foster');
@@ -49,8 +49,8 @@ test('demo showcase upgrade replaces legacy demo data once and backs it up', () 
       .filter(Boolean));
   assert.deepEqual(ameliaHundreds.map((row) => row.resultValue), ['1:04.35','1:04.30','1:02.95']);
   assert.ok(ameliaHundreds.every((row) => row.resultValue === row.resultTime && row.resultTime === row.time && row.time === row.result));
-  assert.equal(db.squads.find((row) => row.name === 'Performance B')?.sortOrder, 2);
-  assert.equal(db.trainingSessionSets.filter((row) => row.isTestSet === true).length, 2);
+  assert.equal(db.squads.find((row) => row.name === 'Performance B'), undefined);
+  assert.equal(db.trainingSessionSets?.length || 0, 0);
   assert.equal(db.tests.filter((row) => row.scheduleId && row.sessionId).length, 144);
   const maxRows = db.tests.filter((row) => row.templateId === 'builtin-test-max');
   assert.equal(maxRows.length, 80);
