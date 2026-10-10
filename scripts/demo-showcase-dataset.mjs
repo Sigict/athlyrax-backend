@@ -396,7 +396,10 @@ function buildTests(mainSwimmers) {
 function buildCompetitions(mainSwimmers) {
   const meets = [
     { id:'benchmark', name:'Early Season Benchmark Meet', date:'2026-09-13', delta:0.15, main:false },
+    { id:'development', name:'September Development Meet', date:'2026-09-20', delta:0.03, main:false },
+    { id:'regional', name:'September Regional Meet', date:'2026-09-27', delta:-0.28, main:false },
     { id:'prep', name:'Autumn Preparation Meet', date:'2026-10-04', delta:-0.65, main:false },
+    { id:'october', name:'October Skills and Race Meet', date:'2026-10-08', delta:-0.77, main:false },
     { id:'target', name:'AthlyraX Autumn Target Meet', date:'2026-11-15', delta:-1.25, main:true },
   ];
   return meets.map((meet, meetIndex) => {
