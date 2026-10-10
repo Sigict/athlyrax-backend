@@ -394,6 +394,7 @@ function buildTests(mainSwimmers) {
 }
 
 function buildCompetitions(mainSwimmers) {
+  const priorBestBySwimmerEvent = new Map();
   const meets = [
     { id:'benchmark', name:'Early Season Benchmark Meet', date:'2026-09-13', delta:0.15, main:false },
     { id:'development', name:'September Development Meet', date:'2026-09-20', delta:0.03, main:false },
@@ -416,9 +417,13 @@ function buildCompetitions(mainSwimmers) {
           : base100 * 0.47 + meet.delta * 0.38 + variation * 0.25;
         const firstHalf = event.distance === 100 ? seconds * 0.485 : seconds;
         const resultTime = secToTime(seconds);
+        const bestKey = `${swimmer.id}:${event.distance}:${event.stroke}`;
+        const previousBest = priorBestBySwimmerEvent.get(bestKey);
+        const isNewPb = Number.isFinite(previousBest) && seconds < previousBest - 0.005;
+        priorBestBySwimmerEvent.set(bestKey, Math.min(previousBest ?? Infinity, seconds));
         resultsBySwimmer[swimmer.id] = {
           time: resultTime, result: resultTime, resultTime, resultValue: resultTime,
-          pb: meetIndex > 0 && seconds < (event.distance === 100 ? base100 : base100 * 0.47),
+          pb: isNewPb,
           rank: String(1 + ((swimmerIndex + eventIndex + meetIndex) % 6)),
           splits: event.distance === 100 ? [secToTime(firstHalf), secToTime(seconds)] : [secToTime(seconds)],
           segmentTimes: event.distance === 100 ? [secToTime(firstHalf), secToTime(seconds - firstHalf)] : [secToTime(seconds)],
