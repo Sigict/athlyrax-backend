@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildDemoTenantSeed } from './demo-showcase-dataset.mjs';
 
-export const DEMO_SHOWCASE_VERSION = 6;
+export const DEMO_SHOWCASE_VERSION = 7;
 const TENANT_ID = 'demo-company';
 
 function safeJson(filePath) {
@@ -41,15 +41,50 @@ export function upgradeDemoShowcaseTenant({ storageRoot, backupRoot, logger = co
   const backupPath = path.join(backupDir, `demo-company-before-showcase-v${DEMO_SHOWCASE_VERSION}-${stamp}.json`);
   fsModule.copyFileSync(dbPath, backupPath);
 
-  const merged = buildDemoTenantSeed();
+  // Repair missing demo evidence only: never replace training, attendance or saved results.
+  const seed = buildDemoTenantSeed();
+  const merged = { ...current };
+  const existingTests = Array.isArray(current.tests) ? current.tests : [];
+  const knownTestIds = new Set(existingTests.map((row) => String(row?.id || '')));
+  merged.tests = [...existingTests, ...seed.tests.filter((row) => !knownTestIds.has(String(row.id)))];
+
+  const existingFixtures = Array.isArray(current.fixtures) ? current.fixtures : [];
+  const fixtureById = new Map(existingFixtures.map((row) => [String(row?.id || ''), row]));
+  const repairedFixtures = seed.fixtures.map((fixture) => {
+    const previous = fixtureById.get(String(fixture.id));
+    if (!previous) return fixture;
+    const existingEvents = Array.isArray(previous.events) ? previous.events : [];
+    const byEventId = new Map(existingEvents.map((event) => [String(event?.id || ''), event]));
+    const supplemented = fixture.events.map((event) => {
+      const savedEvent = byEventId.get(String(event.id));
+      if (!savedEvent) return event;
+      return {
+        ...savedEvent,
+        resultsBySwimmer: { ...event.resultsBySwimmer, ...(savedEvent.resultsBySwimmer || {}) },
+      };
+    });
+    return {
+      ...previous,
+      events: [
+        ...existingEvents.map((event) => supplemented.find((candidate) => String(candidate.id) === String(event.id)) || event),
+        ...supplemented.filter((event) => !byEventId.has(String(event.id))),
+      ],
+    };
+  });
+  const seenFixtureIds = new Set(existingFixtures.map((fixture) => String(fixture?.id || '')));
+  const repairedFixtureById = new Map(repairedFixtures.map((fixture) => [String(fixture.id), fixture]));
+  merged.fixtures = [
+    ...existingFixtures.map((fixture) => repairedFixtureById.get(String(fixture.id)) || fixture),
+    ...repairedFixtures.filter((fixture) => !seenFixtureIds.has(String(fixture.id))),
+  ];
   const previousRevision = Number(current?.__meta?.storageRevision || 0);
   merged.__meta = {
-    ...(merged.__meta || {}),
+    ...(current.__meta || {}),
     tenantId: TENANT_ID,
     tenant: TENANT_ID,
     storageRevision: previousRevision + 1,
     demoSeed: {
-      ...(merged.__meta?.demoSeed || {}),
+      ...(current.__meta?.demoSeed || {}),
       version: DEMO_SHOWCASE_VERSION,
       upgradedAt: new Date().toISOString(),
       source: 'production-start-one-time-upgrade',
