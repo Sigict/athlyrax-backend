@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { upgradeDemoShowcaseTenant } from '../scripts/upgrade-demo-showcase-tenant.mjs';
+import { buildDemoTenantSeed } from '../scripts/demo-showcase-dataset.mjs';
 
 test('demo showcase upgrade repairs evidence without replacing existing data', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'athlyrax-demo-showcase-'));
@@ -36,7 +37,7 @@ test('demo showcase upgrade repairs evidence without replacing existing data', (
   assert.deepEqual(db.squads[0].swimmerIds, ['real-person-data']);
   assert.equal(db.fixtures.length, 3);
   assert.equal(db.tests.length, 144);
-  const amelia = db.swimmers.find((row) => row.name === 'Amelia Foster');
+  const amelia = buildDemoTenantSeed().swimmers.find((row) => row.name === 'Amelia Foster');
   assert.ok(amelia);
   assert.equal(db.tests.filter((row) => row.swimmerId === amelia.id).length, 18);
   const ameliaCompetitionResults = db.fixtures.flatMap((fixture) => (fixture.events || []).map((event) => event.resultsBySwimmer?.[amelia.id]).filter(Boolean));
