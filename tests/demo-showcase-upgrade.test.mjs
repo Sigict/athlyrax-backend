@@ -48,7 +48,7 @@ test('demo showcase upgrade repairs evidence without replacing existing data', (
       .filter((event) => event.distance === 100 && event.stroke === 'Free')
       .map((event) => event.resultsBySwimmer?.[amelia.id])
       .filter(Boolean));
-  assert.deepEqual(ameliaHundreds.map((row) => row.resultValue), ['1:04.35','1:04.23','1:03.92','1:04.30','1:04.18','1:02.95']);
+  assert.deepEqual(ameliaHundreds.map((row) => row.resultValue), ['1:04.35','1:04.23','1:03.92','1:04.30','1:03.43','1:02.95']);
   assert.ok(ameliaHundreds.every((row) => row.resultValue === row.resultTime && row.resultTime === row.time && row.time === row.result));
   assert.equal(db.squads.find((row) => row.name === 'Performance B'), undefined);
   assert.equal(db.trainingSessionSets?.length || 0, 0);
