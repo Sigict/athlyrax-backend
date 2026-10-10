@@ -43,7 +43,9 @@ test('demo showcase upgrade repairs evidence without replacing existing data', (
   const ameliaCompetitionResults = db.fixtures.flatMap((fixture) => (fixture.events || []).map((event) => event.resultsBySwimmer?.[amelia.id]).filter(Boolean));
   assert.equal(ameliaCompetitionResults.length, 12);
   assert.equal(ameliaCompetitionResults.filter((row) => row.pb === true).length, 8);
-  // A slower preparation-meet swim must not be awarded a PB just because it beats the model baseline.\n  const prep = db.fixtures.find((fixture) => fixture.id.endsWith('fixture_prep'));\n  assert.equal(prep.events.every((event) => event.resultsBySwimmer[amelia.id].pb === false), true);\n  const ameliaHundreds = db.fixtures
+  // A slower preparation-meet swim must not be awarded a PB just because it beats the model baseline.
+  const prep = db.fixtures.find((fixture) => fixture.id.endsWith('fixture_prep'));\n  assert.equal(prep.events.every((event) => event.resultsBySwimmer[amelia.id].pb === false), true);
+  const ameliaHundreds = db.fixtures
     .flatMap((fixture) => fixture.events
       .filter((event) => event.distance === 100 && event.stroke === 'Free')
       .map((event) => event.resultsBySwimmer?.[amelia.id])
