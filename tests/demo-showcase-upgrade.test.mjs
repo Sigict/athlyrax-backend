@@ -27,7 +27,7 @@ test('demo showcase upgrade repairs evidence without replacing existing data', (
 
   const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   assert.equal(db.__meta.tenantId, 'demo-company');
-  assert.equal(db.__meta.demoSeed.version, 7);
+  assert.equal(db.__meta.demoSeed.version, 8);
   assert.equal(db.__meta.storageRevision, 8);
   assert.equal(db.squads.length, 1);
   assert.equal(db.coaches?.length || 0, 0);
@@ -35,20 +35,23 @@ test('demo showcase upgrade repairs evidence without replacing existing data', (
   assert.equal(db.swimmers.some((row) => row.id === 'real-person-data'), true);
   assert.equal(db.squads.some((row) => row.id === 'legacy-squad'), true);
   assert.deepEqual(db.squads[0].swimmerIds, ['real-person-data']);
-  assert.equal(db.fixtures.length, 3);
+  assert.equal(db.fixtures.length, 6);
   assert.equal(db.tests.length, 144);
   const amelia = buildDemoTenantSeed().swimmers.find((row) => row.name === 'Amelia Foster');
   assert.ok(amelia);
   assert.equal(db.tests.filter((row) => row.swimmerId === amelia.id).length, 18);
   const ameliaCompetitionResults = db.fixtures.flatMap((fixture) => (fixture.events || []).map((event) => event.resultsBySwimmer?.[amelia.id]).filter(Boolean));
-  assert.equal(ameliaCompetitionResults.length, 6);
-  assert.equal(ameliaCompetitionResults.filter((row) => row.pb === true).length, 3);
+  assert.equal(ameliaCompetitionResults.length, 12);
+  assert.equal(ameliaCompetitionResults.filter((row) => row.pb === true).length, 8);
+  // A slower preparation-meet swim must not be awarded a PB just because it beats the model baseline.
+  const prep = db.fixtures.find((fixture) => fixture.id.endsWith('fixture_prep'));
+  assert.equal(prep.events.every((event) => event.resultsBySwimmer[amelia.id].pb === false), true);
   const ameliaHundreds = db.fixtures
     .flatMap((fixture) => fixture.events
       .filter((event) => event.distance === 100 && event.stroke === 'Free')
       .map((event) => event.resultsBySwimmer?.[amelia.id])
       .filter(Boolean));
-  assert.deepEqual(ameliaHundreds.map((row) => row.resultValue), ['1:04.35','1:04.30','1:02.95']);
+  assert.deepEqual(ameliaHundreds.map((row) => row.resultValue), ['1:04.35','1:04.23','1:03.92','1:04.30','1:03.43','1:02.95']);
   assert.ok(ameliaHundreds.every((row) => row.resultValue === row.resultTime && row.resultTime === row.time && row.time === row.result));
   assert.equal(db.squads.find((row) => row.name === 'Performance B'), undefined);
   assert.equal(db.trainingSessionSets?.length || 0, 0);

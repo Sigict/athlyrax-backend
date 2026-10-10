@@ -394,9 +394,13 @@ function buildTests(mainSwimmers) {
 }
 
 function buildCompetitions(mainSwimmers) {
+  const priorBestBySwimmerEvent = new Map();
   const meets = [
     { id:'benchmark', name:'Early Season Benchmark Meet', date:'2026-09-13', delta:0.15, main:false },
+    { id:'development', name:'September Development Meet', date:'2026-09-20', delta:0.03, main:false },
+    { id:'regional', name:'September Regional Meet', date:'2026-09-27', delta:-0.28, main:false },
     { id:'prep', name:'Autumn Preparation Meet', date:'2026-10-04', delta:-0.65, main:false },
+    { id:'october', name:'October Skills and Race Meet', date:'2026-10-08', delta:-0.77, main:false },
     { id:'target', name:'AthlyraX Autumn Target Meet', date:'2026-11-15', delta:-1.25, main:true },
   ];
   return meets.map((meet, meetIndex) => {
@@ -407,15 +411,19 @@ function buildCompetitions(mainSwimmers) {
       const resultsBySwimmer = {};
       mainSwimmers.forEach((swimmer, swimmerIndex) => {
         const base100 = Number(swimmer.demoBaseline100);
-        const variation = swimmerIndex === 4 && meetIndex === 1 ? 0.75 : swimmerIndex === 6 ? 0.25 : 0;
+        const variation = swimmerIndex === 4 && meet.id === 'prep' ? 0.75 : swimmerIndex === 6 ? 0.25 : 0;
         const seconds = event.distance === 100
           ? base100 + meet.delta + variation
           : base100 * 0.47 + meet.delta * 0.38 + variation * 0.25;
         const firstHalf = event.distance === 100 ? seconds * 0.485 : seconds;
         const resultTime = secToTime(seconds);
+        const bestKey = `${swimmer.id}:${event.distance}:${event.stroke}`;
+        const previousBest = priorBestBySwimmerEvent.get(bestKey);
+        const isNewPb = Number.isFinite(previousBest) && seconds < previousBest - 0.005;
+        priorBestBySwimmerEvent.set(bestKey, Math.min(previousBest ?? Infinity, seconds));
         resultsBySwimmer[swimmer.id] = {
           time: resultTime, result: resultTime, resultTime, resultValue: resultTime,
-          pb: meetIndex > 0 && seconds < (event.distance === 100 ? base100 : base100 * 0.47),
+          pb: isNewPb,
           rank: String(1 + ((swimmerIndex + eventIndex + meetIndex) % 6)),
           splits: event.distance === 100 ? [secToTime(firstHalf), secToTime(seconds)] : [secToTime(seconds)],
           segmentTimes: event.distance === 100 ? [secToTime(firstHalf), secToTime(seconds - firstHalf)] : [secToTime(seconds)],
