@@ -82,7 +82,10 @@ export function enrichDemoCoachRecords(currentDb, seed = buildDemoTenantSeed()) 
 
   // Only change Choice demo sets without recorded results. Named freestyle,
   // race and measured sets must retain their established stroke identity.
-  const rotation = ['Back', 'Breast', 'Fly', 'IM'];
+  // Long aerobic or recovery work should never be relabelled as butterfly.
+  const strokeChoices = distance => distance >= 100
+    ? ['Back', 'Breast', 'IM']
+    : ['Back', 'Breast', 'Fly', 'IM'];
   const seedSets = new Map(array(seed.trainingSessionSets).map(x => [String(x.id), x]));
   result.trainingSessionSets = array(currentDb.trainingSessionSets).map(set => {
     if (!String(set?.id || '').startsWith(PREFIX)) return set;
@@ -91,7 +94,8 @@ export function enrichDemoCoachRecords(currentDb, seed = buildDemoTenantSeed()) 
       || /kick/i.test(String(set.setName))
       || Object.keys(set.resultsBySwimmer || {}).length) return set;
     const next = { ...set };
-    const variant = rotation[Array.from(String(set.id)).reduce((a,c) => a + c.charCodeAt(0),0) % rotation.length];
+    const choices = strokeChoices(Number(set.distance) || 0);
+    const variant = choices[Array.from(String(set.id)).reduce((a,c) => a + c.charCodeAt(0),0) % choices.length];
     next.stroke = variant;
     next.demoSyntheticStroke = true;
     audit.trainingStrokeVariety = (audit.trainingStrokeVariety || 0) + 1;
