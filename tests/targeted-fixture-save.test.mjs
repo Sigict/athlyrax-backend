@@ -25,6 +25,7 @@ test('targeted fixture save updates only canonical fixture data', () => {
     endDate: '2026-10-03',
     competitionType: 'Competition',
     venue: 'New Pool',
+    poolLength: 25,
     startTime: '08:00',
     endTime: '18:00',
     isMainEvent: true,
@@ -46,6 +47,21 @@ test('targeted fixture save updates only canonical fixture data', () => {
   assert.deepEqual(result.fixture.coverCoachIds, ['c3']);
   assert.equal(result.fixture.coverCoachId, 'c3');
   assert.equal(result.fixture.venue, 'New Pool');
+  assert.equal(result.fixture.poolLength, 25);
   assert.ok(result.db.venues.some((row) => row.name === 'New Pool'));
   assert.deepEqual(result.db.swimmers, db.swimmers);
+});
+
+test('course is preserved on subsequent edits and invalid lengths are rejected', () => {
+  const db = { fixtures: [{
+    id: 'fx2', name: 'Gala', startDate: '2026-10-01',
+    endDate: '2026-10-01', venue: 'Pool', poolLength: 50,
+  }], venues: [] };
+  const base = { fixtureReference:'fx2', name:'Gala',
+    startDate:'2026-10-01', endDate:'2026-10-01', venue:'Pool' };
+  assert.equal(applyTargetedFixtureSave(db, base).fixture.poolLength, 50);
+  assert.equal(applyTargetedFixtureSave(db, { ...base, poolLength:25 }).fixture.poolLength, 25);
+  const bad = applyTargetedFixtureSave(db, { ...base, poolLength:75 });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.status, 400);
 });
