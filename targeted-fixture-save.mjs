@@ -58,9 +58,9 @@ export function applyTargetedFixtureSave(db = {}, input = {}) {
 
   const incomingPoolLength = input?.poolLength == null || input.poolLength === ''
     ? (fixtures[index]?.poolLength ?? null)
-    : Number(input.poolLength);
-  if (incomingPoolLength !== null && incomingPoolLength !== 25 && incomingPoolLength !== 50) {
-    return { ok: false, status: 400, error: 'Pool course must be short course (25m) or long course (50m).' };
+    : (input.poolLength === '25yd' ? '25yd' : Number(input.poolLength));
+  if (incomingPoolLength !== null && incomingPoolLength !== 25 && incomingPoolLength !== 50 && incomingPoolLength !== '25yd') {
+    return { ok: false, status: 400, error: 'Pool course must be 25m, 50m, or 25yd.' };
   }
   const venue = ensureVenue(db, input?.venue);
   const now = text(input?.updatedAt) || new Date().toISOString();
