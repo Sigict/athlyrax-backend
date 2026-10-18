@@ -56,6 +56,12 @@ export function applyTargetedFixtureSave(db = {}, input = {}) {
     return { ok: false, status: 400, error: 'Fixture dates are invalid.' };
   }
 
+  const incomingPoolLength = input?.poolLength == null || input.poolLength === ''
+    ? (fixtures[index]?.poolLength ?? null)
+    : Number(input.poolLength);
+  if (incomingPoolLength !== null && incomingPoolLength !== 25 && incomingPoolLength !== 50) {
+    return { ok: false, status: 400, error: 'Pool course must be short course (25m) or long course (50m).' };
+  }
   const venue = ensureVenue(db, input?.venue);
   const now = text(input?.updatedAt) || new Date().toISOString();
   const current = fixtures[index] || {};
@@ -67,6 +73,7 @@ export function applyTargetedFixtureSave(db = {}, input = {}) {
     competitionType: text(input?.competitionType) || 'Competition',
     type: text(input?.competitionType) || text(current?.type) || 'Competition',
     venue: venue.venueName,
+    poolLength: incomingPoolLength,
     venueId: text(input?.venueId) || venue.venueId,
     startTime: text(input?.startTime) || '09:00',
     endTime: text(input?.endTime) || '18:00',
