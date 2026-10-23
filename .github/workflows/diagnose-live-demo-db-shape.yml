@@ -1,0 +1,75 @@
+name: Diagnose live demo DB shape
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/diagnose-live-demo-db-shape.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-live-shape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BACKEND_URL: https://athlyrax-backend.onrender.com
+      DEMO_USERNAME: demo.coach
+      DEMO_PASSWORD: DemoCoach123!
+    steps:
+      - name: Read live planning structure only
+        run: |
+          set -euo pipefail
+          jar="$(mktemp)"
+          login="$(mktemp)"
+          dbfile="$(mktemp)"
+          headers="$(mktemp)"
+          trap 'rm -f "${jar}" "${login}" "${dbfile}" "${headers}"' EXIT
+
+          login_code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 30 \
+            --cookie-jar "${jar}" --header 'Content-Type: application/json' \
+            --data "{\"username\":\"${DEMO_USERNAME}\",\"password\":\"${DEMO_PASSWORD}\"}" \
+            --output "${login}" --write-out '%{http_code}' "${BACKEND_URL}/auth/login")"
+          test "${login_code}" = "200"
+
+          curl --fail --silent --show-error --location --cookie "${jar}" \
+            --dump-header "${headers}" --output "${dbfile}" \
+            "${BACKEND_URL}/db?diagnostic=shape&cb=$(date +%s%N)"
+
+          node --input-type=module - "${dbfile}" "${headers}" <<'NODE'
+          import fs from 'node:fs';
+          const [dbPath, headersPath] = process.argv.slice(2);
+          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+          const headers = fs.readFileSync(headersPath, 'utf8');
+          const arr = (key) => Array.isArray(db?.[key]) ? db[key] : [];
+          const text = (value) => String(value ?? '').trim();
+          const fixtures = arr('fixtures');
+          const plannerWeeks = arr('trainingPlannerWeeks');
+          const report = {
+            tenantId: text(db?.__meta?.tenantId),
+            storageRevision: db?.__meta?.storageRevision ?? null,
+            counts: {
+              fixtures: fixtures.length,
+              mainEventFixtures: fixtures.filter((row) => row?.isMainEvent === true).length,
+              plannerWeeks: plannerWeeks.length,
+              plannerWeeksWithPrimaryTarget: plannerWeeks.filter((row) => text(row?.primaryTargetCompetitionKey)).length,
+              attendance: arr('attendance').length,
+              trainingSessionSets: arr('trainingSessionSets').length,
+            },
+            recentMainEvents: fixtures
+              .filter((row) => row?.isMainEvent === true)
+              .slice(-10)
+              .map((row) => ({ id: text(row?.id), name: text(row?.name || row?.title), startDate: text(row?.startDate || row?.date) })),
+            recentPlannerTargets: plannerWeeks
+              .filter((row) => text(row?.primaryTargetCompetitionKey))
+              .slice(-10)
+              .map((row) => ({ squadId: text(row?.squadId), weekStart: text(row?.weekStart), fixtureId: text(row?.primaryTargetCompetitionFixtureId), name: text(row?.primaryTargetCompetitionName) })),
+            responseHeaders: {
+              revision: (headers.match(/^X-AthlyraX-DB-Revision:\s*([^\r\n]+)/im) || [])[1] || null,
+              backendCommit: (headers.match(/^X-AthlyraX-Backend-Commit:\s*([^\r\n]+)/im) || [])[1] || null,
+              persistenceGuard: (headers.match(/^X-AthlyraX-DB-Persistence-Guard:\s*([^\r\n]+)/im) || [])[1] || null,
+            },
+          };
+          console.log('LIVE_DEMO_TARGET_STATE=' + JSON.stringify(report));
+          NODE
