@@ -70,3 +70,13 @@ test('an edit is refused only when the recorded result changed, not when a whole
   assert.throws(() => submit(changed, [{ swimmerId: 'sw', testItemKey: '2x50', expectedUpdatedAt: opened.updatedAt,
     expectedFingerprint: groupTestResultFingerprint(opened), repResults: [{ overallTime: '31.20' }] }]), (error) => error.status === 409);
 });
+
+test('accepts fractional half-cycles derived from an odd free or back arm-stroke count', () => {
+  const saved = submit(db(), [{ swimmerId:'sw',testItemKey:'2x50',expectedUpdatedAt:'',
+    repResults:[{overallTime:'34.80',overallStrokeCount:'35',strokeCycles:'17.5'}] }]);
+  assert.equal(saved.db.tests[0].repResults[0].overallStrokeCount, '35');
+  assert.equal(saved.db.tests[0].repResults[0].strokeCycles, '17.5');
+  assert.equal(saved.db.tests[0].repResults[0].strokeCycleUnit, 'cycles');
+  assert.throws(() => submit(db(), [{swimmerId:'sw',testItemKey:'2x50',expectedUpdatedAt:'',
+    repResults:[{overallTime:'34.80',overallStrokeCount:'35',strokeCycles:'17.3'}]}]), /stroke-cycle/);
+});
