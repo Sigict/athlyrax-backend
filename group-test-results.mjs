@@ -85,7 +85,7 @@ function safeRep(rep,allowedFields,swimming) {
   });
   if (!allowedFields.length && !swimming) values.result=text(rep?.resultValues?.result).slice(0,120);
   const strokeCycles=text(rep?.strokeCycles).slice(0,20);
-  if(swimming && strokeCycles && !/^\d{1,4}$/.test(strokeCycles))
+  if(swimming && strokeCycles && !/^\d{1,4}(?:\.5)?$/.test(strokeCycles))
     invalid('Invalid recorded stroke-cycle count.');
   const splits=list(rep?.splits).slice(0,32).map(split=>({
     distanceLabel:text(split?.distanceLabel).slice(0,20),
