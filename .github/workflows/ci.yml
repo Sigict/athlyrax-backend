@@ -43,5 +43,8 @@ jobs:
         run: node --test tests/demo-planning-storage-cleanup.test.mjs
       - name: Verify demo showcase one-time upgrade
         run: node --test tests/demo-showcase-upgrade.test.mjs
+      - name: Group Test Results route and separate stroke/cycle storage
+        run: node --test tests/group-test-results.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
