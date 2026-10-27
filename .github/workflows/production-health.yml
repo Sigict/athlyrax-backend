@@ -48,7 +48,10 @@ jobs:
           const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           if (payload?.authRequired !== true) process.exit(1);
           if (payload?.securityMode !== 'production') process.exit(1);
-          if (payload?.requireInviteCode !== true) process.exit(1);
+          // Owner decision 27-10-2026: clubs sign up on their own (a sign-up creates a new
+          // club); coaches join an existing club only by invite.
+          if (payload?.allowCoachSignup !== true) process.exit(1);
+          if (payload?.requireInviteCode !== false) process.exit(1);
           if (payload?.allowCoachInvites !== true) process.exit(1);
           if (payload?.bearerCompatEnabled !== false) process.exit(1);
           NODE
