@@ -4989,6 +4989,76 @@ app.put('/auth/users/:username/role', requireStrictAuth, requireAdminRole, requi
 	}
 });
 
+// Head-coach handover (owner decision 27-10-2026): the current head coach
+// passes the role to an assistant or coach of the same club in one step and
+// becomes an assistant coach, so a club always has exactly one head coach and
+// never needs the owner for a planned change. Only the head coach can start it
+// (no peer takeover); both accounts sign in again afterwards.
+const HEAD_COACH_HANDOVER_TARGET_ROLES = new Set(['assistant-coach', 'coach']);
+app.post('/auth/head-coach/handover', requireStrictAuth, requireAdminRateLimit, (req, res) => {
+	const actorUsername = String(req.auth?.username || '').trim();
+	const targetUsername = String(req.body?.username || '').trim();
+	if (String(req.auth?.role || '').trim() !== 'head-coach') {
+		res.status(403).json({ error: 'Only the current head coach can hand over the head-coach role.' });
+		return;
+	}
+	if (!targetUsername) {
+		res.status(400).json({ error: 'Choose the coach who will become head coach.' });
+		return;
+	}
+	if (targetUsername === actorUsername) {
+		res.status(400).json({ error: 'You are already the head coach.' });
+		return;
+	}
+	const actorIndex = authUsers.findIndex((row) => String(row?.username || '').trim() === actorUsername);
+	const targetIndex = authUsers.findIndex((row) => String(row?.username || '').trim() === targetUsername);
+	if (actorIndex < 0 || targetIndex < 0) {
+		res.status(404).json({ error: 'User not found.' });
+		return;
+	}
+	const actor = authUsers[actorIndex];
+	const target = authUsers[targetIndex];
+	const actorTenant = resolveAuthTenantId(req.auth);
+	if (!actorTenant || resolveTenantKeyFromUser(actor) !== actorTenant || resolveTenantKeyFromUser(target) !== actorTenant) {
+		res.status(403).json({ error: 'The new head coach must belong to your club.' });
+		return;
+	}
+	if (!HEAD_COACH_HANDOVER_TARGET_ROLES.has(String(target?.role || '').trim())) {
+		res.status(400).json({ error: 'The new head coach must currently be an assistant coach or coach in your club.' });
+		return;
+	}
+	if (target?.isApproved === false) {
+		res.status(400).json({ error: 'The new head coach account must be approved first.' });
+		return;
+	}
+
+	const revokeAfter = getNowEpochSeconds() + 1;
+	authUsers[targetIndex] = { ...target, role: 'head-coach', tokenValidAfter: revokeAfter };
+	authUsers[actorIndex] = { ...actor, role: 'assistant-coach', tokenValidAfter: revokeAfter };
+	try {
+		persistAuthUsers();
+	} catch (error) {
+		authUsers[targetIndex] = target;
+		authUsers[actorIndex] = actor;
+		res.status(500).json({ error: 'Could not hand over the head-coach role.', details: error instanceof Error ? error.message : 'Unknown error' });
+		return;
+	}
+	appendAuthAuditEvent({
+		action: 'head_coach_handover',
+		req,
+		status: 'success',
+		target: targetUsername,
+		details: { previousHeadCoach: actorUsername, previousHeadCoachNewRole: 'assistant-coach', tenantId: actorTenant },
+	});
+	clearAuthCookies(res);
+	res.status(200).json({
+		ok: true,
+		headCoach: targetUsername,
+		previousHeadCoach: { username: actorUsername, role: 'assistant-coach' },
+		signInAgain: true,
+	});
+});
+
 app.put('/auth/users/:username/approval', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {
 	const targetUsername = String(req.params?.username || '').trim();
 	const approved = req.body?.approved !== false;
