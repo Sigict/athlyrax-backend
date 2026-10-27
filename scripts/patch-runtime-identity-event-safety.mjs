@@ -83,8 +83,8 @@ replaceRequired(
 
 replaceRequired(
   `\t\t\t\t\t\tstatus: String(session?.status || 'active').trim() || 'active',\n\t\t\t\t\t\tupdatedAt: new Date().toISOString(),`,
-  `\t\t\t\t\t\tstatus: String(session?.status || 'active').trim() || 'active',\n\t\t\t\t\t\tlastStripeEventCreated: Math.max(0, Number.parseInt(event?.created || '0', 10) || 0),\n\t\t\t\t\t\tlastStripeEventId: String(event?.id || '').trim(),\n\t\t\t\t\t\tupdatedAt: new Date().toISOString(),`,
-  'Checkout webhook event markers',
+  `\t\t\t\t\t\t// ATHLYRAX_CHECKOUT_LINKS_CUSTOMER_ONLY: status and event order come from the\n\t\t\t\t\t\t// customer.subscription.* events, which Stripe may deliver before or after this one.\n\t\t\t\t\t\tupdatedAt: new Date().toISOString(),`,
+  'Checkout webhook links the customer only',
 );
 replaceRequired(
   `\t\t\t\t\t\tstatus: 'past_due',\n\t\t\t\t\t\tupdatedAt: new Date().toISOString(),`,
@@ -97,6 +97,7 @@ for (const token of [
   'ATHLYRAX_INVITE_CODE_CRYPTO_RNG',
   'ATHLYRAX_INVITE_CODE_UNIQUENESS_FAIL_CLOSED',
   'ATHLYRAX_STRIPE_EVENT_ORDER_GUARD',
+  'ATHLYRAX_CHECKOUT_LINKS_CUSTOMER_ONLY',
   'lastStripeEventCreated',
   'lastStripeEventId',
 ]) if (!source.includes(token)) throw new Error(`Runtime identity/event hardening token is missing: ${token}`);

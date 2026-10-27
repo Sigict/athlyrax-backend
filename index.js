@@ -301,7 +301,8 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 					upsertUserBillingByUsername(username, {
 						customerId,
 						checkoutSessionId: String(session?.id || '').trim(),
-						status: String(session?.status || 'active').trim() || 'active',
+						// ATHLYRAX_CHECKOUT_LINKS_CUSTOMER_ONLY: status and event order come from the
+						// customer.subscription.* events, which Stripe may deliver before or after this one.
 						updatedAt: new Date().toISOString(),
 					});
 				}
@@ -1195,7 +1196,16 @@ function canAdminManageUser(auth, targetUser) {
 	if (isPrimarySoftwareOwnerAccount(targetUser)) return false;
 	const actorTenant = resolveAuthTenantId(auth);
 	const targetTenant = resolveTenantKeyFromUser(targetUser);
-	return Boolean(actorTenant && targetTenant && actorTenant === targetTenant);
+	if (!(actorTenant && targetTenant && actorTenant === targetTenant)) return false;
+	// A head coach manages the club's assistants, viewers and swimmers, never
+	// another head coach or a software owner (a peer password reset would be
+	// an account takeover). Their own account stays manageable.
+	const actorRole = String(auth?.role || '').trim();
+	const targetRole = String(targetUser?.role || '').trim();
+	const isSelf = String(auth?.username || '').trim() !== ''
+		&& String(auth?.username || '').trim() === String(targetUser?.username || '').trim();
+	if (actorRole !== 'software-owner' && !isSelf && ['head-coach', 'software-owner'].includes(targetRole)) return false;
+	return true;
 }
 
 function getTenantUsersByTenantId(tenantId) {
