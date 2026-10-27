@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 export const REQUIRED_SIGNUP_LEGAL_VERSIONS = Object.freeze({
-  terms: '2026-08-06',
+  terms: '2026-10-27',
   dataProcessingAgreement: '2026-08-06',
   clubDataProtection: '2026-08-06',
 });
