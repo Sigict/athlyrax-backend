@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { resolveStorageConfiguration } from '../scripts/storage-safety-lib.mjs';
 
@@ -46,10 +47,20 @@ function createFixtureStorage(rootDir) {
   return { storageRoot, backupRoot, authUsersPath, authUsersBackupPath };
 }
 
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
+  });
+}
+
 async function startServer(envOverrides = {}) {
   const tempRoot = mkTempDir('athlyrax-admin-hierarchy-');
   const paths = createFixtureStorage(tempRoot);
-  const port = String(3300 + Math.floor(Math.random() * 300));
+  // A port the operating system reports free, so parallel or back-to-back
+  // servers never collide (a random port in a fixed range sometimes did).
+  const port = String(await freePort());
   const env = {
     ...process.env,
     NODE_ENV: 'development',
