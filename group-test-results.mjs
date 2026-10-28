@@ -87,24 +87,39 @@ function safeRep(rep,allowedFields,swimming) {
   const strokeCycles=text(rep?.strokeCycles).slice(0,20);
   if(swimming && strokeCycles && !/^\d{1,4}(?:\.5)?$/.test(strokeCycles))
     invalid('Invalid recorded stroke-cycle count.');
-  const splits=list(rep?.splits).slice(0,32).map(split=>({
-    distanceLabel:text(split?.distanceLabel).slice(0,20),
-    time:text(split?.time).slice(0,24),
-    strokeCount:text(split?.strokeCount).slice(0,20),
-    ...(text(split?.strokeCycles)?{strokeCycles:text(split?.strokeCycles).slice(0,20)}:{}),
-  }));
+  // Recorded underwater distance (metres, or yards in a yard pool) for the
+  // repetition or a split: optional, a plain number with up to two decimals.
+  const underwater=(raw,label)=>{
+    const value=text(raw).slice(0,10);
+    if(value && (!/^\d{1,4}(?:\.\d{1,2})?$/.test(value) || Number(value)>1500))
+      invalid('Invalid '+label+' underwater distance.');
+    return value;
+  };
+  const underwaterDistance=swimming?underwater(rep?.underwaterDistance,'recorded'):'';
+  const splits=list(rep?.splits).slice(0,32).map(split=>{
+    const splitUnderwater=swimming?underwater(split?.underwaterDistance,'split'):'';
+    return {
+      distanceLabel:text(split?.distanceLabel).slice(0,20),
+      time:text(split?.time).slice(0,24),
+      strokeCount:text(split?.strokeCount).slice(0,20),
+      ...(text(split?.strokeCycles)?{strokeCycles:text(split?.strokeCycles).slice(0,20)}:{}),
+      ...(splitUnderwater?{underwaterDistance:splitUnderwater}:{}),
+    };
+  });
   if(swimming)for(const split of splits)
     if(split.time && parseRecordedSwimSeconds(split.time)===null)
       invalid('Invalid swimming split time.');
   return {overallTime,overallStrokeCount,
     ...(overallStrokeCount?{strokeCountUnit:'strokes'}:{}),
     ...(strokeCycles?{strokeCycles,strokeCycleUnit:'cycles'}:{}),
+    ...(underwaterDistance?{underwaterDistance}:{}),
     notes:text(rep?.notes).slice(0,500),
     resultValues:values,splits};
 }
 function resultSummary(reps) {
   return reps.map((rep,i)=>{
     const cells=[rep.overallTime,rep.overallStrokeCount?rep.overallStrokeCount+' strokes':'',rep.strokeCycles?rep.strokeCycles+' cycles':'',
+      rep.underwaterDistance?'UW '+rep.underwaterDistance+' m':'',
       ...Object.entries(rep.resultValues).filter(([,v])=>text(v)).map(([k,v])=>k+': '+v)];
     return cells.some(Boolean) ? 'Rep '+(i+1)+': '+cells.filter(Boolean).join(' / ') : '';
   }).filter(Boolean).join(' | ');

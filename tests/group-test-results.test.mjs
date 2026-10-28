@@ -80,3 +80,16 @@ test('accepts fractional half-cycles derived from an odd free or back arm-stroke
   assert.throws(() => submit(db(), [{swimmerId:'sw',testItemKey:'2x50',expectedUpdatedAt:'',
     repResults:[{overallTime:'34.80',overallStrokeCount:'35',strokeCycles:'17.3'}]}]), /stroke-cycle/);
 });
+
+test('saves a recorded underwater distance per repetition; blank stays absent; invalid is refused', () => {
+  const saved = submit(db(), [{ swimmerId: 'sw', testItemKey: '2x50', expectedUpdatedAt: '',
+    repResults: [{ overallTime: '31.50', overallStrokeCount: '36', underwaterDistance: '7.5' }, { overallTime: '32.00', underwaterDistance: '' }] }]);
+  const reps = saved.db.tests[0].repResults;
+  assert.equal(reps[0].underwaterDistance, '7.5');
+  assert.equal(reps[1].underwaterDistance, undefined, 'no underwater value is invented');
+  assert.match(saved.db.tests[0].resultValue || saved.db.tests[0].result || '', /UW 7\.5 m/);
+  for (const bad of ['abc', '-3', '2000']) {
+    assert.throws(() => submit(db(), [{ swimmerId: 'sw', testItemKey: '2x50', expectedUpdatedAt: '',
+      repResults: [{ overallTime: '31.50', underwaterDistance: bad }] }]), (error) => error.status === 400, bad);
+  }
+});
