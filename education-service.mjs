@@ -164,6 +164,17 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
   }
 
 
+  function mediaStatus(req,res){
+    if(!isOwner(req))return res.status(403).json({error:'Owner access required.'});
+    const parts=[1,2,3].map(part=>{
+      if(!mediaDir)return {part,ready:false};
+      try{
+        const stat=fs.statSync(path.join(mediaDir,'cpd01-module02-part'+part+'.mp4'));
+        return {part,ready:stat.isFile()&&stat.size>1000,bytes:stat.size};
+      }catch{return {part,ready:false}}
+    });
+    return res.json({configured:Boolean(mediaDir),parts});
+  }
   async function uploadMedia(req,res){
     if(!isOwner(req))return res.status(403).json({error:'Owner access required.'});
     const part=String(req.params.part||'');
@@ -248,5 +259,5 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       completed:rows.filter(r=>r.status==='completed').length,
       grossGbpPence:rows.filter(r=>['paid','completed'].includes(r.status)).reduce((sum,r)=>sum+r.amount,0)});
   }
-  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,media,uploadMedia,certificate,admin};
+  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,media,uploadMedia,mediaStatus,certificate,admin};
 }
