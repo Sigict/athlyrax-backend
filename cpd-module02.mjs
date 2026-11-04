@@ -92,7 +92,10 @@ export function registerCpdModule02(app,{stripeClient,storageRoot,requireStrictA
         completion=fs.existsSync(record);
       }
     }catch{}
-    res.json({course:COURSE,salesEnabled:ready(),videoLessons:3,paidAccess:access,certificateAvailable:completion});
+    const user=access?await ownedSession(req).catch(()=>null):null;
+    const progress=user?readProgress(user):null;
+    res.json({course:COURSE,salesEnabled:ready(),videoLessons:3,paidAccess:access,certificateAvailable:completion,
+      progress:progress?{lessons:progress.lessons,checks:progress.checks}:null});
   });
   app.post(base+'/checkout',async(req,res)=>{
     if(!ready()){fail(res,503,'Course purchase is not yet enabled.');return;}
@@ -158,11 +161,35 @@ export function registerCpdModule02(app,{stripeClient,storageRoot,requireStrictA
     res.set('Cache-Control','no-store').json({section,questions:questionBank.filter(x=>x.section===section)
       .map(x=>({id:x.id,question:x.question,options:x.options}))});
   });
+  function progressFile(user){return path.join(root,'progress',crypto.createHash('sha256').update(user.id).digest('hex')+'.json');}
+  function readProgress(user){try{
+    const record=JSON.parse(fs.readFileSync(progressFile(user),'utf8'));
+    return record.sessionId===user.id&&record.course===COURSE?record:{course:COURSE,sessionId:user.id,lessons:[],checks:[]};
+  }catch{return {course:COURSE,sessionId:user.id,lessons:[],checks:[]};}}
+  function writeProgress(user,record){
+    const file=progressFile(user);fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});
+    const temp=file+'.'+crypto.randomBytes(8).toString('hex')+'.tmp';
+    fs.writeFileSync(temp,JSON.stringify(record),{mode:0o600,flag:'wx'});fs.renameSync(temp,file);
+  }
+  app.post(base+'/lesson-complete',async(req,res)=>{
+    let user=null;try{user=await ownedSession(req);}catch{}
+    if(!user){fail(res,401,'Course purchase required.');return;}
+    const n=Number(req.body?.lesson);
+    if(!Number.isInteger(n)||n<1||n>3){fail(res,400,'Invalid lesson.');return;}
+    const record=readProgress(user);
+    record.lessons=[...new Set([...(record.lessons||[]),n])].sort();
+    writeProgress(user,record);
+    res.set('Cache-Control','no-store').json({lessons:record.lessons,checks:record.checks});
+  });
   app.post(base+'/assessment',async(req,res)=>{
     let user=null;try{user=await ownedSession(req);}catch{}
     if(!user){fail(res,401,'Purchase required for graded assessments.');return;}
     const section=String(req.body?.section||'');
     if(!['check-1','check-2','final'].includes(section)){fail(res,400,'Invalid assessment section.');return;}
+    const progress=readProgress(user);
+    if(section==='final'&&(![1,2,3].every(n=>progress.lessons?.includes(n))||!['check-1','check-2'].every(x=>progress.checks?.includes(x)))){
+      fail(res,403,'Complete all three video lessons and two knowledge checks first.');return;
+    }
     const questions=questionBank.filter(x=>x.section===section),answers=req.body?.answers;
     if(!Array.isArray(answers)||answers.length!==questions.length||answers.some(x=>!Number.isInteger(x)||x<0||x>3)){
       fail(res,400,'Answer all questions before submitting.');return;
@@ -173,6 +200,10 @@ export function registerCpdModule02(app,{stripeClient,storageRoot,requireStrictA
       questionId:q.id,correct:q.correct_option_index===answers[i],
       correctAnswerIndex:q.correct_option_index,explanation:q.explanation
     }));
+    if(section==='check-1'||section==='check-2'){
+      progress.checks=[...new Set([...(progress.checks||[]),section])];
+      writeProgress(user,progress);
+    }
     if(pass){
       const folder=path.join(root,'completions');
       fs.mkdirSync(folder,{recursive:true,mode:0o700});
