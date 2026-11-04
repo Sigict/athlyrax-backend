@@ -9,6 +9,8 @@ import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
+import { createEducationService } from './education-service.mjs';
+import { module2FinalQuestions, module2KnowledgeChecks } from './education-question-bank.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -295,6 +297,8 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 		switch (String(event?.type || '')) {
 			case 'checkout.session.completed': {
 				const session = event?.data?.object;
+				// Course-only checkout events must never update software subscription billing.
+				if (session?.metadata?.product === 'athlyrax-education') break;
 				const username = String(session?.client_reference_id || session?.metadata?.username || '').trim();
 				const customerId = String(session?.customer || '').trim();
 				if (username) {
@@ -343,6 +347,18 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 });
 
 // This anonymous collection route must never inherit the larger application JSON body allowance.
+// Dedicated education payment webhooks must receive raw bytes for Stripe signature checking.
+const educationService = createEducationService({
+  storePath:path.join(STORAGE_ROOT,'education-enrolments.json'),
+  stripe:stripeClient,webhookSecret:String(process.env.EDUCATION_STRIPE_WEBHOOK_SECRET||''),
+  appBaseUrl:String(process.env.EDUCATION_APP_BASE_URL||'https://athlyrax.com'),
+  ownerUsername:AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
+  enabled:process.env.EDUCATION_CHECKOUT_ENABLED==='true',
+  questionBank:[...module2KnowledgeChecks,...module2FinalQuestions],
+  resolveLearner:username=>findAuthUser(username),
+  mediaDir:String(process.env.EDUCATION_MEDIA_DIR||'').trim()
+});
+app.post('/education/webhook', express.raw({type:'application/json',limit:'64kb'}),educationService.webhook);
 app.use('/website-analytics/collect', express.json({ limit: '1kb' }));
 app.use(express.json({ limit: '25mb' }));
 app.use(helmet());
@@ -3655,6 +3671,20 @@ app.use((req, res, next) => {
 
 app.use(attachAuthContext);
 app.use(requireCsrf);
+// Education course billing is independent from software subscription write permissions.
+app.get('/education/catalog', (_req,res)=>res.json({id:'cpd01-module02',title:'Our Body, Our Engine',pricePence:499,currency:'gbp',currencyDisplay:'£4.99',checkoutAvailable:process.env.EDUCATION_CHECKOUT_ENABLED==='true' && Boolean(stripeClient) && Boolean(process.env.EDUCATION_STRIPE_WEBHOOK_SECRET)}));
+app.get('/education/my-enrolment',requireStrictAuth,educationService.me);
+app.post('/education/checkout',requireStrictAuth,educationService.checkout);
+app.post('/education/progress',requireStrictAuth,educationService.progress);
+app.post('/education/knowledge-check',requireStrictAuth,educationService.knowledgeCheck);
+app.post('/education/final-assessment',requireStrictAuth,educationService.assess);
+app.get('/education/admin/media-status',requireStrictAuth,requireSoftwareOwnerRole,educationService.mediaStatus);
+app.post('/education/admin/upload/:part',requireStrictAuth,requireSoftwareOwnerRole,educationService.uploadMedia);
+app.get('/education/media/:part',requireStrictAuth,educationService.media);
+app.get('/education/certificate',requireStrictAuth,educationService.certificate);
+app.get('/education/admin/enrolments',requireStrictAuth,educationService.admin);
+app.get('/education/questions/:section',requireStrictAuth,educationService.questions);
+
 
 app.get('/auth/config', (req, res) => {
 	res.status(200).json({
@@ -3669,6 +3699,31 @@ app.get('/auth/config', (req, res) => {
 	});
 });
 
+// Public education accounts are viewer-only and cannot grant coaching software privileges.
+app.post('/education/register', requireLoginRateLimit, (req,res)=>{
+  const fullName=String(req.body?.fullName||'').trim();
+  const email=String(req.body?.email||'').trim().toLowerCase();
+  const password=String(req.body?.password||'');
+  if(fullName.length<2||fullName.length>120||!AUTH_EMAIL_PATTERN.test(email)||email.length>254||password.length<12||password.length>256)
+    return res.status(400).json({error:'Enter your name, a valid email and a password of at least 12 characters.'});
+  if(req.body?.acceptTerms!==true||req.body?.acceptPrivacy!==true)
+    return res.status(400).json({error:'Read and accept the course terms and privacy policy.'});
+  if(findAuthUserByIdentifier(email))return res.status(409).json({error:'An account with this email already exists. Sign in instead.'});
+  const username='edu-'+crypto.randomBytes(12).toString('hex');
+  const role='viewer';
+  const createdAt=new Date().toISOString();
+  authUsers.push({username,role,passwordHash:hashPassword(password),tokenValidAfter:0,createdVia:'education-signup',
+    createdAt,fullName,email,isApproved:true,tenantId:'',onboardingCompletedAt:'',billing:getDefaultBillingState(),
+    courseTermsAcceptedAt:createdAt,coursePrivacyAcceptedAt:createdAt});
+  try {
+    persistAuthUsers();
+    const session=issueAuthToken({username,role});
+    setAuthCookies(res,{token:session.token,csrfToken:session.csrf});
+    return res.status(201).json({ok:true,user:{username,fullName,email,role},csrfHeaderName:AUTH_CSRF_HEADER_NAME});
+  }catch{
+    authUsers.pop();return res.status(500).json({error:'Could not save learner account.'});
+  }
+});
 app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 	if (!AUTH_ALLOW_COACH_SIGNUP && !AUTH_ALLOW_COACH_INVITES) {
 		appendAuthAuditEvent({
