@@ -18,7 +18,7 @@ function atomicWrite(filename,payload){
   finally{try{fs.unlinkSync(temp)}catch{}}
 }
 function present(row){return {courseId:row.courseId,status:row.status,paidAt:row.paidAt||null,completedAt:row.completedAt||null,certificateId:row.certificateId||null,sections:row.sections||[],finalScore:row.finalScore??null};}
-export function createEducationService({storePath,stripe,webhookSecret,appBaseUrl,ownerUsername,enabled=false,questionBank=[],resolveLearner=()=>null}){
+export function createEducationService({storePath,stripe,webhookSecret,appBaseUrl,ownerUsername,enabled=false,questionBank=[],resolveLearner=()=>null,mediaDir=''}){
   const database=()=>({enrolments:{},events:{},sessions:{},revocations:{},...jsonSafeRead(storePath)});
   const save=atomicWrite;
   let writeChain=Promise.resolve();
@@ -162,6 +162,36 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       return result.error?res.status(result.status).json({error:result.error}):res.json(result);
     }catch{return res.status(500).json({error:'Could not save final assessment.'})}
   }
+
+  function media(req,res){
+    if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
+    const row=database().enrolments[key(req.auth.username)];
+    if(!row||!['paid','completed'].includes(row.status))return res.status(403).json({error:'Paid enrolment required.'});
+    const part=String(req.params.part||'');
+    if(!['1','2','3'].includes(part))return res.status(404).json({error:'Unknown video part.'});
+    if(!mediaDir)return res.status(503).json({error:'Course video hosting is not ready.'});
+    // Fixed server-side mapping: never pass untrusted user input to the filesystem.
+    const filename=path.join(mediaDir,'cpd01-module02-part'+part+'.mp4');
+    let stat;
+    try{stat=fs.statSync(filename);if(!stat.isFile()||stat.size<1000)throw Error('Unavailable')}
+    catch{return res.status(503).json({error:'Course video not yet published.'})}
+    const total=stat.size;
+    const range=String(req.headers.range||'');
+    const headers={'Content-Type':'video/mp4','Accept-Ranges':'bytes','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'};
+    if(range){
+      const match=/^bytes=(\d+)-(\d*)$/.exec(range);
+      if(!match){res.set('Content-Range','bytes */'+total);return res.status(416).end()}
+      const start=Number(match[1]),end=match[2]?Number(match[2]):Math.min(total-1,start+1024*1024*4);
+      if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start>=total||end<start||end>=total){
+        res.set('Content-Range','bytes */'+total);return res.status(416).end()
+      }
+      res.status(206).set({...headers,'Content-Range':`bytes ${start}-${end}/${total}`,'Content-Length':String(end-start+1)});
+      fs.createReadStream(filename,{start,end}).on('error',()=>res.destroy()).pipe(res);
+      return;
+    }
+    res.status(200).set({...headers,'Content-Length':String(total)});
+    fs.createReadStream(filename).on('error',()=>res.destroy()).pipe(res);
+  }
   function certificate(req,res){
     if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
     const row=database().enrolments[key(req.auth.username)];
@@ -181,5 +211,5 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       completed:rows.filter(r=>r.status==='completed').length,
       grossGbpPence:rows.filter(r=>['paid','completed'].includes(r.status)).reduce((sum,r)=>sum+r.amount,0)});
   }
-  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,certificate,admin};
+  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,media,certificate,admin};
 }
