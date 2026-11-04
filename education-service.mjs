@@ -163,6 +163,43 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
     }catch{return res.status(500).json({error:'Could not save final assessment.'})}
   }
 
+
+  async function uploadMedia(req,res){
+    if(!isOwner(req))return res.status(403).json({error:'Owner access required.'});
+    const part=String(req.params.part||'');
+    if(!['1','2','3'].includes(part))return res.status(404).json({error:'Unknown video part.'});
+    if(!mediaDir)return res.status(503).json({error:'Private education media storage is not configured.'});
+    if(!/^video\/mp4(?:;|$)/i.test(String(req.headers['content-type']||'')))
+      return res.status(415).json({error:'Upload an MP4 file.'});
+    const maxBytes=165*1024*1024, declared=Number(req.headers['content-length']||0);
+    if(declared>maxBytes)return res.status(413).json({error:'Video exceeds 165 MB limit.'});
+    fs.mkdirSync(mediaDir,{recursive:true});
+    const dest=path.join(mediaDir,'cpd01-module02-part'+part+'.mp4');
+    const tmp=path.join(mediaDir,'.athlyrax-upload-'+crypto.randomUUID()+'.tmp');
+    let bytes=0,finished=false;
+    try{
+      await new Promise((resolve,reject)=>{
+        const output=fs.createWriteStream(tmp,{flags:'wx',mode:0o600});
+        req.on('data',chunk=>{
+          bytes+=chunk.length;
+          if(bytes>maxBytes){const e=new Error('Video exceeds 165 MB limit.');e.statusCode=413;req.unpipe(output);output.destroy(e)}
+        });
+        req.on('aborted',()=>output.destroy(new Error('Upload aborted.')));
+        req.on('error',reject);output.on('error',reject);output.on('finish',()=>{finished=true;resolve()});
+        req.pipe(output);
+      });
+      if(!finished||bytes<1024)throw new Error('Video is empty or incomplete.');
+      const fd=fs.openSync(tmp,'r'),signature=Buffer.alloc(12);
+      try{fs.readSync(fd,signature,0,12,0)}finally{fs.closeSync(fd)}
+      if(signature.toString('latin1',4,8)!=='ftyp')throw new Error('File is not an MP4 container.');
+      // Atomic swap; an existing video remains intact if an upload fails validation.
+      fs.renameSync(tmp,dest);
+      return res.json({ok:true,part,bytes,ready:true});
+    }catch(error){
+      const status=Number(error?.statusCode)||400;
+      return res.status(status).json({error:status===413?'Video exceeds 165 MB limit.':'Unable to save or validate video.'});
+    }finally{try{fs.unlinkSync(tmp)}catch{}}
+  }
   function media(req,res){
     if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
     const row=database().enrolments[key(req.auth.username)];
@@ -211,5 +248,5 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       completed:rows.filter(r=>r.status==='completed').length,
       grossGbpPence:rows.filter(r=>['paid','completed'].includes(r.status)).reduce((sum,r)=>sum+r.amount,0)});
   }
-  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,media,certificate,admin};
+  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,media,uploadMedia,certificate,admin};
 }
