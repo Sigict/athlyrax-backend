@@ -297,6 +297,8 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 		switch (String(event?.type || '')) {
 			case 'checkout.session.completed': {
 				const session = event?.data?.object;
+				// Course-only checkout events must never update software subscription billing.
+				if (session?.metadata?.product === 'athlyrax-education') break;
 				const username = String(session?.client_reference_id || session?.metadata?.username || '').trim();
 				const customerId = String(session?.customer || '').trim();
 				if (username) {
