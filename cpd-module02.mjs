@@ -463,6 +463,49 @@ export function registerCpdModule02(app, deps) {
     if (stripe && priceId) { try { const p = await stripe.prices.retrieve(priceId); priceCheck = { active: p.active, oneTime: p.type === 'one_time', gbp: String(p.currency).toLowerCase() === 'gbp', amount: p.unit_amount, product: typeof p.product === 'string' ? p.product : p.product?.id, livemode: p.livemode }; } catch { priceCheck = { error: 'price not found with the configured Stripe key' }; } }
     noStore(res).json({ lessons: LESSONS.map((l) => ({ lesson: l.n, title: l.title, bytes: lessonSize(l.n) })), freeBytes: free, setup: setup(), salesOpen: salesOpen(), stripeMode, priceCheck });
   });
+  // Owner reporting reflects locally verified course entitlements, not a Stripe
+  // financial ledger. Other products/subscriptions must use their own data source.
+  // Never return these learner details without both authentication guards.
+  app.get(base + '/admin/sales', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
+    try {
+      const folder = path.join(root, 'entitlements');
+      const names = fs.existsSync(folder) ? fs.readdirSync(folder).filter((x) => /^[a-f0-9]{64}\\.json$/.test(x)).slice(0, 20000) : [];
+      const records = [];
+      for (const name of names) {
+        try {
+          const row = JSON.parse(fs.readFileSync(path.join(folder, name), 'utf8'));
+          if (row?.course === CPD_MODULE02_COURSE && ['active', 'revoked'].includes(row.status)
+            && ['test', 'live'].includes(row.mode) && typeof row.sessionId === 'string') records.push(row);
+        } catch {}
+      }
+      const rows = records.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      const count = (mode, status) => rows.filter((x) => x.mode === mode && x.status === status).length;
+      const completed = (mode) => rows.filter((x) => x.mode === mode && x.status === 'active' &&
+        Boolean(store.read('completions', x.sessionId))).length;
+      const summary = Object.fromEntries(['test', 'live'].map((mode) => [mode, {
+        recordedPurchases: rows.filter((x) => x.mode === mode).length,
+        activeAccess: count(mode, 'active'),
+        revokedAccess: count(mode, 'revoked'),
+        verifiedCompletions: completed(mode),
+        activeAccessFaceValuePence: count(mode, 'active') * PRICE_PENCE,
+      }]));
+      noStore(res).json({
+        source: 'locally-verified-cpd-course-entitlements',
+        asOf: new Date().toISOString(),
+        currency: 'gbp',
+        unitAmountPence: PRICE_PENCE,
+        warning: 'Not a complete Stripe sales ledger, profit or net revenue report. Refunds, taxes, fees and unclaimed purchases need separate Stripe reconciliation.',
+        summary,
+        customers: rows.slice(0, 100).map((row) => ({
+          name: String(row.name || '').slice(0, 110),
+          email: String(row.email || '').slice(0, 254),
+          purchasedAt: row.createdAt || null,
+          status: row.status, mode: row.mode,
+          completed: Boolean(store.read('completions', row.sessionId)),
+        })),
+      });
+    } catch { fail(res, 500, 'Course sales reporting is temporarily unavailable.'); }
+  });
   app.put(base + '/admin/video/:lesson', requireStrictAuth, requireSoftwareOwnerRole, express.raw({ type: 'application/octet-stream', limit: UPLOAD_CHUNK_MAX }), (req, res) => {
     const n = Number(req.params.lesson), offset = Number(req.query.offset), total = Number(req.query.total);
     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
