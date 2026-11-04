@@ -9,6 +9,8 @@ import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
+import { createEducationService } from './education-service.mjs';
+import { module2FinalQuestions } from './education-question-bank.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -343,6 +345,16 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 });
 
 // This anonymous collection route must never inherit the larger application JSON body allowance.
+// Dedicated education payment webhooks must receive raw bytes for Stripe signature checking.
+const educationService = createEducationService({
+  storePath:path.join(STORAGE_ROOT,'education-enrolments.json'),
+  stripe:stripeClient,webhookSecret:String(process.env.EDUCATION_STRIPE_WEBHOOK_SECRET||''),
+  appBaseUrl:String(process.env.EDUCATION_APP_BASE_URL||'https://athlyrax.com'),
+  ownerUsername:AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
+  enabled:process.env.EDUCATION_CHECKOUT_ENABLED==='true',
+  questionBank:module2FinalQuestions
+});
+app.post('/education/webhook', express.raw({type:'application/json',limit:'64kb'}),educationService.webhook);
 app.use('/website-analytics/collect', express.json({ limit: '1kb' }));
 app.use(express.json({ limit: '25mb' }));
 app.use(helmet());
@@ -3655,6 +3667,20 @@ app.use((req, res, next) => {
 
 app.use(attachAuthContext);
 app.use(requireCsrf);
+// Education course billing is independent from software subscription write permissions.
+app.get('/education/catalog', (_req,res)=>res.json({id:'cpd01-module02',title:'Our Body, Our Engine',pricePence:499,currency:'gbp',currencyDisplay:'£4.99',checkoutAvailable:process.env.EDUCATION_CHECKOUT_ENABLED==='true' && Boolean(stripeClient) && Boolean(process.env.EDUCATION_STRIPE_WEBHOOK_SECRET)}));
+app.get('/education/my-enrolment',requireStrictAuth,educationService.me);
+app.post('/education/checkout',requireStrictAuth,educationService.checkout);
+app.post('/education/progress',requireStrictAuth,educationService.progress);
+app.post('/education/final-assessment',requireStrictAuth,educationService.assess);
+app.get('/education/admin/enrolments',requireStrictAuth,educationService.admin);
+app.get('/education/final-questions', requireStrictAuth, (req,res)=>{
+ const rowUser=String(req.auth?.username||'').trim();
+ // Question display does not grant access; only students with active entitlement will be scored.
+ if(!rowUser)return res.status(401).json({error:'Sign in required.'});
+ return res.json({questions:module2FinalQuestions.map(({id,question,options})=>({id,question,options}))});
+});
+
 
 app.get('/auth/config', (req, res) => {
 	res.status(200).json({
