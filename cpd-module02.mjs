@@ -291,7 +291,26 @@ export function registerCpdModule02(app, deps) {
         allow_promotion_codes: false,
       });
       noStore(res).json({ url: cs.url });
-    } catch { fail(res, 502, 'Could not start the secure checkout. Please try again.'); }
+    } catch (err) {
+      // Stripe errors must not leak tokens, request details or raw provider messages.
+      // A missing price is usually a mismatch between the secret key's Stripe
+      // account and CPD_MODULE02_PRICE_ID, not a customer's payment failure.
+      if (err?.code === 'resource_missing' && err?.param === 'price') {
+        return fail(res, 503, 'Course Stripe price is not in the configured Stripe account. Check the CPD Stripe key and price ID.');
+      }
+      if (err?.code === 'resource_missing' && /price/i.test(String(err?.message || ''))) {
+        return fail(res, 503, 'Course Stripe price is not in the configured Stripe account. Check the CPD Stripe key and price ID.');
+      }
+      if (err?.type === 'StripeAuthenticationError' || err?.statusCode === 401) {
+        return fail(res, 503, 'Course Stripe test key is invalid or no longer active. Check CPD_STRIPE_SECRET_KEY.');
+      }
+      if (err?.type === 'StripePermissionError' || err?.statusCode === 403) {
+        return fail(res, 503, 'Course Stripe key cannot create checkout sessions. Check its account and permissions.');
+      }
+      // Retain generic messaging for all other errors. Do not weaken the
+      // payment, owner-only test or CSRF controls in order to bypass failure.
+      fail(res, 502, 'Could not start the secure checkout. Please try again.');
+    }
   });
 
   app.post(base + '/claim', async (req, res) => {
