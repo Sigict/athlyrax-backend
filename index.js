@@ -352,7 +352,8 @@ const educationService = createEducationService({
   appBaseUrl:String(process.env.EDUCATION_APP_BASE_URL||'https://athlyrax.com'),
   ownerUsername:AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
   enabled:process.env.EDUCATION_CHECKOUT_ENABLED==='true',
-  questionBank:[...module2KnowledgeChecks,...module2FinalQuestions]
+  questionBank:[...module2KnowledgeChecks,...module2FinalQuestions],
+  resolveLearner:username=>findAuthUser(username)
 });
 app.post('/education/webhook', express.raw({type:'application/json',limit:'64kb'}),educationService.webhook);
 app.use('/website-analytics/collect', express.json({ limit: '1kb' }));
@@ -3674,6 +3675,7 @@ app.post('/education/checkout',requireStrictAuth,educationService.checkout);
 app.post('/education/progress',requireStrictAuth,educationService.progress);
 app.post('/education/knowledge-check',requireStrictAuth,educationService.knowledgeCheck);
 app.post('/education/final-assessment',requireStrictAuth,educationService.assess);
+app.get('/education/certificate',requireStrictAuth,educationService.certificate);
 app.get('/education/admin/enrolments',requireStrictAuth,educationService.admin);
 app.get('/education/questions/:section',requireStrictAuth,educationService.questions);
 
