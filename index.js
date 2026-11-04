@@ -9,6 +9,7 @@ import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
+import { registerCpdModule02 } from './cpd-module02.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -3655,6 +3656,10 @@ app.use((req, res, next) => {
 
 app.use(attachAuthContext);
 app.use(requireCsrf);
+
+// CPD 01 Module 02: separate one-time course payments, private videos and verified certificates.
+// Routes fail closed until video files, Stripe price and dedicated signing key are configured.
+registerCpdModule02(app, {stripeClient,storageRoot:STORAGE_ROOT,requireStrictAuth,requireSoftwareOwnerRole});
 
 app.get('/auth/config', (req, res) => {
 	res.status(200).json({
