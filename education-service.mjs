@@ -18,7 +18,7 @@ function atomicWrite(filename,payload){
   finally{try{fs.unlinkSync(temp)}catch{}}
 }
 function present(row){return {courseId:row.courseId,status:row.status,paidAt:row.paidAt||null,completedAt:row.completedAt||null,certificateId:row.certificateId||null,sections:row.sections||[],finalScore:row.finalScore??null};}
-export function createEducationService({storePath,stripe,webhookSecret,appBaseUrl,ownerUsername,enabled=false,questionBank=[]}){
+export function createEducationService({storePath,stripe,webhookSecret,appBaseUrl,ownerUsername,enabled=false,questionBank=[],resolveLearner=()=>null}){
   const database=()=>({enrolments:{},events:{},sessions:{},revocations:{},...jsonSafeRead(storePath)});
   const save=atomicWrite;
   let writeChain=Promise.resolve();
@@ -162,6 +162,18 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       return result.error?res.status(result.status).json({error:result.error}):res.json(result);
     }catch{return res.status(500).json({error:'Could not save final assessment.'})}
   }
+  function certificate(req,res){
+    if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
+    const row=database().enrolments[key(req.auth.username)];
+    if(!row||row.status!=='completed'||!row.completedAt||!row.certificateId)
+      return res.status(403).json({error:'A passed final assessment is required.'});
+    const user=resolveLearner(req.auth.username);
+    const learnerName=String(user?.fullName||'').trim();
+    if(!learnerName)return res.status(409).json({error:'Learner name missing. Contact support.'});
+    return res.json({certificateId:row.certificateId,learnerName,courseId:EDUCATION_COURSE.id,
+      courseTitle:EDUCATION_COURSE.title,completedAt:row.completedAt,
+      finalScore:row.finalScore,passThreshold:8,issuer:'AthlyraX Education'});
+  }
   function admin(req,res){
     if(!isOwner(req))return res.status(403).json({error:'Owner access required.'});
     const rows=Object.values(database().enrolments).map(r=>({...present(r),username:r.username,amount:r.amount||0,currency:r.currency||'',paymentIntentId:r.paymentIntentId||''}));
@@ -169,5 +181,5 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       completed:rows.filter(r=>r.status==='completed').length,
       grossGbpPence:rows.filter(r=>['paid','completed'].includes(r.status)).reduce((sum,r)=>sum+r.amount,0)});
   }
-  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,admin};
+  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,certificate,admin};
 }
