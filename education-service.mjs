@@ -95,6 +95,14 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
     const row=database().enrolments[key(req.auth.username)];
     return res.json({course:EDUCATION_COURSE,enrolment:row?present(row):null,checkoutEnabled:Boolean(enabled&&stripe&&webhookSecret&&appBaseUrl)});
   }
+  function questions(req,res){
+    if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
+    const row=database().enrolments[key(req.auth.username)];
+    if(!row||!['paid','completed'].includes(row.status))return res.status(403).json({error:'Paid enrolment required.'});
+    const section=String(req.params.section||'');
+    if(!['check-1','check-2','final'].includes(section))return res.status(404).json({error:'Unknown question group.'});
+    return res.json({questions:questionBank.filter(q=>q.section===section).map(({id,question,options})=>({id,question,options}))});
+  }
   async function progress(req,res){
     if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
     const section=String(req.body?.section||'');
@@ -161,5 +169,5 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       completed:rows.filter(r=>r.status==='completed').length,
       grossGbpPence:rows.filter(r=>['paid','completed'].includes(r.status)).reduce((sum,r)=>sum+r.amount,0)});
   }
-  return {checkout,webhook,me,progress,knowledgeCheck,assess,admin};
+  return {checkout,webhook,me,questions,progress,knowledgeCheck,assess,admin};
 }
