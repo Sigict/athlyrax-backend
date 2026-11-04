@@ -19,7 +19,7 @@ function atomicWrite(filename,payload){
 }
 function present(row){return {courseId:row.courseId,status:row.status,paidAt:row.paidAt||null,completedAt:row.completedAt||null,certificateId:row.certificateId||null,sections:row.sections||[],finalScore:row.finalScore??null};}
 export function createEducationService({storePath,stripe,webhookSecret,appBaseUrl,ownerUsername,enabled=false,questionBank=[]}){
-  const database=()=>({enrolments:{},events:{},sessions:{} ,...jsonSafeRead(storePath)});
+  const database=()=>({enrolments:{},events:{},sessions:{},revocations:{},...jsonSafeRead(storePath)});
   const save=atomicWrite;
   let writeChain=Promise.resolve();
   function transact(change){
@@ -70,12 +70,14 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
             const rowKey=key(record.username);
             if((type==='checkout.session.completed'||type==='checkout.session.async_payment_succeeded')&&obj.payment_status==='paid'){
               const previous=state.enrolments[rowKey]||{};
-              state.enrolments[rowKey]={...previous,username:record.username,courseId:record.courseId,status:'paid',checkoutSessionId:obj.id,
+              const revoked=Boolean(state.revocations[String(obj.payment_intent||'')]);
+              state.enrolments[rowKey]={...previous,username:record.username,courseId:record.courseId,status:revoked?'revoked':'paid',checkoutSessionId:obj.id,
                 paymentIntentId:String(obj.payment_intent||''),paidAt:previous.paidAt||iso(),amount:499,currency:'gbp'};
             }
           }
         }else{
           const paymentIntentId=String(obj.payment_intent||'');
+          if(paymentIntentId&&(type==='charge.dispute.created'||(type==='charge.refunded'&&obj.refunded===true)))state.revocations[paymentIntentId]={type,at:iso()};
           for(const row of Object.values(state.enrolments)){
             if(row.paymentIntentId===paymentIntentId&&paymentIntentId){
               if(type==='charge.dispute.created'||(type==='charge.refunded'&&obj.refunded===true))
@@ -96,7 +98,7 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
   async function progress(req,res){
     if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
     const section=String(req.body?.section||'');
-    if(!['video-1','check-1','video-2','check-2','video-3'].includes(section))return res.status(400).json({error:'Invalid course section.'});
+    if(!['video-1','video-2','video-3'].includes(section))return res.status(400).json({error:'Invalid course section.'});
     const rowKey=key(req.auth.username);
     try{
       const result=await transact(state=>{
@@ -105,6 +107,30 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       });
       return result?res.json({enrolment:result}):res.status(403).json({error:'Paid enrolment required.'});
     }catch{return res.status(500).json({error:'Unable to save course progress.'})}
+  }
+
+  async function knowledgeCheck(req,res){
+    if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
+    const section=String(req.body?.section||'');
+    if(!['check-1','check-2'].includes(section))return res.status(400).json({error:'Invalid knowledge check.'});
+    const answers=req.body?.answers;
+    const questions=questionBank.filter(q=>q.section===section);
+    if(questions.length!==4||!Array.isArray(answers)||answers.length!==4||
+      !answers.every(n=>Number.isInteger(n)&&n>=0&&n<=3))
+      return res.status(400).json({error:'Submit four answers.'});
+    const keyName=key(req.auth.username);
+    try{
+      const result=await transact(state=>{
+        const row=state.enrolments[keyName];
+        if(!row||!['paid','completed'].includes(row.status))return {status:403,error:'Paid enrolment required.'};
+        const prerequisite=section==='check-1'?'video-1':'video-2';
+        if(!(row.sections||[]).includes(prerequisite))return {status:409,error:'Complete the preceding lesson first.'};
+        const score=questions.reduce((sum,q,i)=>sum+(q.correct_option_index===answers[i]?1:0),0);
+        row.sections=[...new Set([...(row.sections||[]),section])];
+        return {score,passed:score===4,correct:questions.map(q=>q.correct_option_index),enrolment:present(row)};
+      });
+      return result.error?res.status(result.status).json({error:result.error}):res.json(result);
+    }catch{return res.status(500).json({error:'Unable to save knowledge check.'})}
   }
   async function assess(req,res){
     if(!authenticated(req))return res.status(401).json({error:'Sign in required.'});
@@ -135,5 +161,5 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
       completed:rows.filter(r=>r.status==='completed').length,
       grossGbpPence:rows.filter(r=>['paid','completed'].includes(r.status)).reduce((sum,r)=>sum+r.amount,0)});
   }
-  return {checkout,webhook,me,progress,assess,admin};
+  return {checkout,webhook,me,progress,knowledgeCheck,assess,admin};
 }
