@@ -9,6 +9,7 @@ import nodemailer from 'nodemailer';
 import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
+import { registerCpdModule02 } from './cpd-module02.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -295,6 +296,11 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 		switch (String(event?.type || '')) {
 			case 'checkout.session.completed': {
 				const session = event?.data?.object;
+				if (session?.metadata?.course === 'cpd01-module02') {
+					// One-time education course: handled by the course module, never as a software subscription.
+					if (cpdModule02) await cpdModule02.onCheckoutCompleted(session);
+					break;
+				}
 				const username = String(session?.client_reference_id || session?.metadata?.username || '').trim();
 				const customerId = String(session?.customer || '').trim();
 				if (username) {
@@ -325,6 +331,12 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 					});
 				}
 				await sendBillingInvoiceEmail(invoice, 'failed');
+				break;
+			}
+			case 'charge.refunded':
+			case 'charge.dispute.created': {
+				// Course access ends when Stripe confirms a refund or dispute for that purchase.
+				if (cpdModule02) await cpdModule02.onRefundOrDispute(event?.data?.object);
 				break;
 			}
 			case 'invoice.paid': {
@@ -3655,6 +3667,22 @@ app.use((req, res, next) => {
 
 app.use(attachAuthContext);
 app.use(requireCsrf);
+
+// CPD 01 Module 02: separate one-time course payments, private videos and verified certificates.
+// Routes fail closed until video files, Stripe price and dedicated signing key are configured.
+// Set here; the signed Stripe webhook above hands course events to it at request time.
+const cpdModule02 = registerCpdModule02(app, {
+	stripeClient,
+	storageRoot: STORAGE_ROOT,
+	requireStrictAuth,
+	requireSoftwareOwnerRole,
+	// Course access links use the existing SMTP account, only when one is configured.
+	sendMail: AUTH_SMTP_HOST && AUTH_SMTP_FROM
+		? (message) => getAuthResetMailTransport().sendMail({ from: AUTH_SMTP_FROM, ...message })
+		: null,
+	isSoftwareOwner: (req) => String(req.auth?.role || '').trim() === 'software-owner'
+		&& String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
+});
 
 app.get('/auth/config', (req, res) => {
 	res.status(200).json({
