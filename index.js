@@ -10,7 +10,7 @@ import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { createEducationService } from './education-service.mjs';
-import { module2FinalQuestions } from './education-question-bank.mjs';
+import { module2FinalQuestions, module2KnowledgeChecks } from './education-question-bank.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -352,7 +352,7 @@ const educationService = createEducationService({
   appBaseUrl:String(process.env.EDUCATION_APP_BASE_URL||'https://athlyrax.com'),
   ownerUsername:AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
   enabled:process.env.EDUCATION_CHECKOUT_ENABLED==='true',
-  questionBank:module2FinalQuestions
+  questionBank:[...module2KnowledgeChecks,...module2FinalQuestions]
 });
 app.post('/education/webhook', express.raw({type:'application/json',limit:'64kb'}),educationService.webhook);
 app.use('/website-analytics/collect', express.json({ limit: '1kb' }));
@@ -3672,14 +3672,10 @@ app.get('/education/catalog', (_req,res)=>res.json({id:'cpd01-module02',title:'O
 app.get('/education/my-enrolment',requireStrictAuth,educationService.me);
 app.post('/education/checkout',requireStrictAuth,educationService.checkout);
 app.post('/education/progress',requireStrictAuth,educationService.progress);
+app.post('/education/knowledge-check',requireStrictAuth,educationService.knowledgeCheck);
 app.post('/education/final-assessment',requireStrictAuth,educationService.assess);
 app.get('/education/admin/enrolments',requireStrictAuth,educationService.admin);
-app.get('/education/final-questions', requireStrictAuth, (req,res)=>{
- const rowUser=String(req.auth?.username||'').trim();
- // Question display does not grant access; only students with active entitlement will be scored.
- if(!rowUser)return res.status(401).json({error:'Sign in required.'});
- return res.json({questions:module2FinalQuestions.map(({id,question,options})=>({id,question,options}))});
-});
+app.get('/education/questions/:section',requireStrictAuth,educationService.questions);
 
 
 app.get('/auth/config', (req, res) => {
