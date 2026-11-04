@@ -3695,6 +3695,31 @@ app.get('/auth/config', (req, res) => {
 	});
 });
 
+// Public education accounts are viewer-only and cannot grant coaching software privileges.
+app.post('/education/register', requireLoginRateLimit, (req,res)=>{
+  const fullName=String(req.body?.fullName||'').trim();
+  const email=String(req.body?.email||'').trim().toLowerCase();
+  const password=String(req.body?.password||'');
+  if(fullName.length<2||fullName.length>120||!AUTH_EMAIL_PATTERN.test(email)||email.length>254||password.length<12||password.length>256)
+    return res.status(400).json({error:'Enter your name, a valid email and a password of at least 12 characters.'});
+  if(req.body?.acceptTerms!==true||req.body?.acceptPrivacy!==true)
+    return res.status(400).json({error:'Read and accept the course terms and privacy policy.'});
+  if(findAuthUserByIdentifier(email))return res.status(409).json({error:'An account with this email already exists. Sign in instead.'});
+  const username='edu-'+crypto.randomBytes(12).toString('hex');
+  const role='viewer';
+  const createdAt=new Date().toISOString();
+  authUsers.push({username,role,passwordHash:hashPassword(password),tokenValidAfter:0,createdVia:'education-signup',
+    createdAt,fullName,email,isApproved:true,tenantId:'',onboardingCompletedAt:'',billing:getDefaultBillingState(),
+    courseTermsAcceptedAt:createdAt,coursePrivacyAcceptedAt:createdAt});
+  try {
+    persistAuthUsers();
+    const session=issueAuthToken({username,role});
+    setAuthCookies(res,{token:session.token,csrfToken:session.csrf});
+    return res.status(201).json({ok:true,user:{username,fullName,email,role},csrfHeaderName:AUTH_CSRF_HEADER_NAME});
+  }catch{
+    authUsers.pop();return res.status(500).json({error:'Could not save learner account.'});
+  }
+});
 app.post('/auth/register', requireLoginRateLimit, (req, res) => {
 	if (!AUTH_ALLOW_COACH_SIGNUP && !AUTH_ALLOW_COACH_INVITES) {
 		appendAuthAuditEvent({
