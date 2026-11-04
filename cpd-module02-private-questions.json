@@ -1,0 +1,244 @@
+{
+  "module_id": "athlyrax-cpd01-module02",
+  "assessment_policy": {
+    "knowledge_checks": "formative, not graded; allow retries",
+    "final_assessment": "10 questions, 80% (8/10) passing score, unlimited retakes",
+    "certificate": "Completion certificate requires verified enrolment and completion of learning components"
+  },
+  "questions": [
+    {
+      "id": "KC1-01",
+      "section": "check-1",
+      "question": "What is the direct energy source used by muscles for movement?",
+      "options": [
+        "Lactate",
+        "ATP (adenosine triphosphate)",
+        "Oxygen alone",
+        "Phosphocreatine alone"
+      ],
+      "correct_option_index": 1,
+      "explanation": "ATP is the immediate energy source. Phosphocreatine, glycolysis and oxidative metabolism help regenerate it."
+    },
+    {
+      "id": "KC1-02",
+      "section": "check-1",
+      "question": "Which description best matches the ATP–PCr pathway in swimming?",
+      "options": [
+        "It is particularly important during short explosive starts and breakouts",
+        "It is the only pathway used for the entire 1500 m race",
+        "It begins working only after 30 seconds",
+        "It replaces the need for recovery"
+      ],
+      "correct_option_index": 0,
+      "explanation": "The phosphagen pathway supports rapid ATP regeneration in short, explosive efforts; other pathways also contribute."
+    },
+    {
+      "id": "KC1-03",
+      "section": "check-1",
+      "question": "AthlyraX uses LP and LT to describe which relationship?",
+      "options": [
+        "Two completely separate energy systems",
+        "LP means low pace and LT means long training",
+        "Different training emphases associated with glycolytic work",
+        "Two names for aerobic EN1"
+      ],
+      "correct_option_index": 2,
+      "explanation": "LP and LT are coaching categories for different demands, not separate biochemical energy systems."
+    },
+    {
+      "id": "KC1-04",
+      "section": "check-1",
+      "question": "Which statement about lactate is supported by Part 1?",
+      "options": [
+        "Any lactate means a swimmer has trained incorrectly",
+        "Lactate can be produced and used as fuel; its level alone does not diagnose fatigue",
+        "Lactate is always a harmful waste product",
+        "A lactate value tells us the exact reason for a slower swim"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Part 1 explains that lactate is not simply waste, and an isolated measurement does not establish a cause of fatigue."
+    },
+    {
+      "id": "KC2-01",
+      "section": "check-2",
+      "question": "A swimmer reports 8/10 perceived effort. What does this tell us?",
+      "options": [
+        "Their blood lactate is exactly 8 mmol/L",
+        "Only the anaerobic system was active",
+        "The swimmer felt the effort was very demanding",
+        "Their stroke technique must have failed"
+      ],
+      "correct_option_index": 2,
+      "explanation": "RPE describes perceived demand; it is not a lactate reading or a precise energy-system diagnosis."
+    },
+    {
+      "id": "KC2-02",
+      "section": "check-2",
+      "question": "What should a coach conclude if breathing appears comfortable again after a short rest?",
+      "options": [
+        "The swimmer is fully recovered for every task",
+        "Breathing is one clue, but the next effort and movement quality still matter",
+        "Phosphocreatine must be 100% restored",
+        "The swimmer should immediately sprint maximally"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Breathing recovery is useful but does not guarantee restored speed, technical control or overall readiness."
+    },
+    {
+      "id": "KC2-03",
+      "section": "check-2",
+      "question": "A swimmer completes the same 100 m time on two different days, but rates one effort 5/10 and the other 8/10. What is the best interpretation?",
+      "options": [
+        "Both efforts had identical internal demand",
+        "The second day proves the athlete has lost aerobic fitness",
+        "The swimmer must have changed energy systems",
+        "The same performance can be experienced differently; consider context"
+      ],
+      "correct_option_index": 3,
+      "explanation": "A matching stopwatch result does not imply matching experience. Sleep, training load, pacing and technique may help explain the difference."
+    },
+    {
+      "id": "KC2-04",
+      "section": "check-2",
+      "question": "Which set of observations gives a broader poolside picture than swim time alone?",
+      "options": [
+        "Breathing, perceived effort, repeatability and movement quality",
+        "Only the number of metres completed",
+        "Only the swimmer’s age and body mass",
+        "Only the name of the planned energy zone"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Part 2 identifies these four complementary observations while emphasising that none proves a diagnosis by itself."
+    },
+    {
+      "id": "FA-01",
+      "section": "final",
+      "question": "A swimmer’s four fast 25 m times are 14.8, 15.0, 15.6 and 16.1 seconds. Which claim is justified?",
+      "options": [
+        "The swimmer definitely has poor aerobic fitness",
+        "Lactate alone caused the decline",
+        "Performance became slower across the repetitions",
+        "The phosphagen pathway stopped working"
+      ],
+      "correct_option_index": 2,
+      "explanation": "The decline is observed. Its cause requires additional information about recovery, pacing and movement quality."
+    },
+    {
+      "id": "FA-02",
+      "section": "final",
+      "question": "What extra information would be useful when interpreting that declining 25 m series?",
+      "options": [
+        "Only the swimmer’s personal best from last year",
+        "Actual rest, start and breakout quality, stroke rhythm and effort",
+        "The coach’s preferred energy-zone label",
+        "The total number of swimmers in the pool"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Part 3 highlights these measurements and observations to examine plausible explanations."
+    },
+    {
+      "id": "FA-03",
+      "section": "final",
+      "question": "A swimmer holds approximately 1:30 for six 100 m repetitions while RPE rises from 4 to 8. Which statement is most appropriate?",
+      "options": [
+        "The external times are stable but the experienced demand appears to increase",
+        "The set has become objectively easier",
+        "Each repetition must have exactly the same physiological cost",
+        "The athlete has proven a particular blood-lactate level"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Stable times do not necessarily mean stable internal demand; RPE contributes context."
+    },
+    {
+      "id": "FA-04",
+      "section": "final",
+      "question": "Two swimmers both complete 100 m in 1:30. One rates the effort 5/10 and the other 9/10. What does the example show?",
+      "options": [
+        "The swimmers necessarily have the same capacity",
+        "The second swimmer must be unwilling to train",
+        "Both swimmers experienced identical effort",
+        "A shared time need not represent an equal relative challenge"
+      ],
+      "correct_option_index": 3,
+      "explanation": "The external result is the same, but the swimmers report very different demands."
+    },
+    {
+      "id": "FA-05",
+      "section": "final",
+      "question": "After 60 seconds of rest, breathing settles but the next effort is slower with poorer movement. What is the best conclusion?",
+      "options": [
+        "The next performance suggests readiness was not fully restored for that task",
+        "Breathing recovery guarantees peak speed",
+        "The swimmer was not trying",
+        "The stopwatch must be broken"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Visible breathing recovery does not guarantee the same performance or technical quality on the next task."
+    },
+    {
+      "id": "FA-06",
+      "section": "final",
+      "question": "Which sequence matches the evidence-based approach in Part 3?",
+      "options": [
+        "Assign an energy system, ignore feedback, increase metres",
+        "Record the observation, consider alternative explanations, decide what to check next",
+        "Assume a biochemical cause, then select a training zone",
+        "Wait for a race personal best before noting any response"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Part 3 explicitly separates observation, possible interpretation and the next useful measurement."
+    },
+    {
+      "id": "FA-07",
+      "section": "final",
+      "question": "Which statement about the three energy pathways is accurate?",
+      "options": [
+        "Each pathway switches on only when the previous one switches off",
+        "Glycolysis is the only source of ATP in hard swimming",
+        "The pathways overlap, while their relative contributions vary with demand",
+        "Only aerobic metabolism contributes during swimming"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Part 1 explains that phosphagen, glycolytic and oxidative pathways all contribute, with varying emphasis."
+    },
+    {
+      "id": "FA-08",
+      "section": "final",
+      "question": "A coach tells a swimmer that a slower second sprint proves a precise biochemical deficiency. Why is this unsupported?",
+      "options": [
+        "All swim times are unreliable",
+        "Sprint performance is unaffected by recovery",
+        "Breathing patterns can establish all biochemical causes",
+        "A change in time alone does not establish the cause; other evidence is needed"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Part 3 distinguishes measurable outcomes from possible—but unproven—physiological explanations."
+    },
+    {
+      "id": "FA-09",
+      "section": "final",
+      "question": "Which basic training record best reflects Part 3?",
+      "options": [
+        "Swim time, actual recovery, effort rating and a movement observation",
+        "Total distance and an assumed lactate score only",
+        "Planned send-off without achieved swim time",
+        "A subjective judgement of the swimmer’s attitude only"
+      ],
+      "correct_option_index": 0,
+      "explanation": "The recommended simple record combines external performance, actual recovery, subjective effort and observed movement."
+    },
+    {
+      "id": "FA-10",
+      "section": "final",
+      "question": "What is an appropriate way to respond when a swimmer reports high effort?",
+      "options": [
+        "Treat high RPE as poor attitude",
+        "Listen to the swimmer, consider performance and context, and avoid unsupported labels",
+        "Conclude that one specific energy pathway has failed",
+        "Ignore the report whenever the swim time is fast"
+      ],
+      "correct_option_index": 1,
+      "explanation": "The three parts emphasise individual experience, open questions and appropriately cautious interpretation."
+    }
+  ]
+}
