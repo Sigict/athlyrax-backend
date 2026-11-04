@@ -111,9 +111,11 @@ export function createEducationService({storePath,stripe,webhookSecret,appBaseUr
     try{
       const result=await transact(state=>{
         const row=state.enrolments[rowKey];if(!row||!['paid','completed'].includes(row.status))return null;
+        const prerequisite=section==='video-2'?'check-1':section==='video-3'?'check-2':null;
+        if(prerequisite && !(row.sections||[]).includes(prerequisite))return {error:'Complete the earlier learning step first.',status:409};
         row.sections=[...new Set([...(row.sections||[]),section])];return present(row);
       });
-      return result?res.json({enrolment:result}):res.status(403).json({error:'Paid enrolment required.'});
+      return result?.error?res.status(result.status).json({error:result.error}):result?res.json({enrolment:result}):res.status(403).json({error:'Paid enrolment required.'});
     }catch{return res.status(500).json({error:'Unable to save course progress.'})}
   }
 
