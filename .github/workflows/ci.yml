@@ -46,5 +46,8 @@ jobs:
       - name: Group Test Results route and separate stroke/cycle storage
         run: node --test tests/group-test-results.test.mjs
 
+      - name: Paid education course access, video and certificate tests
+        run: node --test tests/cpd-module02.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
