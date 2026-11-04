@@ -469,7 +469,7 @@ export function registerCpdModule02(app, deps) {
   app.get(base + '/admin/sales', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
     try {
       const folder = path.join(root, 'entitlements');
-      const names = fs.existsSync(folder) ? fs.readdirSync(folder).filter((x) => /^[a-f0-9]{64}\\.json$/.test(x)).slice(0, 20000) : [];
+      const names = fs.existsSync(folder) ? fs.readdirSync(folder).filter((x) => /^[a-f0-9]{64}\.json$/.test(x)).slice(0, 20000) : [];
       const records = [];
       for (const name of names) {
         try {
