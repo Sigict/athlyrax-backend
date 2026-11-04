@@ -3678,6 +3678,7 @@ app.post('/education/checkout',requireStrictAuth,educationService.checkout);
 app.post('/education/progress',requireStrictAuth,educationService.progress);
 app.post('/education/knowledge-check',requireStrictAuth,educationService.knowledgeCheck);
 app.post('/education/final-assessment',requireStrictAuth,educationService.assess);
+app.post('/education/admin/upload/:part',requireStrictAuth,requireSoftwareOwnerRole,educationService.uploadMedia);
 app.get('/education/media/:part',requireStrictAuth,educationService.media);
 app.get('/education/certificate',requireStrictAuth,educationService.certificate);
 app.get('/education/admin/enrolments',requireStrictAuth,educationService.admin);
