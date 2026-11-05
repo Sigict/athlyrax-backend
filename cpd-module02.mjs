@@ -54,6 +54,9 @@ function loadQuestions() {
 }
 
 // ---------- certificate PDF (A4 landscape, standard Helvetica, embedded AthlyraX logo) ----------
+// The original RGB JPEG includes a very dark rectangular matte. PDF image color-key
+// masking makes that matte transparent so the certificate's single navy page
+// background remains visible behind the original brand artwork.
 function pdfText(x) { return String(x).normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/[\\()]/g, (m) => '\\' + m); }
 function textWidth(s, size) { return String(s).length * size * 0.5; } // Helvetica average, used only for centring
 export function buildCertificatePdf({ name, completedAt, certificateId, score, verifyUrl, logoJpeg }) {
@@ -90,7 +93,7 @@ export function buildCertificatePdf({ name, completedAt, certificateId, score, v
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
     Buffer.from('<< /Length ' + Buffer.byteLength(stream) + ' >>\nstream\n' + stream + 'endstream', 'latin1'),
   ];
-  if (logoJpeg) objects.push(Buffer.concat([Buffer.from(`<< /Type /XObject /Subtype /Image /Width 306 /Height 92 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logoJpeg.length} >>\nstream\n`, 'latin1'), logoJpeg, Buffer.from('\nendstream', 'latin1')]));
+  if (logoJpeg) objects.push(Buffer.concat([Buffer.from(`<< /Type /XObject /Subtype /Image /Width 306 /Height 92 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Mask [0 70 0 70 0 85] /Length ${logoJpeg.length} >>\nstream\n`, 'latin1'), logoJpeg, Buffer.from('\nendstream', 'latin1')]));
   const parts = [Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1')];
   let size = parts[0].length; const offsets = [];
   objects.forEach((obj, i) => {
