@@ -235,7 +235,7 @@ test('without billing enforcement, connected clubs keep current Stopwatch access
   } finally { await server.stop(); }
 });
 
-test('stored catalog with an old price: published price advertised, old subscriptions still recognised; persisted policy enforces capacity', async () => {
+test('stored catalog with an old price: published price advertised and used for checkout, old subscriptions still recognised; persisted policy enforces capacity', async () => {
   const seed = (paths) => writeJson(path.join(paths.storageRoot, 'billing-catalog.json'), {
     version: 1, currency: 'GBP',
     settings: { enforceCharging: true, checkoutEnabled: true },
@@ -253,6 +253,10 @@ test('stored catalog with an old price: published price advertised, old subscrip
     assert.equal(config.response.status, 200, JSON.stringify(config.payload));
     const tier1 = (config.payload.catalog?.plans || config.payload.plans || []).find((row) => row.key === 'tier-1');
     assert.equal(tier1?.amountMinor, 1500, 'published price is advertised');
+    assert.equal(tier1?.stripePriceId, PRICES.t1, 'checkout uses the configured published price, not the stored old one');
+    const tier3 = (config.payload.catalog?.plans || []).find((row) => row.key === 'tier-3');
+    assert.equal(tier3?.stripePriceId, PRICES.t3);
+    assert.equal(tier3?.configured, true);
 
     // A subscription on the OLD stored price is still Tier 1, with an add-on block.
     await sendEvent(server.baseUrl, 'customer.subscription.created', subscription('active', [['price_old_tier_1', 1], [PRICES.a25, 1]]));

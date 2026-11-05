@@ -1566,7 +1566,12 @@ function getBillingPolicy() {
 	};
 }
 
-const COACHING_PLAN_ENV_PRICE_IDS = { 'tier-1': BILLING_PRICE_TIER_1, 'tier-2': BILLING_PRICE_TIER_2, 'tier-3': BILLING_PRICE_TIER_3 };
+// Only the explicit tier variables override a stored price (not the legacy MONTHLY/ANNUAL fallbacks).
+const COACHING_PLAN_ENV_PRICE_IDS = {
+	'tier-1': String(process.env.STRIPE_PRICE_TIER_1 || '').trim(),
+	'tier-2': String(process.env.STRIPE_PRICE_TIER_2 || '').trim(),
+	'tier-3': String(process.env.STRIPE_PRICE_TIER_3 || '').trim(),
+};
 
 function getBillingPlanPriceMaps() {
 	const byPlan = new Map();
@@ -1604,8 +1609,8 @@ function serializeBillingPlanForResponse(plan) {
 		amountMinor: normalized.amountMinor,
 		amountLabel: formatMoneyMinor(normalized.amountMinor, billingCatalog?.currency),
 		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
-		stripePriceId: String(normalized?.stripePriceId || '').trim(),
-		configured: Boolean(String(normalized?.stripePriceId || '').trim()),
+		stripePriceId: getBillingPlanPriceMaps().byPlan.get(normalized.key) || String(normalized?.stripePriceId || '').trim(),
+		configured: getBillingPlanPriceMaps().byPlan.has(normalized.key),
 		limits: {
 			maxCoaches: normalized?.limits?.maxCoaches ?? null,
 			maxSwimmers: normalized?.limits?.maxSwimmers ?? null,
