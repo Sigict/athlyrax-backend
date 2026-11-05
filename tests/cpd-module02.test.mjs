@@ -172,6 +172,10 @@ test('full learner journey: pay, watch, checks, 7/10 fails, 8/10 passes, certifi
     const pdf = Buffer.from(await r.arrayBuffer()).toString('latin1');
     assert.ok(pdf.startsWith('%PDF-1.4')); assert.ok(pdf.includes('(Alex Learner)')); assert.ok(pdf.includes(certId)); assert.ok(pdf.includes('Certificate of Completion'));
     assert.ok(pdf.includes('8/10'), 'first passing score recorded'); assert.ok(pdf.includes('/DCTDecode'), 'AthlyraX logo embedded');
+    assert.ok(pdf.includes('/Mask [0 70 0 70 0 85]'), 'logo matte is transparent rather than a rectangular block');
+    assert.ok(pdf.includes('Completed:'), 'completion date is included');
+    assert.ok(pdf.includes('Verify:'), 'certificate verification URL is included');
+    assert.ok(pdf.includes('21 min 54 s'), 'video duration agrees with the three lessons');
     r = await c.call('/verify/' + certId); res = await r.json(); assert.equal(res.valid, true); assert.equal(res.learnerName, 'Alex Learner');
     r = await c.call('/verify/AXE-M02-0000000000'); assert.equal((await r.json()).valid, false);
 
