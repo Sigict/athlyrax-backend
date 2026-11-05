@@ -11,6 +11,7 @@ import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
+import { registerResultsInbox } from './results-inbox.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -3775,6 +3776,14 @@ const cpdModule02 = registerCpdModule02(app, {
 		: null,
 	isSoftwareOwner: (req) => String(req.auth?.role || '').trim() === 'software-owner'
 		&& String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
+});
+
+// Stopwatch / Assistant / Video results sent to the coach's club for review and import.
+registerResultsInbox(app, {
+	storageRoot: STORAGE_ROOT,
+	requireStrictAuth,
+	requireWriteRole,
+	resolveTenantId: (req) => resolveTenantKeyFromUser(findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {}),
 });
 
 app.get('/auth/config', (req, res) => {
