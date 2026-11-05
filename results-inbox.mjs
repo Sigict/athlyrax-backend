@@ -17,7 +17,10 @@ const text = (value, max = 200) => String(value ?? '').trim().slice(0, max);
 export function resultsFingerprint(file) {
 	const rows = (Array.isArray(file?.results) ? file.results : [])
 		.map((r) => [text(r?.swimmer?.id) || text(r?.swimmer?.name).toLowerCase(), Number(r?.distance) || 0, Number(r?.rep) || 0,
-			Number(r?.time?.seconds) || 0, text(r?.setId || r?.setTitle), text(r?.capturedAt), text(r?.id)].join('|'))
+			Number(r?.time?.seconds) || 0, text(r?.setId || r?.setTitle), text(r?.capturedAt), text(r?.id),
+			// Every measured value counts: corrected splits, strokes or breakout make a new item, not a duplicate.
+			JSON.stringify((Array.isArray(r?.splits) ? r.splits : []).map((sp) => [Number(sp?.distance) || 0, Number(sp?.cumulativeSeconds ?? sp?.seconds) || 0, Number(sp?.splitSeconds) || 0, sp?.strokeCount ?? null])),
+			r?.strokeCount ?? '', r?.breakout?.distanceM ?? '', r?.breakout?.timeSeconds ?? '', text(r?.review?.status)].join('|'))
 		.sort();
 	return crypto.createHash('sha256').update(`${text(file?.session?.id)}\n${rows.join('\n')}`).digest('hex');
 }
@@ -29,7 +32,8 @@ export function validateResultsFile(file) {
 	if (!Array.isArray(file.results)) return { ok: false, error: 'The results file has no results.' };
 	if (file.results.length < 1) return { ok: false, error: 'The results file is empty.' };
 	if (file.results.length > RESULTS_INBOX_MAX_RESULTS) return { ok: false, error: `A results file can hold at most ${RESULTS_INBOX_MAX_RESULTS} results.` };
-	const bad = file.results.findIndex((r) => !r || r.format !== 'athlyrax-swim-result' || !(Number(r?.time?.seconds) > 0) || !(text(r?.swimmer?.id) || text(r?.swimmer?.name)));
+	const validTime = (value) => { const n = Number(value); return Number.isFinite(n) && n > 0 && n < 86400; };
+	const bad = file.results.findIndex((r) => !r || r.format !== 'athlyrax-swim-result' || !validTime(r?.time?.seconds) || !(text(r?.swimmer?.id) || text(r?.swimmer?.name)));
 	if (bad >= 0) return { ok: false, error: `Result ${bad + 1} is not a valid swim result (swimmer and time are required).` };
 	const swimmers = new Set(file.results.map((r) => text(r.swimmer?.id) || text(r.swimmer?.name).toLowerCase()));
 	const sources = new Set(file.results.map((r) => text(r.source, 40)).filter((s) => SOURCES.has(s)));
@@ -56,14 +60,27 @@ export function registerResultsInbox(app, deps) {
 	const tenantDir = (tenantId) => path.join(root, crypto.createHash('sha256').update(String(tenantId)).digest('hex').slice(0, 32));
 	const idPattern = /^[a-f0-9]{24}$/;
 
+	// Only a missing index means an empty inbox. A damaged index is an error, so a new upload can
+	// never overwrite it and hide earlier items.
 	function readIndex(dir) {
-		try { const parsed = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8')); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+		let raw;
+		try { raw = fs.readFileSync(path.join(dir, 'index.json'), 'utf8'); } catch (error) {
+			if (error?.code === 'ENOENT') return [];
+			throw error;
+		}
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed)) throw new Error('Results inbox index is not a list.');
+		return parsed;
 	}
+	// Crash-durable atomic write: flush the temporary file, rename, then flush the directory.
 	function writeAtomic(file, value) {
-		fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+		const dir = path.dirname(file);
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 		const tmp = `${file}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-		fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600, flag: 'wx' });
+		const fd = fs.openSync(tmp, 'wx', 0o600);
+		try { fs.writeSync(fd, JSON.stringify(value)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 		fs.renameSync(tmp, file);
+		try { const dfd = fs.openSync(dir, 'r'); try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); } } catch { /* directory fsync unsupported on this platform */ }
 	}
 	function tenantOf(req, res) {
 		const tenantId = text(resolveTenantId(req), 200);
@@ -115,7 +132,10 @@ export function registerResultsInbox(app, deps) {
 	app.get('/results-inbox', requireStrictAuth, requireWriteRole, (req, res) => {
 		const tenantId = tenantOf(req, res); if (!tenantId) return;
 		const status = text(req.query?.status, 20);
-		const items = readIndex(tenantDir(tenantId)).filter((row) => !status || row.status === status);
+		let items;
+		try { items = readIndex(tenantDir(tenantId)).filter((row) => !status || row.status === status); } catch {
+			res.status(500).json({ error: 'The Results inbox could not be read.' }); return;
+		}
 		res.set('Cache-Control', 'no-store');
 		res.status(200).json({ ok: true, items });
 	});
@@ -125,7 +145,8 @@ export function registerResultsInbox(app, deps) {
 		const id = text(req.params.id, 40);
 		if (!idPattern.test(id)) { res.status(404).json({ error: 'Not found.' }); return; }
 		const dir = tenantDir(tenantId);
-		const item = readIndex(dir).find((row) => row.id === id);
+		let item;
+		try { item = readIndex(dir).find((row) => row.id === id); } catch { res.status(500).json({ error: 'The Results inbox could not be read.' }); return; }
 		if (!item) { res.status(404).json({ error: 'Not found.' }); return; }
 		try {
 			const file = JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8'));

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { resolveStorageConfiguration } from '../scripts/storage-safety-lib.mjs';
 import Stripe from 'stripe';
@@ -194,6 +195,16 @@ test('results inbox: coaches send, duplicates are detected, clubs are isolated, 
     const big = resultsFile([result('Swimmer A', 1, 30, { note: 'x'.repeat(2.1 * 1024 * 1024) })]);
     assert.equal((await request(base, '/results-inbox', { ...coach, method: 'POST', body: { file: big } })).response.status, 413);
 
+    // Corrected splits are new measurements, not a duplicate; non-finite times are refused.
+    const corrected = resultsFile([result('Swimmer A', 1, 31.2, { splits: [{ distance: 25, cumulativeSeconds: 15.1, splitSeconds: 15.1, strokeCount: 12 }] }), result('Swimmer A', 2, 31.0)]);
+    const correctedSent = await request(base, '/results-inbox', { ...coach, method: 'POST', body: { file: corrected } });
+    assert.equal(correctedSent.response.status, 201);
+    assert.equal(correctedSent.payload.duplicate, false);
+    const infinite = JSON.stringify({ file: resultsFile([result('Swimmer A', 1, 30)]) }).replace('"seconds":30', '"seconds":1e309');
+    const infiniteSent = await fetch(`${base}/results-inbox`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: coach.cookie, [coach.csrfHeaderName]: coach.csrfToken }, body: infinite });
+    assert.equal(infiniteSent.status, 400);
+    await request(base, `/results-inbox/${correctedSent.payload.item.id}/status`, { ...coach, method: 'POST', body: { status: 'dismissed' } });
+
     // Mark imported; status persists and records who and which session.
     const marked = await request(base, `/results-inbox/${id}/status`, { ...coach, method: 'POST', body: { status: 'imported', sessionId: 'sessionA' } });
     assert.equal(marked.response.status, 200);
@@ -205,5 +216,19 @@ test('results inbox: coaches send, duplicates are detected, clubs are isolated, 
     // Inbox items never change the club database.
     const db = await request(base, '/db', coach);
     assert.equal(JSON.stringify(db.payload).includes('31.2'), false);
+  } finally { await server.stop(); }
+});
+
+test('a damaged inbox index is never overwritten by a new upload', async () => {
+  const server = await startServer({ AUTH_PASSWORD_RESET_DELIVERY: 'console' });
+  try {
+    const coach = await login(server.baseUrl, 'coachA', 'CoachA!Pass1234');
+    const dir = path.join(server.tempRoot, 'storage', 'results-inbox', crypto.createHash('sha256').update('tenant-a').digest('hex').slice(0, 32));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'index.json'), '{not json');
+    const sent = await request(server.baseUrl, '/results-inbox', { ...coach, method: 'POST', body: { file: resultsFile([result('Swimmer A', 1, 31)]) } });
+    assert.equal(sent.response.status, 500);
+    assert.equal(fs.readFileSync(path.join(dir, 'index.json'), 'utf8'), '{not json');
+    assert.equal((await request(server.baseUrl, '/results-inbox', coach)).response.status, 500);
   } finally { await server.stop(); }
 });
