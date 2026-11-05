@@ -1,4 +1,5 @@
 /* global process, Buffer */
+import { COACHING_PLAN_RULES, CAPACITY_ADDON_RULES, resolveSubscriptionComposition, computeSwimmerCapacity, stopwatchEntitlement, buildAddonLineItems, checkSwimmerCapacity } from './coaching-billing.mjs';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -131,30 +132,30 @@ const DEFAULT_BILLING_CATALOG = {
 			key: 'tier-1',
 			label: 'Tier 1',
 			interval: 'month',
-			amountMinor: 1800,
+			amountMinor: COACHING_PLAN_RULES['tier-1'].amountMinor,
 			stripePriceId: BILLING_PRICE_TIER_1,
-			limits: { maxCoaches: 1, maxSwimmers: 24, maxSquads: 1 },
+			limits: { maxCoaches: 1, maxSwimmers: COACHING_PLAN_RULES['tier-1'].maxSwimmers, maxSquads: 1 },
 		},
 		{
 			key: 'tier-2',
 			label: 'Tier 2',
 			interval: 'month',
-			amountMinor: 2800,
+			amountMinor: COACHING_PLAN_RULES['tier-2'].amountMinor,
 			stripePriceId: BILLING_PRICE_TIER_2,
-			limits: { maxCoaches: 1, maxSwimmers: 100, maxSquads: 4 },
+			limits: { maxCoaches: 1, maxSwimmers: COACHING_PLAN_RULES['tier-2'].maxSwimmers, maxSquads: 4 },
 		},
 		{
 			key: 'tier-3',
 			label: 'Tier 3 Club',
 			interval: 'month',
-			amountMinor: 0,
+			amountMinor: COACHING_PLAN_RULES['tier-3'].amountMinor,
 			stripePriceId: BILLING_PRICE_TIER_3,
-			limits: { maxCoaches: null, maxSwimmers: 250, maxSquads: null },
+			limits: { maxCoaches: null, maxSwimmers: COACHING_PLAN_RULES['tier-3'].maxSwimmers, maxSquads: null },
 		},
 	],
 	addons: [
-		{ key: 'extra-25-swimmers', label: 'Extra 25 swimmers', swimmers: 25, amountMinor: 1300 },
-		{ key: 'extra-50-swimmers', label: 'Extra 50 swimmers', swimmers: 50, amountMinor: 2500 },
+		{ key: 'extra-25-swimmers', label: CAPACITY_ADDON_RULES['extra-25-swimmers'].label, swimmers: 25, amountMinor: CAPACITY_ADDON_RULES['extra-25-swimmers'].amountMinor },
+		{ key: 'extra-50-swimmers', label: CAPACITY_ADDON_RULES['extra-50-swimmers'].label, swimmers: 50, amountMinor: CAPACITY_ADDON_RULES['extra-50-swimmers'].amountMinor },
 	],
 };
 const DEFAULT_AUTH_USERS = [
@@ -1241,6 +1242,39 @@ function resolveTenantPlanLimits(tenantId) {
 	};
 }
 
+// Capacity is enforced only when billing is enforced; the global owner tenant is never limited.
+function resolveTenantSwimmerCapacity(tenantId) {
+	if (!BILLING_ENFORCED || !stripeClient) return null;
+	const normalizedTenantId = normalizeTenantId(tenantId);
+	if (!normalizedTenantId || normalizedTenantId === 'global-owner') return null;
+	const paying = getTenantUsersByTenantId(normalizedTenantId).find((row) => {
+		const billing = normalizeBillingState(row?.billing);
+		return COACHING_PLAN_RULES[billing.planKey] && ['active', 'trialing'].includes(billing.status.toLowerCase());
+	});
+	if (!paying) return null;
+	const billing = normalizeBillingState(paying.billing);
+	return computeSwimmerCapacity(billing.planKey, billing.addons);
+}
+
+function resolveTenantStopwatchEntitlement(user) {
+	const role = String(user?.role || '').trim();
+	const username = String(user?.username || '').trim().toLowerCase();
+	if (role === 'software-owner' && username === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME) return stopwatchEntitlement({ isPrimaryOwner: true });
+	const tenantId = resolveTenantKeyFromUser(user);
+	// Until billing is enforced, connected club accounts keep today's Stopwatch access (no downgrade).
+	if ((!BILLING_ENFORCED || !stripeClient) && tenantId && WRITE_ALLOWED_ROLES.has(role)) {
+		return { source: 'billing-not-enforced', lanes: 10, assistants: 5, included: true };
+	}
+	const candidates = tenantId ? getTenantUsersByTenantId(tenantId) : [user];
+	let best = stopwatchEntitlement({});
+	for (const row of candidates) {
+		const billing = normalizeBillingState(row?.billing);
+		const next = stopwatchEntitlement({ planKey: billing.planKey, status: billing.status });
+		if (next.lanes > best.lanes || (next.lanes === best.lanes && next.assistants > best.assistants)) best = next;
+	}
+	return best;
+}
+
 function countActiveTenantRoleUsers(tenantId, role, excludeUsername = '') {
 	const normalizedTenantId = normalizeTenantId(tenantId);
 	const excluded = String(excludeUsername || '').trim().toLowerCase();
@@ -1477,8 +1511,40 @@ function backupBillingCatalogSnapshot(rawCatalog, reason = 'save') {
 	}
 }
 
+// ATHLYRAX_COACHING_PRICE_RULES: published tier prices and swimmer caps come from coaching-billing.mjs,
+// so a stored catalog written before the price change cannot advertise or enforce the old values.
 function getBillingPlansCatalog() {
-	return Array.isArray(billingCatalog?.plans) ? billingCatalog.plans : [];
+	const plans = Array.isArray(billingCatalog?.plans) ? billingCatalog.plans : [];
+	return plans.map((plan) => {
+		const rule = COACHING_PLAN_RULES[String(plan?.key || '').trim()];
+		if (!rule) return plan;
+		return { ...plan, amountMinor: rule.amountMinor, limits: { ...(plan?.limits || {}), maxSwimmers: rule.maxSwimmers } };
+	});
+}
+
+function getCapacityAddonPriceIds() {
+	const ids = {};
+	for (const [key, rule] of Object.entries(CAPACITY_ADDON_RULES)) {
+		const fromEnv = String(process.env[rule.priceEnv] || '').trim();
+		if (fromEnv) ids[key] = fromEnv;
+	}
+	return ids;
+}
+
+function getCapacityAddonPriceMap() {
+	const byPrice = new Map();
+	for (const [key, priceId] of Object.entries(getCapacityAddonPriceIds())) byPrice.set(priceId, key);
+	return byPrice;
+}
+
+function normalizeBillingAddonCounts(raw) {
+	const counts = {};
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return counts;
+	for (const key of Object.keys(CAPACITY_ADDON_RULES)) {
+		const qty = Number(raw[key]);
+		if (Number.isInteger(qty) && qty > 0) counts[key] = qty;
+	}
+	return counts;
 }
 
 function getBillingPolicy() {
@@ -1539,10 +1605,11 @@ function serializeBillingAddonForResponse(addon) {
 	return {
 		key: normalized.key,
 		label: normalized.label,
-		swimmers: normalized.swimmers,
-		amountMinor: normalized.amountMinor,
-		amountLabel: formatMoneyMinor(normalized.amountMinor, billingCatalog?.currency),
+		swimmers: CAPACITY_ADDON_RULES[normalized.key]?.swimmers ?? normalized.swimmers,
+		amountMinor: CAPACITY_ADDON_RULES[normalized.key]?.amountMinor ?? normalized.amountMinor,
+		amountLabel: formatMoneyMinor(CAPACITY_ADDON_RULES[normalized.key]?.amountMinor ?? normalized.amountMinor, billingCatalog?.currency),
 		currency: String(billingCatalog?.currency || 'GBP').toUpperCase(),
+		configured: Boolean(getCapacityAddonPriceIds()[normalized.key]),
 	};
 }
 
@@ -1558,6 +1625,7 @@ function normalizeBillingState(raw) {
 		checkoutSessionId: String(raw?.checkoutSessionId || '').trim(),
 		trialEndsAt: String(raw?.trialEndsAt || '').trim(),
 		currentPeriodEnd: String(raw?.currentPeriodEnd || '').trim(),
+		addons: normalizeBillingAddonCounts(raw?.addons),
 		cancelAtPeriodEnd: raw?.cancelAtPeriodEnd === true,
 		updatedAt: String(raw?.updatedAt || fallback.updatedAt).trim() || fallback.updatedAt,
 	};
@@ -1588,6 +1656,8 @@ function buildBillingAccessForUser(user) {
 		canManageBilling: isPrimarySoftwareOwner || isPaid,
 		planLimits,
 		planLabel: String(plan?.label || billing?.planKey || 'Free').trim(),
+		swimmerCapacity: isPaid && !isPrimarySoftwareOwner ? computeSwimmerCapacity(billing?.planKey, billing?.addons) : null,
+		stopwatch: stopwatchEntitlement({ planKey: billing?.planKey, status: billing?.status, isPrimaryOwner: isPrimarySoftwareOwner }),
 		billing,
 	};
 }
@@ -1621,10 +1691,12 @@ function parseEpochSecondsToIso(seconds) {
 
 function resolveSubscriptionPlanFromStripe(subscription) {
 	const { byPrice } = getBillingPlanPriceMaps();
-	const linePriceId = String(subscription?.items?.data?.[0]?.price?.id || '').trim();
-	if (linePriceId && byPrice.has(linePriceId)) {
-		return { planKey: byPrice.get(linePriceId), priceId: linePriceId };
+	// Every item is read: capacity add-on items may come before the tier item.
+	const composition = resolveSubscriptionComposition(subscription, { planByPrice: byPrice, addonByPrice: getCapacityAddonPriceMap() });
+	if (composition.planKey) {
+		return { planKey: composition.planKey, priceId: composition.priceId, addons: composition.addons };
 	}
+	const linePriceId = String(composition.unknownPriceIds[0] || subscription?.items?.data?.[0]?.price?.id || '').trim();
 	if (String(subscription?.status || '').trim().toLowerCase() === 'active') {
 		return { planKey: 'tier-1', priceId: linePriceId };
 	}
@@ -1673,8 +1745,10 @@ async function handleStripeSubscriptionEvent(subscriptionObject) {
 	const customerId = String(subscription?.customer || '').trim();
 	if (!customerId) return;
 
-	const { planKey, priceId } = resolveSubscriptionPlanFromStripe(subscription);
+	const { planKey, priceId, addons } = resolveSubscriptionPlanFromStripe(subscription);
+	const subscriptionEnded = String(subscription?.status || '').trim().toLowerCase() === 'canceled';
 	const nextBilling = {
+		addons: subscriptionEnded ? {} : (addons || {}),
 		customerId,
 		subscriptionId: String(subscription?.id || '').trim(),
 		status: String(subscription?.status || 'inactive').trim() || 'inactive',
@@ -4463,6 +4537,11 @@ app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
 		res.status(400).json({ error: 'Invalid or unconfigured billing plan.' });
 		return;
 	}
+	const addonLines = buildAddonLineItems(req.body?.addons, getCapacityAddonPriceIds());
+	if (!addonLines.ok) {
+		res.status(400).json({ error: addonLines.error });
+		return;
+	}
 
 	const username = String(req.auth?.username || '').trim();
 	const user = findAuthUser(username);
@@ -4501,7 +4580,7 @@ app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
 		const checkoutSession = await stripeClient.checkout.sessions.create({
 			mode: 'subscription',
 			customer: customerId,
-			line_items: [{ price: priceId, quantity: 1 }],
+			line_items: [{ price: priceId, quantity: 1 }, ...addonLines.lineItems],
 			success_url: `${BILLING_APP_BASE_URL}/?billing=success`,
 			cancel_url: `${BILLING_APP_BASE_URL}/?billing=cancel`,
 			allow_promotion_codes: true,
@@ -4529,6 +4608,13 @@ app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
 	} catch (error) {
 		res.status(500).json({ error: 'Could not create checkout session.', details: error instanceof Error ? error.message : 'Unknown error' });
 	}
+});
+
+// Stopwatch entitlement included with the club's coaching subscription (no second charge).
+app.get('/entitlements/stopwatch', requireStrictAuth, (req, res) => {
+	const user = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+	res.set('Cache-Control', 'no-store');
+	res.status(200).json({ ok: true, stopwatch: resolveTenantStopwatchEntitlement(user) });
 });
 
 app.post('/billing/portal-session', requireStrictAuth, async (req, res) => {
@@ -6861,6 +6947,13 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 			details: { path: '/db', method: 'PUT' },
 		});
 		res.status(403).json({ error: 'Documents can only be modified by the primary software-owner account.' });
+		return;
+	}
+	// ATHLYRAX_SWIMMER_CAPACITY_GUARD: only refuses saves that add active swimmers beyond the paid capacity.
+	const swimmerCapacity = resolveTenantSwimmerCapacity(actorTenantId);
+	const capacityCheck = checkSwimmerCapacity({ existingDb, nextDb: body, capacity: swimmerCapacity });
+	if (!capacityCheck.ok) {
+		res.status(402).json({ error: capacityCheck.error, code: 'swimmer_capacity_reached', capacity: capacityCheck.capacity, activeSwimmers: capacityCheck.after });
 		return;
 	}
 
