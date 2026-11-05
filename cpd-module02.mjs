@@ -479,8 +479,34 @@ export function registerCpdModule02(app, deps) {
   app.get(base + '/admin/videos', requireStrictAuth, requireSoftwareOwnerRole, async (req, res) => {
     let free = null; try { const s = fs.statfsSync(storageRoot); free = s.bavail * s.bsize; } catch {}
     let priceCheck = null;
-    if (stripe && priceId) { try { const p = await stripe.prices.retrieve(priceId); priceCheck = { active: p.active, oneTime: p.type === 'one_time', gbp: String(p.currency).toLowerCase() === 'gbp', amount: p.unit_amount, product: typeof p.product === 'string' ? p.product : p.product?.id, livemode: p.livemode }; } catch { priceCheck = { error: 'price not found with the configured Stripe key' }; } }
-    noStore(res).json({ lessons: LESSONS.map((l) => ({ lesson: l.n, title: l.title, bytes: lessonSize(l.n) })), freeBytes: free, setup: setup(), salesOpen: salesOpen(), stripeMode, priceCheck });
+    let stripeAccount = null;
+    // The Stripe account identifier is non-secret, and this route is strictly
+    // software-owner authenticated. Never expose API keys or raw errors.
+    if (stripe) {
+      try {
+        const account = await stripe.accounts.retrieve();
+        stripeAccount = { id: String(account.id || ''), livemode: Boolean(account.livemode) };
+      } catch (err) {
+        stripeAccount = { error: err?.statusCode === 401 ? 'Stripe API key rejected' : 'Stripe account lookup unavailable' };
+      }
+    }
+    if (stripe && priceId) {
+      try {
+        const p = await stripe.prices.retrieve(priceId);
+        priceCheck = { active: p.active, oneTime: p.type === 'one_time', gbp: String(p.currency).toLowerCase() === 'gbp', amount: p.unit_amount, product: typeof p.product === 'string' ? p.product : p.product?.id, livemode: p.livemode };
+      } catch (err) {
+        priceCheck = {
+          error: err?.code === 'resource_missing'
+            ? 'Price ID does not exist in this Stripe account'
+            : err?.statusCode === 401 ? 'Stripe key rejected' : 'Price lookup failed',
+        };
+      }
+    }
+    noStore(res).json({
+      lessons: LESSONS.map((l) => ({ lesson: l.n, title: l.title, bytes: lessonSize(l.n) })),
+      freeBytes: free, setup: setup(), salesOpen: salesOpen(), stripeMode, stripeAccount,
+      priceId, priceCheck,
+    });
   });
   // Owner reporting reflects locally verified course entitlements, not a Stripe
   // financial ledger. Other products/subscriptions must use their own data source.
