@@ -505,6 +505,7 @@ export function registerCpdModule02(app, deps) {
     noStore(res).json({
       lessons: LESSONS.map((l) => ({ lesson: l.n, title: l.title, bytes: lessonSize(l.n) })),
       freeBytes: free, setup: setup(), salesOpen: salesOpen(), stripeMode, stripeAccount,
+      stripeKeySource: courseKey ? 'CPD_STRIPE_SECRET_KEY' : 'shared STRIPE_SECRET_KEY fallback',
       priceId, priceCheck,
     });
   });
