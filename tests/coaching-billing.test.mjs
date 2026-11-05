@@ -85,6 +85,10 @@ test('capacity guard refuses only saves that add swimmers beyond capacity; exist
 	db.swimmers.slice(0, 6).forEach((row) => { row.archived = true; });
 	assert.equal(countActiveSwimmers(db), 24);
 	assert.equal(checkSwimmerCapacity({ existingDb: swimmers(0), nextDb: db, capacity: 24 }).ok, true);
+	// Disconnected swimmer archives (active: false) do not count.
+	const linked = swimmers(24);
+	linked.swimmers.push({ id: 'gone', active: false });
+	assert.equal(countActiveSwimmers(linked), 24);
 	// No capacity in force (billing not enforced): never refused.
 	assert.equal(checkSwimmerCapacity({ existingDb: swimmers(0), nextDb: swimmers(999), capacity: null }).ok, true);
 });

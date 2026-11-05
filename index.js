@@ -1236,15 +1236,21 @@ function resolveTenantPlanLimits(tenantId) {
 	}) || tenantUsers[0];
 	const planKey = String(selectedUser?.billing?.planKey || 'free').trim() || 'free';
 	const plan = getBillingPlansCatalog().find((row) => String(row?.key || '').trim() === planKey) || null;
+	// Purchased 25/50 swimmer blocks raise the swimmer limit everywhere it is checked.
+	const capacity = computeSwimmerCapacity(planKey, normalizeBillingState(selectedUser?.billing).addons);
 	return {
 		planKey,
-		limits: plan?.limits || null,
+		limits: plan?.limits ? { ...plan.limits, ...(capacity !== null ? { maxSwimmers: capacity } : {}) } : null,
 	};
 }
 
 // Capacity is enforced only when billing is enforced; the global owner tenant is never limited.
+function isBillingEnforcedNow() {
+	return Boolean(stripeClient) && getBillingPolicy().enforceCharging === true;
+}
+
 function resolveTenantSwimmerCapacity(tenantId) {
-	if (!BILLING_ENFORCED || !stripeClient) return null;
+	if (!isBillingEnforcedNow()) return null;
 	const normalizedTenantId = normalizeTenantId(tenantId);
 	if (!normalizedTenantId || normalizedTenantId === 'global-owner') return null;
 	const paying = getTenantUsersByTenantId(normalizedTenantId).find((row) => {
@@ -1262,7 +1268,7 @@ function resolveTenantStopwatchEntitlement(user) {
 	if (role === 'software-owner' && username === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME) return stopwatchEntitlement({ isPrimaryOwner: true });
 	const tenantId = resolveTenantKeyFromUser(user);
 	// Until billing is enforced, connected club accounts keep today's Stopwatch access (no downgrade).
-	if ((!BILLING_ENFORCED || !stripeClient) && tenantId && WRITE_ALLOWED_ROLES.has(role)) {
+	if (!isBillingEnforcedNow() && tenantId && WRITE_ALLOWED_ROLES.has(role)) {
 		return { source: 'billing-not-enforced', lanes: 10, assistants: 5, included: true };
 	}
 	const candidates = tenantId ? getTenantUsersByTenantId(tenantId) : [user];
@@ -1560,15 +1566,23 @@ function getBillingPolicy() {
 	};
 }
 
+const COACHING_PLAN_ENV_PRICE_IDS = { 'tier-1': BILLING_PRICE_TIER_1, 'tier-2': BILLING_PRICE_TIER_2, 'tier-3': BILLING_PRICE_TIER_3 };
+
 function getBillingPlanPriceMaps() {
 	const byPlan = new Map();
 	const byPrice = new Map();
 	for (const plan of getBillingPlansCatalog()) {
 		const key = String(plan?.key || '').trim();
-		const priceId = String(plan?.stripePriceId || '').trim();
-		if (!key || !priceId) continue;
-		byPlan.set(key, priceId);
-		byPrice.set(priceId, key);
+		const storedPriceId = String(plan?.stripePriceId || '').trim();
+		// The environment price is the published price: checkout always uses it when configured,
+		// so a catalog stored before the price change can never charge an old amount.
+		const envPriceId = String(COACHING_PLAN_ENV_PRICE_IDS[key] || '').trim();
+		const checkoutPriceId = envPriceId || storedPriceId;
+		if (!key || !checkoutPriceId) continue;
+		byPlan.set(key, checkoutPriceId);
+		// Subscriptions started on an earlier price are still recognised as the same tier.
+		if (storedPriceId) byPrice.set(storedPriceId, key);
+		byPrice.set(checkoutPriceId, key);
 	}
 	return { byPlan, byPrice };
 }
@@ -1657,7 +1671,7 @@ function buildBillingAccessForUser(user) {
 		planLimits,
 		planLabel: String(plan?.label || billing?.planKey || 'Free').trim(),
 		swimmerCapacity: isPaid && !isPrimarySoftwareOwner ? computeSwimmerCapacity(billing?.planKey, billing?.addons) : null,
-		stopwatch: stopwatchEntitlement({ planKey: billing?.planKey, status: billing?.status, isPrimaryOwner: isPrimarySoftwareOwner }),
+		stopwatch: resolveTenantStopwatchEntitlement(user),
 		billing,
 	};
 }
