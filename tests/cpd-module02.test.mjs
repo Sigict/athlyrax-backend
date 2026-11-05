@@ -24,15 +24,18 @@ function fakeStripe() {
       create: async (params) => { created.push(params); return { url: 'https://checkout.stripe.com/c/pay/cs_test_fake' }; },
     } },
     prices: { retrieve: async () => ({ active: true, type: 'one_time', currency: 'gbp', unit_amount: 499, product: 'prod_test' }) },
+    accounts: { retrieve: async () => ({ id: stripe.accountId, livemode: false }) },
+    accountId: 'acct_1UXqgPPGSvfRRDt1',
   };
   return stripe;
 }
 
-async function startCourse({ sales = true, mode = 'live', mail = null } = {}) {
+async function startCourse({ sales = true, mode = 'live', mail = null, expectedAccount = '' } = {}) {
   const saved = { ...process.env };
   process.env.CPD_SESSION_SECRET = 'test-secret-longer-than-thirty-two-characters!!';
   process.env.CPD_MODULE02_PRICE_ID = 'price_test_module02';
   process.env.CPD_MODULE02_SALES_ENABLED = sales ? 'true' : 'false';
+  if (expectedAccount) process.env.CPD_STRIPE_EXPECTED_ACCOUNT = expectedAccount; else delete process.env.CPD_STRIPE_EXPECTED_ACCOUNT;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cpd02-'));
   const stripe = fakeStripe();
   const app = express();
@@ -228,4 +231,29 @@ test('course purchases never reach the software-subscription billing code', () =
   const upsert = src.indexOf('upsertUserBillingByUsername(username', hook);
   assert.ok(hook > 0 && branch > hook && branch < upsert, 'course branch runs before subscription billing');
   assert.match(src.slice(branch, upsert), /break;/);
+});
+
+test('the course reports which Stripe key it uses and refuses a key from another account', async () => {
+  const c = await startCourse({ mode: 'test', expectedAccount: 'acct_1UXqgPPGSvfRRDt1' });
+  try {
+    for (const n of [1, 2, 3]) await upload(c.call, n, mp4(4096));
+    let r = await c.call('/status'); let st = await r.json();
+    assert.equal(st.stripeConfig.keySource, 'injected');
+    assert.equal(st.stripeConfig.priceInKeyAccount, true);
+    assert.equal(st.stripeConfig.priceValidForSale, true);
+    assert.equal(st.stripeConfig.expectedAccountMatches, true);
+    assert.match(st.stripeConfig.serverStartedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(JSON.stringify(st).includes('acct_'), false, 'no account ID on the public status');
+    assert.equal(st.salesEnabled, true);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' }, headers: { 'x-test-owner': 'yes' } });
+    assert.equal(r.status, 200, 'owner test checkout on the expected sandbox account');
+    // The key now belongs to another account (e.g. the live account's own test mode).
+    c.stripe.accountId = 'acct_1UY3W3AROMWHD0h9';
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' }, headers: { 'x-test-owner': 'yes' } });
+    assert.equal(r.status, 503); assert.match((await r.json()).error, /different Stripe account/);
+    r = await c.call('/admin/videos', { headers: { 'x-test-owner': 'yes' } }); const admin = await r.json();
+    assert.equal(admin.stripeAccount.id, 'acct_1UY3W3AROMWHD0h9'); assert.equal(admin.expectedAccountMatches, false); assert.equal(admin.setup.stripe, false);
+    r = await c.call('/status'); st = await r.json();
+    assert.equal(st.salesEnabled, false, 'course closed while the key is on the wrong account');
+  } finally { await c.stop(); }
 });

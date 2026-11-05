@@ -146,6 +146,33 @@ export function registerCpdModule02(app, deps) {
   const courseKey = String(process.env.CPD_STRIPE_SECRET_KEY || '').trim();
   const stripe = deps.courseStripeClient || (courseKey ? new Stripe(courseKey) : deps.stripeClient) || null;
   const stripeMode = deps.courseStripeMode || (courseKey ? (courseKey.startsWith('sk_test_') ? 'test' : 'live') : (String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test_') ? 'test' : 'live'));
+  // Optional guard: the Stripe account the course must use (non-secret, e.g. acct_...).
+  // When set, the course stays closed unless the key in use belongs to that account.
+  const expectedAccount = String(process.env.CPD_STRIPE_EXPECTED_ACCOUNT || '').trim();
+  const keySource = deps.courseStripeClient ? 'injected' : courseKey ? 'CPD_STRIPE_SECRET_KEY' : 'shared STRIPE_SECRET_KEY fallback';
+  // Environment variables are read once when the server process starts; a changed
+  // Render variable takes effect only after the service restarts or redeploys.
+  const serverStartedAt = new Date().toISOString();
+  // Non-secret Stripe configuration check, cached for 10 minutes.
+  let configCheck = null, configCheckAt = 0;
+  async function stripeConfigCheck(force = false) {
+    if (!stripe) return null;
+    if (!force && configCheck && Date.now() - configCheckAt < 600000) return configCheck;
+    const out = { accountId: null, livemode: null, accountError: null, price: null };
+    try { const a = await stripe.accounts.retrieve(); out.accountId = String(a?.id || ''); out.livemode = Boolean(a?.livemode); }
+    catch (err) { out.accountError = err?.statusCode === 401 ? 'Stripe API key rejected' : 'Stripe account lookup unavailable'; }
+    if (priceId) {
+      try {
+        const p = await stripe.prices.retrieve(priceId);
+        out.price = { found: true, active: Boolean(p.active), oneTime: p.type === 'one_time', gbp: String(p.currency).toLowerCase() === 'gbp', amount: p.unit_amount, livemode: Boolean(p.livemode),
+          validForSale: Boolean(p.active) && p.type === 'one_time' && String(p.currency).toLowerCase() === 'gbp' && p.unit_amount === PRICE_PENCE };
+      } catch (err) { out.price = { found: false, error: err?.code === 'resource_missing' ? 'Price ID does not exist in this Stripe account' : err?.statusCode === 401 ? 'Stripe key rejected' : 'Price lookup failed' }; }
+    }
+    out.expectedAccountMatches = expectedAccount ? (out.accountId ? out.accountId === expectedAccount : null) : null;
+    configCheck = out; configCheckAt = Date.now();
+    return out;
+  }
+  const accountGuardOk = () => !expectedAccount || configCheck?.expectedAccountMatches === true;
   const questions = loadQuestions();
   let logoJpeg = null;
   try { logoJpeg = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'cpd-assets', 'athlyrax-logo.jpg')); } catch {}
@@ -153,7 +180,7 @@ export function registerCpdModule02(app, deps) {
   const lessonPath = (n) => path.join(root, LESSONS[n - 1].file);
   const lessonSize = (n) => { try { const st = fs.statSync(lessonPath(n)); return st.isFile() && st.size > 1024 ? st.size : 0; } catch { return 0; } };
   const videosReady = () => LESSONS.every((l) => lessonSize(l.n) > 0);
-  const setup = () => ({ videos: videosReady(), signingKey: secret.length >= 32, price: Boolean(priceId), stripe: Boolean(stripe), salesSwitch: salesFlag, recoveryEmail: Boolean(sendMail) });
+  const setup = () => ({ videos: videosReady(), signingKey: secret.length >= 32, price: Boolean(priceId), stripe: Boolean(stripe) && accountGuardOk(), salesSwitch: salesFlag, recoveryEmail: Boolean(sendMail) });
   const salesOpen = () => Object.values(setup()).slice(0, 5).every(Boolean);
   const ipOf = (req) => String(req.ip || req.socket?.remoteAddress || '');
 
@@ -261,9 +288,16 @@ export function registerCpdModule02(app, deps) {
     const revoked = (() => { const c = readCookie(req); const e = c && store.read('entitlements', c.id); return e && e.status === 'revoked' ? e.revokedReason || 'revoked' : ''; })();
     const completion = ent ? store.read('completions', ent.sessionId) : null;
     if (ent) setAccessCookie(res, ent.sessionId); // keep returning learners signed in
+    let check = null; try { check = await stripeConfigCheck(); } catch {}
     res.json({
       course: CPD_MODULE02_COURSE, title: COURSE_TITLE, price: { amount: PRICE_PENCE, currency: 'gbp' },
       salesEnabled: salesOpen(), testMode: stripeMode === 'test', setup: setup(),
+      // Non-secret: which key is in use and whether the configured price exists in
+      // that key's Stripe account. No key, account ID or raw provider error.
+      stripeConfig: { keySource, mode: stripeMode, serverStartedAt,
+        priceInKeyAccount: check?.price ? check.price.found === true : null,
+        priceValidForSale: check?.price?.found ? check.price.validForSale : null,
+        expectedAccountMatches: check ? check.expectedAccountMatches : null },
       lessons: LESSONS.map((l) => ({ n: l.n, title: l.title, duration: l.duration })),
       paidAccess: Boolean(ent), accessRevoked: revoked,
       learner: ent ? { name: ent.name, email: ent.email.replace(/^(.).*(@.*)$/, '$1***$2') } : null,
@@ -275,6 +309,10 @@ export function registerCpdModule02(app, deps) {
   app.post(base + '/checkout', async (req, res) => {
     if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
     if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
+    if (expectedAccount) {
+      let check = null; try { check = await stripeConfigCheck(true); } catch {}
+      if (check?.expectedAccountMatches !== true) return fail(res, 503, 'Course Stripe key belongs to a different Stripe account than CPD_STRIPE_EXPECTED_ACCOUNT.');
+    }
     if (!checkoutLimit(ipOf(req))) return fail(res, 429, 'Too many attempts. Please try again later.');
     const email = String(req.body?.email || '').trim().toLowerCase(), name = cleanName(req.body?.fullName);
     if (!emailValid(email) || name.length < 2 || name.length > 110) return fail(res, 400, 'Enter your full name (as it should appear on the certificate) and a valid email address.');
@@ -502,10 +540,14 @@ export function registerCpdModule02(app, deps) {
         };
       }
     }
+    try { await stripeConfigCheck(true); } catch {}
     noStore(res).json({
       lessons: LESSONS.map((l) => ({ lesson: l.n, title: l.title, bytes: lessonSize(l.n) })),
       freeBytes: free, setup: setup(), salesOpen: salesOpen(), stripeMode, stripeAccount,
-      stripeKeySource: courseKey ? 'CPD_STRIPE_SECRET_KEY' : 'shared STRIPE_SECRET_KEY fallback',
+      stripeKeySource: keySource,
+      expectedAccount: expectedAccount || null,
+      expectedAccountMatches: expectedAccount && stripeAccount?.id ? stripeAccount.id === expectedAccount : null,
+      serverStartedAt,
       priceId, priceCheck,
     });
   });
