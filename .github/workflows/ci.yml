@@ -52,5 +52,8 @@ jobs:
       - name: Coaching tiers, capacity blocks and Stopwatch entitlement
         run: node --test tests/coaching-billing.test.mjs tests/coaching-billing.integration.test.mjs
 
+      - name: Results inbox (Stopwatch/Assistant/Video results sent to the club)
+        run: node --test tests/results-inbox.integration.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
