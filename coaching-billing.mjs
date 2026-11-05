@@ -118,6 +118,8 @@ function isActiveSwimmerRow(row) {
 	if (!row || typeof row !== 'object') return false;
 	if (row.deleted === true || row.isDeleted === true || text(row.deletedAt)) return false;
 	if (row.archived === true || row.isArchived === true || text(row.archivedAt)) return false;
+	// Disconnected swimmer archives are stored as active: false (coach-link reconnect flow).
+	if (row.active === false) return false;
 	const status = text(row.status).toLowerCase();
 	if (status === 'archived' || status === 'inactive' || status === 'deleted' || status === 'left') return false;
 	return true;

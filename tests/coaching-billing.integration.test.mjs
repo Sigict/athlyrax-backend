@@ -56,9 +56,10 @@ function freePort() {
   });
 }
 
-async function startServer(envOverrides = {}) {
+async function startServer(envOverrides = {}, seed = null) {
   const tempRoot = mkTempDir('athlyrax-coaching-billing-');
   const paths = createFixtureStorage(tempRoot);
+  if (seed) seed(paths);
   // A port the operating system reports free, so parallel or back-to-back
   // servers never collide (a random port in a fixed range sometimes did).
   const port = String(await freePort());
@@ -231,5 +232,45 @@ test('without billing enforcement, connected clubs keep current Stopwatch access
     assert.equal(stopwatch.payload.stopwatch.lanes, 10);
     assert.equal(stopwatch.payload.stopwatch.source, 'billing-not-enforced');
     assert.equal((await saveSwimmers(server.baseUrl, coach, 60)).response.status, 200);
+  } finally { await server.stop(); }
+});
+
+test('stored catalog with an old price: published price advertised and used for checkout, old subscriptions still recognised; persisted policy enforces capacity', async () => {
+  const seed = (paths) => writeJson(path.join(paths.storageRoot, 'billing-catalog.json'), {
+    version: 1, currency: 'GBP',
+    settings: { enforceCharging: true, checkoutEnabled: true },
+    plans: [
+      { key: 'tier-1', label: 'Tier 1', interval: 'month', amountMinor: 1800, stripePriceId: 'price_old_tier_1', limits: { maxCoaches: 1, maxSwimmers: 24, maxSquads: 1 } },
+      { key: 'tier-3', label: 'Tier 3', interval: 'month', amountMinor: 0, stripePriceId: 'price_old_tier_3', limits: { maxCoaches: null, maxSwimmers: 250, maxSquads: null } },
+    ],
+    addons: [],
+  });
+  // Env says billing is not enforced; the persisted owner policy says it is. The persisted policy wins.
+  const server = await startServer({ ...STRIPE_ENV, BILLING_ENFORCED: 'false' }, seed);
+  try {
+    const owner = await login(server.baseUrl, 'softwareowner', 'Owner!Pass1234');
+    const config = await request(server.baseUrl, '/billing/catalog', owner);
+    assert.equal(config.response.status, 200, JSON.stringify(config.payload));
+    const tier1 = (config.payload.catalog?.plans || config.payload.plans || []).find((row) => row.key === 'tier-1');
+    assert.equal(tier1?.amountMinor, 1500, 'published price is advertised');
+    assert.equal(tier1?.stripePriceId, PRICES.t1, 'checkout uses the configured published price, not the stored old one');
+    const tier3 = (config.payload.catalog?.plans || []).find((row) => row.key === 'tier-3');
+    assert.equal(tier3?.stripePriceId, PRICES.t3);
+    assert.equal(tier3?.configured, true);
+
+    // A subscription on the OLD stored price is still Tier 1, with an add-on block.
+    await sendEvent(server.baseUrl, 'customer.subscription.created', subscription('active', [['price_old_tier_1', 1], [PRICES.a25, 1]]));
+    const coach = await login(server.baseUrl, 'coachA', 'CoachA!Pass1234');
+    const access = (await request(server.baseUrl, '/auth/me', coach)).payload?.user?.access || {};
+    assert.equal(access.billing?.planKey, 'tier-1');
+    assert.equal(access.swimmerCapacity, 49);
+    assert.equal((await saveSwimmers(server.baseUrl, coach, 50)).response.status, 402, 'persisted policy enforces capacity');
+
+    // Auth payload and the entitlement endpoint agree for an assistant of the paying club.
+    const assistant = await login(server.baseUrl, 'assistA', 'AssistA!Pass1234');
+    const assistantMe = (await request(server.baseUrl, '/auth/me', assistant)).payload?.user?.access || {};
+    const assistantEnt = (await request(server.baseUrl, '/entitlements/stopwatch', assistant)).payload.stopwatch;
+    assert.equal(assistantMe.stopwatch?.lanes, 3);
+    assert.deepEqual(assistantMe.stopwatch, assistantEnt);
   } finally { await server.stop(); }
 });
