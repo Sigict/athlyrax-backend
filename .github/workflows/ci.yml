@@ -49,5 +49,8 @@ jobs:
       - name: Paid education course access, video and certificate tests
         run: node --test tests/cpd-module02.test.mjs
 
+      - name: Coaching tiers, capacity blocks and Stopwatch entitlement
+        run: node --test tests/coaching-billing.test.mjs tests/coaching-billing.integration.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
