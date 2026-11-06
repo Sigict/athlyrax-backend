@@ -96,3 +96,39 @@ test('projection does not expose unrelated tenant collections or private coach s
 test('projection fails closed when authenticated account has no mapped athlete', () => {
   assert.equal(buildAthleteHomeProjection(db, { username: 'missing' }), null);
 });
+
+// ATHLYRAX_ATHLETE_HOME_PLANNER_SESSIONS
+test('a Planner session (schedule with squadIds + training session with sets) reaches its squad once, complete', () => {
+  const planner = () => ({
+    swimmers: [
+      { id: 'sw-amy', name: 'Amy Test', squadIds: ['sq-1'], swimmerAccountUsername: 'amy.athlete' },
+      { id: 'sw-ben', name: 'Ben Other', squadId: 'sq-2', swimmerAccountUsername: 'ben.athlete' },
+    ],
+    schedule: [
+      { id: 'sch-1', scheduleDate: '2026-11-20', startTime: '06:00', endTime: '07:00', squadIds: ['sq-1'], squadNames: ['Squad One'], mainFocus: 'ATHLETE TEST session' },
+      { id: 'sch-gone', scheduleDate: '2026-11-21', squadIds: ['sq-1'], mainFocus: 'Deleted', status: 'deleted' },
+    ],
+    trainingSessions: [{ id: 'ts-1', scheduleId: 'sch-1' }],
+    trainingSessionSets: [
+      { id: 'set-a', trainingSessionId: 'ts-1', order: 1, reps: 3, distance: 100, stroke: 'free', sendOff: '1:40', restTime: '20s', title: '3x100 free' },
+      { id: 'set-p', trainingSessionId: 'ts-1', order: 2, reps: 1, distance: 50, coachPrivate: true, title: 'coach only' },
+    ],
+  });
+  const db = planner();
+  const amy = buildAthleteHomeProjection(db, { username: 'amy.athlete', role: 'swimmer' });
+  assert.equal(amy.athlete.id, 'sw-amy');
+  assert.equal(amy.sessions.length, 1, 'one session, not a schedule copy plus a session copy; deleted schedules hidden');
+  const s = amy.sessions[0];
+  assert.deepEqual([s.id, s.scheduleId, s.date, s.title, s.startTime], ['ts-1', 'sch-1', '2026-11-20', 'ATHLETE TEST session', '06:00']);
+  assert.deepEqual(s.sets.map((x) => [x.id, x.reps, x.distance, x.stroke, x.sendoff, x.rest]), [['set-a', 3, 100, 'free', '1:40', '20s']], 'complete set instructions; coach-private set hidden');
+  // Another squad's swimmer does not get it.
+  assert.equal(buildAthleteHomeProjection(db, { username: 'ben.athlete', role: 'swimmer' }).sessions.length, 0);
+  // A coach change (Console: 3 -> 4 reps, send-off 1:45) is what the athlete sees next.
+  db.trainingSessionSets[0].reps = 4; db.trainingSessionSets[0].sendOff = '1:45';
+  const updated = buildAthleteHomeProjection(db, { username: 'amy.athlete', role: 'swimmer' }).sessions[0].sets[0];
+  assert.deepEqual([updated.reps, updated.sendoff], [4, '1:45']);
+  // A schedule that names its training session directly is linked the same way.
+  const db2 = planner(); db2.schedule[0].trainingSessionId = 'ts-1'; db2.trainingSessions[0] = { id: 'ts-1' };
+  const viaSchedule = buildAthleteHomeProjection(db2, { username: 'amy.athlete', role: 'swimmer' }).sessions;
+  assert.deepEqual(viaSchedule.map((x) => [x.id, x.date, x.sets.length]), [['ts-1', '2026-11-20', 1]]);
+});
