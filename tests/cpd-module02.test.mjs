@@ -30,7 +30,7 @@ function fakeStripe() {
   return stripe;
 }
 
-async function startCourse({ sales = true, mode = 'live', mail = null, expectedAccount = '' } = {}) {
+async function startCourse({ sales = true, mode = 'live', mail = async () => {}, expectedAccount = '' } = {}) {
   const saved = { ...process.env };
   process.env.CPD_SESSION_SECRET = 'test-secret-longer-than-thirty-two-characters!!';
   process.env.CPD_MODULE02_PRICE_ID = 'price_test_module02';
@@ -252,6 +252,8 @@ test('Stripe test mode: only the signed-in owner can start a checkout', async ()
 
 test('recovery by email says so plainly when no email service is configured', async () => {
   const c = await startCourse({ mail: null });
+  const noMailStatus = await c.call('/status');
+  assert.equal((await noMailStatus.json()).salesEnabled, false, 'course sales are closed without purchase confirmation email');
   try {
     const r = await c.call('/recover', { method: 'POST', body: { email: 'a@example.com' } }); assert.equal(r.status, 503);
     assert.match((await r.json()).error, /athlyrax@outlook\.com/);
