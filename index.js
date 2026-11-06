@@ -4757,6 +4757,8 @@ app.post('/auth/onboarding/complete', requireStrictAuth, (req, res) => {
 });
 
 app.post('/auth/logout', requireStrictAuth, (req, res) => {
+	// Main-account sign-out must also clear the separate CPD learner cookie on this browser.
+	res.clearCookie('athlyrax_cpd02', { httpOnly: true, secure: true, sameSite: 'lax', path: '/api/cpd/module-02' });
 	const username = String(req.auth?.username || '').trim();
 	const index = authUsers.findIndex((row) => String(row?.username || '').trim() === username);
 	if (index < 0) {
