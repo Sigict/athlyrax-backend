@@ -15,7 +15,11 @@ import crypto from 'node:crypto';
 export const ATHLETE_INVITE_COLLECTION = 'athleteAccountInvites';
 export const ATHLETE_LINK_FIELDS = Object.freeze(['swimmerAccountUsername', 'swimmerAccountEmail', 'accountLinkedAt', 'accountLinkInviteId', 'accountLinkHistory']);
 export const SERVER_OWNED_COLLECTIONS = Object.freeze([ATHLETE_INVITE_COLLECTION]);
-export const GUARDIAN_CONSENT_VERSION = 'athlete-app-guardian-consent-v1';
+export const GUARDIAN_CONSENT_VERSION = 'athlete-app-guardian-consent-v2';
+export const GUARDIAN_CODE_TTL_MINUTES = 30;
+export const GUARDIAN_CODE_MAX_ATTEMPTS = 5;
+export const GUARDIAN_CODE_MAX_SENDS = 5;
+export const GUARDIAN_CODE_RESEND_SECONDS = 60;
 
 const text = (v) => String(v ?? '').trim();
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -88,6 +92,12 @@ export function createAthleteInvite(db = {}, { swimmerId, tenantKey, clubName = 
   if (linked.username || linked.email) return { ok: false, status: 409, error: 'This swimmer is already linked to an Athlete App account. Use "Correct account link" first if the link is wrong.' };
   if (targetEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) return { ok: false, status: 400, error: 'Enter a valid athlete email address.' };
   const guardianRequired = guardianRequiredFor(row, now);
+  if (guardianRequired && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text(guardianEmail))) {
+    return { ok: false, status: 400, error: 'This athlete is under 18 (or has no date of birth recorded): enter the parent/guardian email. The parent/guardian must confirm a code sent to that address.' };
+  }
+  if (guardianRequired && targetEmail && text(targetEmail).toLowerCase() === text(guardianEmail).toLowerCase()) {
+    return { ok: false, status: 400, error: 'The parent/guardian email must be different from the athlete email.' };
+  }
   const id = `ai_${crypto.randomBytes(12).toString('hex')}`;
   const athleteSecret = secret(); const guardianSecret = guardianRequired ? secret() : '';
   const invite = {
@@ -118,7 +128,30 @@ export function resolveInvite(db = {}, parsed, kind) {
   return sameHash(hash, kind === 'athlete' ? invite.tokenHash : invite.guardianTokenHash) ? invite : null;
 }
 
-export function recordGuardianConsent(db = {}, parsed, { name, relationship, email, consent, consentVersion, now = new Date(), ip = '' } = {}) {
+// The parent/guardian proves control of the email address the club specified: a one-time code is
+// sent there and must be entered with the consent. Only a hash of the code is stored.
+export function issueGuardianCode(db = {}, parsed, { now = new Date() } = {}) {
+  const invite = resolveInvite(db, parsed, 'guardian');
+  if (!invite) return { ok: false, status: 404, error: 'This parent/guardian link is not valid.' };
+  const status = inviteStatus(invite, now.getTime());
+  if (status !== 'awaiting-guardian') return { ok: false, status: 410, error: status === 'pending' ? 'Authorisation has already been given.' : `This invitation is ${status}.` };
+  if (!invite.guardianEmail) return { ok: false, status: 409, error: 'No parent/guardian email is recorded for this invitation. Ask the club for a new one.' };
+  const prev = invite.guardianCode || {};
+  if (Number(prev.sends || 0) >= GUARDIAN_CODE_MAX_SENDS) return { ok: false, status: 429, error: 'Too many codes were requested. Ask the club for a new invitation.' };
+  if (prev.sentAt && now.getTime() - Date.parse(prev.sentAt) < GUARDIAN_CODE_RESEND_SECONDS * 1000) return { ok: false, status: 429, error: 'A code was sent less than a minute ago. Check the inbox, then try again.' };
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const guardianCode = { hash: sha256(`${invite.id}:${code}`), sentAt: now.toISOString(), expiresAt: new Date(now.getTime() + GUARDIAN_CODE_TTL_MINUTES * 60000).toISOString(), attempts: 0, sends: Number(prev.sends || 0) + 1 };
+  const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id ? { ...inv, guardianCode } : inv));
+  return { ok: true, code, email: invite.guardianEmail, invite, db: { ...db, [ATHLETE_INVITE_COLLECTION]: invites } };
+}
+
+export function maskEmail(email) {
+  const [user, domain] = text(email).split('@');
+  if (!user || !domain) return '';
+  return `${user.slice(0, 1)}${'*'.repeat(Math.max(2, user.length - 1))}@${domain}`;
+}
+
+export function recordGuardianConsent(db = {}, parsed, { name, relationship, code, consent, consentVersion, now = new Date(), ip = '' } = {}) {
   const invite = resolveInvite(db, parsed, 'guardian');
   if (!invite) return { ok: false, status: 404, error: 'This parent/guardian link is not valid.' };
   const status = inviteStatus(invite, now.getTime());
@@ -126,9 +159,18 @@ export function recordGuardianConsent(db = {}, parsed, { name, relationship, ema
   if (invite.guardianConsent) return { ok: true, already: true, invite };
   if (consent !== true || consentVersion !== GUARDIAN_CONSENT_VERSION) return { ok: false, status: 400, error: 'Parent/guardian consent must be confirmed.' };
   if (!text(name) || !text(relationship)) return { ok: false, status: 400, error: 'Enter the parent/guardian name and relationship.' };
-  if (invite.guardianEmail && text(email).toLowerCase() !== invite.guardianEmail) return { ok: false, status: 403, error: 'This link was issued to a different parent/guardian email.' };
-  const guardianConsent = { at: now.toISOString(), name: text(name), relationship: text(relationship), email: text(email).toLowerCase(), version: GUARDIAN_CONSENT_VERSION, ip: text(ip) };
-  const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id ? { ...inv, guardianConsent } : inv));
+  const gc = invite.guardianCode || null;
+  if (!gc?.hash) return { ok: false, status: 403, error: `Request a verification code first: it is sent to ${maskEmail(invite.guardianEmail)}.` };
+  if (Number(gc.attempts || 0) >= GUARDIAN_CODE_MAX_ATTEMPTS) return { ok: false, status: 429, error: 'Too many wrong codes. Request a new code.' };
+  if (!(Date.parse(gc.expiresAt) > now.getTime())) return { ok: false, status: 403, error: 'The verification code has expired. Request a new code.' };
+  const good = /^\d{6}$/.test(text(code)) && sameHash(sha256(`${invite.id}:${text(code)}`), gc.hash);
+  if (!good) {
+    // Wrong code: count the attempt (persisted) and refuse.
+    const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id ? { ...inv, guardianCode: { ...gc, attempts: Number(gc.attempts || 0) + 1 } } : inv));
+    return { ok: false, status: 403, error: 'The verification code is not correct.', persist: true, db: { ...db, [ATHLETE_INVITE_COLLECTION]: invites } };
+  }
+  const guardianConsent = { at: now.toISOString(), name: text(name), relationship: text(relationship), email: invite.guardianEmail, verifiedBy: 'email-code', codeSentAt: gc.sentAt, version: GUARDIAN_CONSENT_VERSION, ip: text(ip) };
+  const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id ? { ...inv, guardianConsent, guardianCode: { ...gc, usedAt: now.toISOString(), hash: '' } } : inv));
   return { ok: true, invite: { ...invite, guardianConsent }, db: { ...db, [ATHLETE_INVITE_COLLECTION]: invites } };
 }
 
@@ -228,4 +270,36 @@ export function preserveServerOwnedAthleteData(nextShape = {}, existingShape = {
     });
   }
   return out;
+}
+
+// Compensation: undo an acceptance whose login account could not be saved. Only reverts the exact
+// link made by this invitation for this username; the invitation becomes usable again.
+export function revertAcceptance(db = {}, invite, username, { reason = 'account not saved', now = new Date() } = {}) {
+  const at = now.toISOString();
+  let reverted = false;
+  const swimmers = list(db.swimmers).map((s) => {
+    if (text(s?.id) !== text(invite.swimmerId) || text(s?.accountLinkInviteId) !== text(invite.id) || text(s?.swimmerAccountUsername).toLowerCase() !== text(username).toLowerCase()) return s;
+    reverted = true;
+    const next = { ...s, accountLinkHistory: [...list(s.accountLinkHistory), { action: 'reverted', at, username: text(username), inviteId: invite.id, by: 'system', reason }] };
+    delete next.swimmerAccountUsername; delete next.swimmerAccountEmail; delete next.accountLinkedAt; delete next.accountLinkInviteId;
+    return next;
+  });
+  if (!reverted) return { ok: true, reverted: false, db: null };
+  const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id && text(inv.acceptedBy).toLowerCase() === text(username).toLowerCase() ? { ...inv, acceptedAt: '', acceptedBy: '' } : inv));
+  return { ok: true, reverted: true, db: { ...db, swimmers, [ATHLETE_INVITE_COLLECTION]: invites } };
+}
+
+// Recovery: a link made by an invitation whose login account does not exist (for example, the
+// account save failed and so did the immediate undo) is reverted, so no swimmer stays linked to an
+// account nobody can sign in to.
+export function reconcileOrphanedAthleteLinks(db = {}, accountExists = () => true, { now = new Date() } = {}) {
+  let current = db; const reverted = [];
+  for (const row of list(db.swimmers)) {
+    const username = text(row?.swimmerAccountUsername); const inviteId = text(row?.accountLinkInviteId);
+    if (!username || !inviteId || accountExists(username)) continue;
+    const invite = list(current[ATHLETE_INVITE_COLLECTION]).find((inv) => text(inv.id) === inviteId) || { id: inviteId, swimmerId: row.id };
+    const out = revertAcceptance(current, invite, username, { reason: 'login account missing (recovered automatically)', now });
+    if (out.reverted) { current = out.db; reverted.push({ swimmerId: text(row.id), username }); }
+  }
+  return reverted.length ? { ok: true, reverted, db: current } : { ok: true, reverted, db: null };
 }

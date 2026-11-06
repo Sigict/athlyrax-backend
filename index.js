@@ -12,7 +12,7 @@ import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
-import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION } from './athlete-account-invites.mjs';
+import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -3886,21 +3886,43 @@ async function mutateAthleteTenantDb(paths, mutate) {
 		const db = readJsonFile(paths.dbPath);
 		if (!db || typeof db !== 'object' || Array.isArray(db)) throw new Error('Club data is unavailable.');
 		outcome = mutate(db);
-		if (!outcome?.ok || !outcome.db) return;
+		if (!outcome?.db || !(outcome.ok || outcome.persist)) return;
 		writeDbSnapshotIfPossible(paths.dbPath, paths.snapshotDir);
 		writeAtomicJsonFile(paths.dbPath, outcome.db);
 	});
 	return outcome;
 }
+// Test-only failure switches (ignored in production) used by the regression tests.
+const athleteInviteTestFailure = (name) => !IS_PRODUCTION && String(process.env[name] || '') === '1';
+const athleteAccountExists = (username) => authUsers.some((u) => String(u?.username || '').trim().toLowerCase() === String(username || '').trim().toLowerCase());
+// Recovery: revert any invitation link whose login account does not exist (see reconcileOrphanedAthleteLinks).
+async function reconcileAthleteLinks(t, req) {
+	try {
+		const out = await mutateAthleteTenantDb(t.paths, (db) => reconcileOrphanedAthleteLinks(db, athleteAccountExists));
+		if (out?.reverted?.length) appendAuthAuditEvent({ action: 'athlete_link_reconciled', req, status: 'success', target: t.key, details: { reverted: out.reverted } });
+	} catch {}
+}
+function guardianDeliveryMode() {
+	if (AUTH_SMTP_HOST && AUTH_SMTP_FROM) return 'smtp';
+	return IS_PRODUCTION ? '' : 'console';
+}
+async function sendAthleteGuardianEmail(to, subject, lines) {
+	const mode = guardianDeliveryMode();
+	if (mode === 'smtp') { await getAuthResetMailTransport().sendMail({ from: AUTH_SMTP_FROM, to, subject, text: lines.join('\n') }); return 'smtp'; }
+	if (mode === 'console') { console.log(`[athlete-invite] email to ${to}: ${subject} | ${lines.join(' | ')}`); return 'console'; }
+	throw new Error('Email delivery is not configured.');
+}
+
 function clubDisplayName(tenantKey) {
 	const coach = authUsers.find((u) => normalizeTenantId(u?.tenantId) === tenantKey && String(u?.swimClub || '').trim());
 	return String(coach?.swimClub || coach?.teamName || '').trim();
 }
 
 // Coach: invitation status for one swimmer (no secrets).
-app.get('/coach/swimmers/:swimmerId/athlete-invites', requireStrictAuth, requireAthleteInviteManager, (req, res) => {
+app.get('/coach/swimmers/:swimmerId/athlete-invites', requireStrictAuth, requireAthleteInviteManager, async (req, res) => {
 	const t = athleteTenantPaths(athleteInviteActorTenant(req));
 	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
+	await reconcileAthleteLinks(t, req);
 	const db = readJsonFile(t.paths.dbPath) || {};
 	const row = (Array.isArray(db.swimmers) ? db.swimmers : []).find((s) => String(s?.id || '') === String(req.params.swimmerId || ''));
 	if (!row) { res.status(404).json({ error: 'Swimmer not found in this club.' }); return; }
@@ -3914,10 +3936,17 @@ app.post('/coach/swimmers/:swimmerId/athlete-invites', requireStrictAuth, requir
 	const t = athleteTenantPaths(athleteInviteActorTenant(req));
 	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
 	try {
-		const out = await mutateAthleteTenantDb(t.paths, (db) => createAthleteInvite(db, {
-			swimmerId: req.params.swimmerId, tenantKey: t.key, actor: req.auth?.username,
-			targetEmail: String(req.body?.email || '').trim(), guardianEmail: String(req.body?.guardianEmail || '').trim(), ttlHours: ATHLETE_INVITE_TTL_HOURS,
-		}));
+		await reconcileAthleteLinks(t, req);
+		const out = await mutateAthleteTenantDb(t.paths, (db) => {
+			const created = createAthleteInvite(db, {
+				swimmerId: req.params.swimmerId, tenantKey: t.key, actor: req.auth?.username,
+				targetEmail: String(req.body?.email || '').trim(), guardianEmail: String(req.body?.guardianEmail || '').trim(), ttlHours: ATHLETE_INVITE_TTL_HOURS,
+			});
+			if (created.ok && created.invite.guardianRequired && !guardianDeliveryMode()) {
+				return { ok: false, status: 503, error: 'Parent/guardian email verification is not available, so invitations for under-18 athletes cannot be created yet.' };
+			}
+			return created;
+		});
 		if (!out?.ok) { res.status(out?.status || 400).json({ error: out?.error || 'Invitation could not be created.' }); return; }
 		appendAuthAuditEvent({ action: 'athlete_invite_created', req, status: 'success', target: out.invite.swimmerId, details: { inviteId: out.invite.id, tenantId: t.key, guardianRequired: out.invite.guardianRequired, expiresAt: out.invite.expiresAt } });
 		res.status(201).json({ ok: true, invite: publicInvite(out.invite), swimmerName: out.swimmerName, athleteToken: out.athleteToken, guardianToken: out.guardianToken });
@@ -3965,7 +3994,33 @@ app.get('/athlete-invites/preview', requireLoginRateLimit, (req, res) => {
 	res.status(200).json({ ok: true, kind: parsed.kind, status: inviteStatus(invite), club: clubDisplayName(t.key), swimmerFirstName: String(row.firstName || swimmerDisplayName(row).split(' ')[0] || ''), expiresAt: invite.expiresAt, guardianRequired: invite.guardianRequired === true, guardianConsented: Boolean(invite.guardianConsent), emailRestricted: Boolean(invite.targetEmail), consentVersion: GUARDIAN_CONSENT_VERSION });
 });
 
-// Public: parent/guardian authorises an under-18 athlete's link.
+// Public: a one-time verification code is emailed to the parent/guardian address the club specified.
+app.post('/athlete-invites/guardian-code', requireLoginRateLimit, async (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
+	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
+	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
+	if (!guardianDeliveryMode()) { res.status(503).json({ error: 'Email verification is not available right now.' }); return; }
+	const out = await mutateAthleteTenantDb(t.paths, (db) => issueGuardianCode(db, parsed)).catch(() => null);
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'A code could not be issued safely.' }); return; }
+	const row = ((readJsonFile(t.paths.dbPath) || {}).swimmers || []).find((r) => String(r?.id) === String(out.invite.swimmerId)) || {};
+	try {
+		await sendAthleteGuardianEmail(out.email, 'AthlyraX: parent/guardian verification code', [
+			`${clubDisplayName(t.key) || 'Your club'} has invited ${String(row.firstName || 'your child')} to the AthlyraX Athlete App.`,
+			'',
+			`Your verification code is: ${out.code}`,
+			`It expires in ${GUARDIAN_CODE_TTL_MINUTES} minutes. Enter it on the parent/guardian page to authorise the link.`,
+			'',
+			'If you did not expect this, ignore this email and tell the club.',
+		]);
+	} catch {
+		res.status(503).json({ error: 'The verification email could not be sent. Try again in a minute.' });
+		return;
+	}
+	appendAuthAuditEvent({ action: 'athlete_invite_guardian_code_sent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key } });
+	res.status(200).json({ ok: true, sentTo: maskEmail(out.email), expiresInMinutes: GUARDIAN_CODE_TTL_MINUTES });
+});
+
+// Public: parent/guardian authorises an under-18 athlete's link with the emailed code.
 app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req, res) => {
 	const parsed = parseInviteToken(req.body?.token);
 	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
@@ -3974,8 +4029,12 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 		const r = recordGuardianConsent(db, parsed, { ...req.body, ip: req.ip });
 		return r.already ? { ...r, db: null } : r;
 	}).catch(() => null);
-	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'Consent could not be saved safely.' }); return; }
-	appendAuthAuditEvent({ action: 'athlete_invite_guardian_consent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key, relationship: out.invite.guardianConsent?.relationship } });
+	if (!out?.ok) {
+		if (out?.persist) appendAuthAuditEvent({ action: 'athlete_invite_guardian_code_failed', req, status: 'blocked', target: String(parsed.inviteId) });
+		res.status(out?.status || 503).json({ error: out?.error || 'Consent could not be saved safely.' });
+		return;
+	}
+	appendAuthAuditEvent({ action: 'athlete_invite_guardian_consent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key, relationship: out.invite.guardianConsent?.relationship, verifiedBy: 'email-code' } });
 	res.status(200).json({ ok: true, already: Boolean(out.already) });
 });
 
@@ -4018,10 +4077,15 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 			swimClub: clubDisplayName(t.key), isApproved: true, onboardingCompletedAt: new Date().toISOString(), billing: getDefaultBillingState(),
 		};
 	}
+	await reconcileAthleteLinks(t, req);
 	const pre = checkAcceptance(readJsonFile(t.paths.dbPath) || {}, parsed, account);
 	if (!pre.ok) { res.status(pre.status || 400).json({ error: pre.error }); return; }
 	if (pre.already) { res.status(200).json({ ok: true, already: true }); return; }
 	let out;
+	// The new account is held in memory before the link is written, so a concurrent reconciliation
+	// never sees the link without its account; it is removed again if anything below fails.
+	if (newUser) authUsers.push(newUser);
+	const dropNewUser = () => { if (newUser) { const i = authUsers.indexOf(newUser); if (i >= 0) authUsers.splice(i, 1); } };
 	try {
 		out = await mutateAthleteTenantDb(t.paths, (db) => {
 			const c = checkAcceptance(db, parsed, account);
@@ -4029,19 +4093,37 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 			return { ok: true, invite: c.invite, db: applyAcceptance(db, c.invite, account) };
 		});
 	} catch { out = null; }
-	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'The invitation could not be accepted safely.' }); return; }
+	if (!out?.ok) { dropNewUser(); res.status(out?.status || 503).json({ error: out?.error || 'The invitation could not be accepted safely.' }); return; }
+	// ATHLYRAX_ATHLETE_INVITE_ATOMIC: the swimmer link and the login account succeed together. If the
+	// account cannot be saved, the account changes are rolled back and the link is undone; if even the
+	// undo fails, reconcileOrphanedAthleteLinks reverts it on the next club access.
+	const user = newUser || signedIn;
+	const before = newUser ? null : { athleteInviteManaged: user.athleteInviteManaged, athleteTenantConnections: user.athleteTenantConnections };
 	try {
-		if (newUser) authUsers.push(newUser);
-		const user = newUser || signedIn;
 		user.athleteInviteManaged = true;
 		// The club connection the Athlete App shows (also for the account's own club).
 		const rows = Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections.filter((c) => normalizeTenantId(c?.tenantId) !== t.key) : [];
 		user.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, clubName: clubDisplayName(t.key) || 'Club', status: 'active', source: 'athlete-invite', connectedAt: new Date().toISOString() }];
+		if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_AUTH_PERSIST')) throw new Error('test: account save failed');
 		persistAuthUsers();
 	} catch (error) {
-		if (newUser) authUsers.splice(authUsers.indexOf(newUser), 1);
-		res.status(500).json({ error: 'The link was saved but the account could not be updated. Ask the club to check the link.' });
+		if (newUser) dropNewUser();
+		else { user.athleteInviteManaged = before.athleteInviteManaged; user.athleteTenantConnections = before.athleteTenantConnections; }
+		let undone = false;
+		try {
+			if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_LINK_COMPENSATION')) throw new Error('test: undo failed');
+			const undo = await mutateAthleteTenantDb(t.paths, (db) => revertAcceptance(db, out.invite, account.username, { reason: 'login account could not be saved' }));
+			undone = Boolean(undo?.ok);
+		} catch {}
+		appendAuthAuditEvent({ action: 'athlete_invite_accept_rolled_back', req, status: 'error', target: out.invite.swimmerId, details: { inviteId: out.invite.id, tenantId: t.key, linkUndone: undone } });
+		res.status(503).json({ error: 'The account could not be saved, so nothing was linked. Please try again.' });
 		return;
+	}
+	if (out.invite.guardianRequired && out.invite.guardianEmail) {
+		sendAthleteGuardianEmail(out.invite.guardianEmail, 'AthlyraX: Athlete App account linked', [
+			`The AthlyraX Athlete App login "${account.username}" is now linked to the athlete you authorised at ${clubDisplayName(t.key) || 'the club'}.`,
+			'If you did not expect this, contact the club straight away.',
+		]).catch(() => {});
 	}
 	appendAuthAuditEvent({ action: 'athlete_invite_accepted', req, status: 'success', target: out.invite.swimmerId, details: { inviteId: out.invite.id, tenantId: t.key, username: account.username, newAccount: Boolean(newUser) } });
 	const payload = { ok: true, linked: true, newAccount: Boolean(newUser) };

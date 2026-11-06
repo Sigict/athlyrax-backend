@@ -104,6 +104,7 @@ async function startServer(envOverrides = {}, seed = null) {
   });
 
   return {
+    output: () => stdout,
     baseUrl: `http://127.0.0.1:${port}`,
     child,
     tempRoot,
@@ -156,6 +157,7 @@ const seedInvites = (paths) => {
     ...BIG,
   });
 };
+const waitFor = async (fn, ms = 5000) => { const end = Date.now() + ms; let v; while (!(v = fn()) && Date.now() < end) await new Promise((r) => setTimeout(r, 50)); assert.ok(v, 'timed out waiting'); return v; };
 const tenantDb = (server) => JSON.parse(fs.readFileSync(path.join(server.tempRoot, 'storage', 'tenants', 'tenant-a', 'db.json'), 'utf8'));
 const META = new Set(['createdByUserId', 'createdAt', 'updatedByUserId', 'updatedAt', 'tenantId', 'attributionStatus']);
 const noMeta = (v) => (Array.isArray(v) ? v.map(noMeta) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([k]) => !META.has(k)).map(([k, x]) => [k, noMeta(x)])) : v);
@@ -239,14 +241,30 @@ test('Athlete App invitations link a login to the existing swimmer record, secur
     const inv2 = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
     assert.equal((await signup(base, inv2.payload.athleteToken, 'amelia.real')).response.status, 201);
     assert.equal(tenantDb(server).swimmers.find((r) => r.id === 'amelia').swimmerAccountUsername, 'amelia.real');
-    // Under 18: a parent/guardian must authorise first.
+    // Under 18: a parent/guardian email is required, and the guardian must confirm a code emailed there.
+    assert.equal((await post(base, '/coach/swimmers/kid/athlete-invites', {}, coach)).response.status, 400, 'guardian email required');
     const kid = await post(base, '/coach/swimmers/kid/athlete-invites', { guardianEmail: 'parent@example.com' }, coach);
     assert.equal(kid.payload.invite.guardianRequired, true);
     assert.equal((await signup(base, kid.payload.athleteToken, 'kit.young')).response.status, 403);
+    const consent = (extra) => post(base, '/athlete-invites/guardian-consent', { token: kid.payload.guardianToken, name: 'Pat Young', relationship: 'Mother', consent: true, consentVersion: 'athlete-app-guardian-consent-v2', ...extra }, {});
     assert.equal((await post(base, '/athlete-invites/guardian-consent', { token: kid.payload.athleteToken, consent: true }, {})).response.status, 404, 'athlete link cannot consent');
-    assert.equal((await post(base, '/athlete-invites/guardian-consent', { token: kid.payload.guardianToken, name: 'P', relationship: 'Mother', email: 'someone@example.com', consent: true, consentVersion: 'athlete-app-guardian-consent-v1' }, {})).response.status, 403, 'wrong guardian email');
-    assert.equal((await post(base, '/athlete-invites/guardian-consent', { token: kid.payload.guardianToken, name: 'Pat Young', relationship: 'Mother', email: 'parent@example.com', consent: true, consentVersion: 'athlete-app-guardian-consent-v1' }, {})).response.status, 200);
+    assert.equal((await consent({})).response.status, 403, 'no consent without a verification code');
+    const sent = await post(base, '/athlete-invites/guardian-code', { token: kid.payload.guardianToken }, {});
+    assert.equal(sent.response.status, 200, JSON.stringify(sent.payload));
+    assert.equal(sent.payload.sentTo, 'p*****@example.com');
+    assert.equal((await post(base, '/athlete-invites/guardian-code', { token: kid.payload.guardianToken }, {})).response.status, 429, 'resend throttled');
+    const code = await waitFor(() => (server.output().match(/email to parent@example\.com: [^\n]*?Your verification code is: (\d{6})/) || [])[1]);
+    assert.match(code, /^\d{6}$/);
+    assert.ok(!JSON.stringify(tenantDb(server)).includes(code), 'the code itself is never stored');
+    const wrong = code === '000000' ? '111111' : '000000';
+    assert.equal((await consent({ code: wrong })).response.status, 403, 'wrong code refused');
+    assert.equal(tenantDb(server).athleteAccountInvites.find((i) => i.id === kid.payload.invite.id).guardianCode.attempts, 1, 'failed attempts are counted');
+    assert.equal((await consent({ code, consent: false })).response.status, 400);
+    assert.equal((await consent({ code })).response.status, 200);
+    const recorded = tenantDb(server).athleteAccountInvites.find((i) => i.id === kid.payload.invite.id).guardianConsent;
+    assert.deepEqual([recorded.email, recorded.verifiedBy, recorded.name], ['parent@example.com', 'email-code', 'Pat Young']);
     assert.equal((await signup(base, kid.payload.athleteToken, 'kit.young')).response.status, 201);
+    await waitFor(() => /email to parent@example\.com: AthlyraX: Athlete App account linked/.test(server.output()));
     // Revoked and expired invitations.
     const oth = await post(base, '/coach/swimmers/other/athlete-invites', {}, coach);
     assert.equal((await post(base, `/coach/athlete-invites/${oth.payload.invite.id}/revoke`, {}, coach)).response.status, 200);
@@ -264,4 +282,45 @@ test('Athlete App invitations link a login to the existing swimmer record, secur
   } finally {
     await server.stop();
   }
+});
+
+// ATHLYRAX_ATHLETE_INVITE_ATOMIC: a failed account save never leaves a linked swimmer behind.
+test('if the login account cannot be saved, the swimmer link is undone and the invitation stays usable', async () => {
+  const server = await startServer({ ATHLYRAX_TEST_FAIL_ATHLETE_AUTH_PERSIST: '1' }, seedInvites);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const inv = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
+    const acc = await signup(base, inv.payload.athleteToken, 'amelia.athlete');
+    assert.equal(acc.response.status, 503, JSON.stringify(acc.payload));
+    const db = tenantDb(server);
+    const row = db.swimmers.find((r) => r.id === 'amelia');
+    assert.equal(row.swimmerAccountUsername, undefined, 'no link left behind');
+    assert.deepEqual(row.accountLinkHistory.map((h) => h.action), ['linked', 'reverted']);
+    assert.equal(db.swimmers.length, 3, 'no swimmer created');
+    assert.equal(db.athleteAccountInvites[0].acceptedAt, '', 'invitation usable again');
+    const loginTry = await request(base, '/auth/login', { method: 'POST', body: { username: 'amelia.athlete', password: 'Athlete!Pass1234' } });
+    assert.equal(loginTry.response.status, 401, 'no half-created account');
+    assert.equal((await request(base, `/athlete-invites/preview?token=${encodeURIComponent(inv.payload.athleteToken)}`)).payload.status, 'pending');
+  } finally { await server.stop(); }
+});
+
+test('if even the undo fails, the orphaned link is reverted automatically on the next club access', async () => {
+  const server = await startServer({ ATHLYRAX_TEST_FAIL_ATHLETE_AUTH_PERSIST: '1', ATHLYRAX_TEST_FAIL_ATHLETE_LINK_COMPENSATION: '1' }, seedInvites);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const inv = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
+    assert.equal((await signup(base, inv.payload.athleteToken, 'amelia.athlete')).response.status, 503);
+    assert.equal(tenantDb(server).swimmers.find((r) => r.id === 'amelia').swimmerAccountUsername, 'amelia.athlete', 'undo failed: the link is still there');
+    // The next club access (coach opens the swimmer's Athlete App status) recovers it.
+    const status = await request(base, '/coach/swimmers/amelia/athlete-invites', coach);
+    assert.equal(status.response.status, 200);
+    assert.equal(status.payload.linkedUsername, '');
+    const row = tenantDb(server).swimmers.find((r) => r.id === 'amelia');
+    assert.equal(row.swimmerAccountUsername, undefined);
+    assert.equal(row.accountLinkHistory.at(-1).action, 'reverted');
+    assert.match(row.accountLinkHistory.at(-1).reason, /login account missing/);
+    assert.equal(status.payload.invites[0].status, 'pending', 'invitation usable again');
+  } finally { await server.stop(); }
 });
