@@ -192,6 +192,9 @@ test('Coach Pool Console: load session, save results per set and rep without ove
     // Set change (send-off) saves to the canonical set.
     const change = await request(base, '/coach/poolside/sessions/sessionA/sets/set-1', { ...coach, method: 'POST', body: { reps: 4, sendoffSeconds: 75 } });
     assert.equal(change.response.status, 200, JSON.stringify(change.payload));
+    // ATHLYRAX_SENDOFF_PLANNER_FORMAT: stored like the Planner stores it, seconds alongside.
+    const changedSet = (await request(base, '/db', coach)).payload.trainingSessionSets.find((s) => s.id === 'set-1');
+    assert.deepEqual([changedSet.reps, changedSet.sendOff, changedSet.sendoffSeconds], [4, '1:15', 75]);
 
     // Viewer cannot write; another club cannot see the session.
     const viewer = await login(base, 'viewerA', 'ViewerA!Pass1234');

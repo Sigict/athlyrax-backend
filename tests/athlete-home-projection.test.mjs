@@ -132,3 +132,11 @@ test('a Planner session (schedule with squadIds + training session with sets) re
   const viaSchedule = buildAthleteHomeProjection(db2, { username: 'amy.athlete', role: 'swimmer' }).sessions;
   assert.deepEqual(viaSchedule.map((x) => [x.id, x.date, x.sets.length]), [['ts-1', '2026-11-20', 1]]);
 });
+
+// Send-offs saved as plain seconds are shown as clock time.
+test('athlete sets show numeric send-offs as clock time', () => {
+  const db = { swimmers: [{ id: 'a', swimmerAccountUsername: 'a.user', squadId: 'sq' }], trainingSessions: [{ id: 's', date: '2026-11-20', squadId: 'sq' }],
+    trainingSessionSets: [{ id: 'x', trainingSessionId: 's', sendOff: 105 }, { id: 'y', trainingSessionId: 's', sendOff: '1:40' }, { id: 'z', trainingSessionId: 's', sendoff: '95' }] };
+  const sets = buildAthleteHomeProjection(db, { username: 'a.user' }).sessions[0].sets;
+  assert.deepEqual(sets.map((x) => x.sendoff), ['1:45', '1:40', '1:35']);
+});

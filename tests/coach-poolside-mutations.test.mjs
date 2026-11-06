@@ -30,7 +30,9 @@ test('Poolside set change mutates only the canonical linked set', () => {
   const result = applyCoachPoolsideSetChange(db, { sessionId: 'sess-1', setId: 'set-1', reps: 10, sendoffSeconds: 65, updatedBy: 'coach' });
   assert.equal(result.ok, true);
   assert.equal(result.db.trainingSessionSets[0].reps, 10);
-  assert.equal(result.db.trainingSessionSets[0].sendoff, 65);
+  assert.equal(result.db.trainingSessionSets[0].sendoff, '1:05');
+  assert.equal(result.db.trainingSessionSets[0].sendOff, '1:05');
+  assert.equal(result.db.trainingSessionSets[0].sendoffSeconds, 65);
 });
 
 test('Poolside refuses an unrelated set', () => {
