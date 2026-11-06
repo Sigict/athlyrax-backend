@@ -32,3 +32,30 @@ test('coach Poolside projection returns only one day and linked club records', (
   assert.deepEqual(result.attendance.map((row) => row.id), ['att-1']);
   assert.equal(Object.hasOwn(result, 'db'), false);
 });
+
+test('poolside projection shows the real session name (Planner "Session name" is mainFocus)', () => {
+  const date = '2026-11-20';
+  const result = buildCoachPoolsideProjection({
+    schedule: [
+      { id: 'sch-a', scheduleDate: date, trainingSessionId: 'ts-a', mainFocus: 'CONSOLE TEST - not real training', startTime: '06:00' },
+      { id: 'sch-b', scheduleDate: date, trainingSessionId: 'ts-b', mainFocus: 'Evening threshold', startTime: '18:00' },
+      { id: 'sch-c', scheduleDate: date, trainingSessionId: 'ts-c', startTime: '12:00' },
+    ],
+    trainingSessions: [
+      { id: 'ts-a', scheduleId: 'sch-a', mainFocus: '' },
+      { id: 'ts-b', scheduleId: 'sch-b', title: 'Threshold 10x100' },
+      { id: 'ts-c', scheduleId: 'sch-c' },
+    ],
+  }, { date });
+  const byId = Object.fromEntries(result.sessions.map((s) => [s.id, s]));
+  // The session row's empty name does not hide the schedule's name.
+  assert.equal(byId['ts-a'].title, 'CONSOLE TEST - not real training');
+  assert.equal(byId['ts-a'].titleIsPlaceholder, false);
+  assert.equal(byId['ts-a'].scheduleId, 'sch-a');
+  // An explicit session title wins over the schedule's name.
+  assert.equal(byId['ts-b'].title, 'Threshold 10x100');
+  // Only a session with no name anywhere gets the placeholder, and it is marked as one.
+  assert.equal(byId['ts-c'].title, 'Training session');
+  assert.equal(byId['ts-c'].titleIsPlaceholder, true);
+  assert.equal(new Set(result.sessions.map((s) => s.id)).size, 3, 'three sessions on one date stay distinct');
+});

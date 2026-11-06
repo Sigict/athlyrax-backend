@@ -26,6 +26,18 @@ function fullName(row = {}) {
   return text(row.fullName || row.name || [row.firstName, row.lastName].map(text).filter(Boolean).join(' '));
 }
 
+// The coach's session name is saved as mainFocus by the Planner ("Session name"); older rows may
+// use title/name/sessionName. The first non-empty name from the session, then its schedule, is used.
+function sessionTitle(...sources) {
+  for (const source of sources) {
+    for (const key of ['title', 'name', 'sessionName', 'mainFocus']) {
+      const value = String(source?.[key] ?? '').trim();
+      if (value) return value;
+    }
+  }
+  return '';
+}
+
 export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
   const selectedDate = /^\d{4}-\d{2}-\d{2}$/.test(text(date))
     ? text(date)
@@ -39,11 +51,11 @@ export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
   }
   const canonicalSessions = schedules.map((schedule) => {
     const linked = sessionByScheduleId.get(sessionId(schedule)) || trainingSessions.find((row) => sessionId(row) === text(schedule.trainingSessionId)) || {};
-    return { ...schedule, ...linked, id: sessionId(linked) || sessionId(schedule), scheduleId: sessionId(schedule), date: selectedDate };
+    return { ...schedule, ...linked, id: sessionId(linked) || sessionId(schedule), scheduleId: sessionId(schedule), date: selectedDate, poolsideTitle: sessionTitle(linked, schedule) };
   });
   for (const session of trainingSessions) {
     if (sessionDate(session) !== selectedDate || text(session.status).toLowerCase() === 'deleted') continue;
-    if (!canonicalSessions.some((row) => sessionId(row) === sessionId(session))) canonicalSessions.push({ ...session, id: sessionId(session), date: selectedDate });
+    if (!canonicalSessions.some((row) => sessionId(row) === sessionId(session))) canonicalSessions.push({ ...session, id: sessionId(session), date: selectedDate, poolsideTitle: sessionTitle(session) });
   }
   const sessionIds = new Set(canonicalSessions.map(sessionId).filter(Boolean));
   const setsBySession = new Map();
@@ -115,7 +127,8 @@ export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
     sessions: canonicalSessions.map((session) => ({
       id: sessionId(session),
       scheduleId: text(session.scheduleId),
-      title: text(session.title || session.name || session.sessionName || 'Training session'),
+      title: session.poolsideTitle || 'Training session',
+      titleIsPlaceholder: !session.poolsideTitle,
       startTime: text(session.startTime),
       endTime: text(session.endTime),
       venue: text(session.venueName || session.venue),
