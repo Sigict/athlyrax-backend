@@ -274,3 +274,29 @@ test('stored catalog with an old price: published price advertised and used for 
     assert.deepEqual(assistantMe.stopwatch, assistantEnt);
   } finally { await server.stop(); }
 });
+
+test('portal cancellation scheduled with cancel_at (Stripe basil) shows as cancelling at period end and keeps access until then', async () => {
+  const server = await startServer(STRIPE_ENV);
+  try {
+    const periodEnd = 2000000000;
+    const basil = (extra) => ({
+      id: 'sub_basil', customer: 'cus_basil', status: 'active', metadata: { username: 'coachA' },
+      items: { data: [{ price: { id: PRICES.t1 }, quantity: 1, current_period_end: periodEnd }] },
+      cancel_at_period_end: false, ...extra,
+    });
+    await sendEvent(server.baseUrl, 'customer.subscription.created', basil({}));
+    const coach = await login(server.baseUrl, 'coachA', 'CoachA!Pass1234');
+    let access = (await request(server.baseUrl, '/auth/me', coach)).payload?.user?.access || {};
+    assert.equal(access.billing?.cancelAtPeriodEnd, false);
+    assert.equal(access.billing?.currentPeriodEnd, new Date(periodEnd * 1000).toISOString(), 'period end read from the subscription item');
+    await sendEvent(server.baseUrl, 'customer.subscription.updated', basil({ cancel_at: periodEnd, canceled_at: periodEnd - 100 }));
+    access = (await request(server.baseUrl, '/auth/me', coach)).payload?.user?.access || {};
+    assert.equal(access.billing?.cancelAtPeriodEnd, true, 'scheduled cancellation recognised');
+    assert.equal(access.isPaid, true, 'access continues until the period ends');
+    assert.equal(access.billing?.status, 'active');
+    // "Don't cancel" in the portal clears cancel_at.
+    await sendEvent(server.baseUrl, 'customer.subscription.updated', basil({ cancel_at: null }));
+    access = (await request(server.baseUrl, '/auth/me', coach)).payload?.user?.access || {};
+    assert.equal(access.billing?.cancelAtPeriodEnd, false);
+  } finally { await server.stop(); }
+});

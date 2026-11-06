@@ -1761,7 +1761,17 @@ function upsertUserBillingByCustomerId(customerId, partialBilling) {
 }
 
 async function handleStripeSubscriptionEvent(subscriptionObject) {
-	const subscription = subscriptionObject && typeof subscriptionObject === 'object' ? subscriptionObject : {};
+	// ATHLYRAX_SUBSCRIPTION_SCHEDULED_CANCEL: from Stripe API 2025-03-31.basil the customer portal
+	// schedules "cancel at end of period" as cancel_at (cancel_at_period_end stays false), and the
+	// billing period end lives on the subscription items. Both are read here.
+	const rawSubscription = subscriptionObject && typeof subscriptionObject === 'object' ? subscriptionObject : {};
+	const itemPeriodEnd = Math.max(0, ...((Array.isArray(rawSubscription?.items?.data) ? rawSubscription.items.data : []).map((item) => Number(item?.current_period_end) || 0)));
+	const subscription = {
+		...rawSubscription,
+		current_period_end: rawSubscription?.current_period_end || itemPeriodEnd || rawSubscription?.cancel_at || null,
+		cancel_at_period_end: rawSubscription?.cancel_at_period_end === true
+			|| (Number(rawSubscription?.cancel_at) > 0 && String(rawSubscription?.status || '').toLowerCase() !== 'canceled'),
+	};
 	const customerId = String(subscription?.customer || '').trim();
 	if (!customerId) return;
 
