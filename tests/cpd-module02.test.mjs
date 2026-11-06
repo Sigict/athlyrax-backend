@@ -269,6 +269,24 @@ test('course purchases never reach the software-subscription billing code', () =
   assert.match(src.slice(branch, upsert), /break;/);
 });
 
+test('restricted live CPD key can use configured price without broad account-read access', async () => {
+  const c = await startCourse({ mode: 'live', expectedAccount: 'acct_1UY3W3AROMWHD0h9' });
+  try {
+    c.stripe.accounts.retrieve = async () => { const e = new Error('restricted key'); e.statusCode = 403; throw e; };
+    c.stripe.prices.retrieve = async () => ({ active: true, type: 'one_time', currency: 'gbp', unit_amount: 499, livemode: true, product: 'prod_course' });
+    for (const n of [1, 2, 3]) await upload(c.call, n, mp4(4096));
+    let r = await c.call('/status'); let st = await r.json();
+    assert.equal(st.stripeConfig.expectedAccountMatches, null);
+    assert.equal(st.stripeConfig.verifiedByPrice, true);
+    assert.equal(st.salesEnabled, true);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', digitalContentConsent: true, cancellationAcknowledged: true } });
+    assert.equal(r.status, 200);
+    c.stripe.prices.retrieve = async () => { const e = new Error('not found'); e.code = 'resource_missing'; throw e; };
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', digitalContentConsent: true, cancellationAcknowledged: true } });
+    assert.equal(r.status, 503, 'a key that cannot reach the configured price stays closed');
+  } finally { await c.stop(); }
+});
+
 test('the course reports which Stripe key it uses and refuses a key from another account', async () => {
   const c = await startCourse({ mode: 'test', expectedAccount: 'acct_1UXqgPPGSvfRRDt1' });
   try {
