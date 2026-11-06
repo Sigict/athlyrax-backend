@@ -154,14 +154,15 @@ export function registerCpdModule02(app, deps) {
   const testClient = deps.courseStripeClient || (courseKey ? new Stripe(courseKey) : deps.stripeClient) || null;
   const liveClient = deps.courseLiveStripeClient || (/^(sk|rk)_live_/.test(liveKey) ? new Stripe(liveKey) : null);
   const liveSelected = String(process.env.CPD_PAYMENTS_MODE || '').trim().toLowerCase() === 'live';
-  const live = liveSelected && Boolean(liveClient);
+  // Fail closed: selecting live must never silently send anyone to sandbox checkout.
+  const live = liveSelected;
   const stripe = live ? liveClient : testClient;
   const priceId = String((live ? process.env.CPD_LIVE_MODULE02_PRICE_ID : process.env.CPD_MODULE02_PRICE_ID) || '').trim();
   const publicSales = process.env.CPD_MODULE02_PUBLIC_SALES === 'true';
   const stripeMode = live ? 'live' : (deps.courseStripeMode || (courseKey ? (courseKey.startsWith('sk_test_') ? 'test' : 'live') : (String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test_') ? 'test' : 'live')));
   // Each purchase is verified in the Stripe account it was made in: sandbox purchases with the
   // sandbox key, live purchases with the live key, so switching mode never revokes either.
-  const clientForSession = (id) => (String(id || '').startsWith('cs_live_') ? (liveClient || (stripeMode === 'live' ? testClient : null)) : testClient);
+  const clientForSession = (id) => (String(id || '').startsWith('cs_live_') ? liveClient : testClient);
   // Optional guard: the Stripe account the course must use (non-secret, e.g. acct_...).
   // When set, the course stays closed unless the key in use belongs to that account.
   const expectedAccount = String((live ? process.env.CPD_LIVE_STRIPE_EXPECTED_ACCOUNT : process.env.CPD_STRIPE_EXPECTED_ACCOUNT) || '').trim();
