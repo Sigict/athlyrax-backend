@@ -317,12 +317,14 @@ export function registerCpdModule02(app, deps) {
   });
 
   app.post(base + '/checkout', async (req, res) => {
-    if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
-    if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
+    // Warm the account guard before checking salesOpen: otherwise the first
+    // customer checkout after a process restart can be incorrectly denied.
     if (expectedAccount) {
       let check = null; try { check = await stripeConfigCheck(true); } catch {}
       if (check?.expectedAccountMatches !== true) return fail(res, 503, 'Course Stripe key belongs to a different Stripe account than CPD_STRIPE_EXPECTED_ACCOUNT.');
     }
+    if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
+    if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
     if (!checkoutLimit(ipOf(req))) return fail(res, 429, 'Too many attempts. Please try again later.');
     const email = String(req.body?.email || '').trim().toLowerCase(), name = cleanName(req.body?.fullName);
     if (!emailValid(email) || name.length < 2 || name.length > 110) return fail(res, 400, 'Enter your full name (as it should appear on the certificate) and a valid email address.');
