@@ -164,6 +164,7 @@ test('Coach Pool Console: load session, save results per set and rep without ove
     const session = loaded.payload.sessions[0];
     assert.equal(session.id, 'sessionA');
     assert.deepEqual(session.sets.map((s) => s.id), ['set-1', 'set-2'], 'every planned set, in order');
+    assert.deepEqual(session.sets.map((s) => s.title), ['Warm up', 'Main']);
 
     // Results to the SECOND set, reps 1 and 3: rep 1 already recorded and kept, rep 3 saved.
     const saved = await request(base, '/coach/poolside/sessions/sessionA/sets/set-2/results', { ...coach, method: 'POST', body: { swimmerId: 'swimmerA', source: 'coach-pool-console', reps: [{ rep: 1, overallTime: '1:20.00' }, { rep: 3, overallTime: '1:12.40' }] } });
