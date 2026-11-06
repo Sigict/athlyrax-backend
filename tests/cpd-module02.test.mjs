@@ -45,7 +45,7 @@ async function startCourse({ sales = true, mode = 'live', mail = null, expectedA
   if (expectedAccount) process.env.CPD_STRIPE_EXPECTED_ACCOUNT = expectedAccount; else delete process.env.CPD_STRIPE_EXPECTED_ACCOUNT;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cpd02-'));
   const stripe = fakeStripe();
-  const liveStripe = live ? fakeStripe() : null;
+  const liveStripe = live && !live.missingClient ? fakeStripe() : null;
   if (liveStripe) liveStripe.accountId = 'acct_live_athlyrax';
   const app = express();
   app.use(express.json({ limit: '25mb' }));
@@ -339,6 +339,20 @@ test('CPD live payments are staged separately: sandbox until switched, owner-onl
     assert.equal((await (await c.call('/status')).json()).purchase.audience, 'public');
     assert.equal((await c.call('/checkout', buy)).status, 200);
     assert.equal(c.liveStripe.created.length, 1);
+  } finally { await c.stop(); }
+});
+
+test('requesting live checkout without a live client fails closed, never falls back to sandbox', async () => {
+  const c = await startCourse({ mode: 'test', live: { selected: true, missingClient: true }, publicSales: true });
+  try {
+    for (const n of [1, 2, 3]) await upload(c.call, n, mp4(4096));
+    const status = await (await c.call('/status')).json();
+    assert.equal(status.purchase.liveSelected, true);
+    assert.equal(status.purchase.mode, 'live');
+    assert.equal(status.salesEnabled, false);
+    const r = await c.call('/checkout', { method: 'POST', body: { email: 'buyer@example.com', fullName: 'Buyer Test', immediateAccessConsent: true }, headers: { 'x-test-owner': 'yes' } });
+    assert.equal(r.status, 503);
+    assert.equal(c.stripe.created.length, 0, 'sandbox client was never used for selected live mode');
   } finally { await c.stop(); }
 });
 
