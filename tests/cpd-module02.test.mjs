@@ -30,24 +30,33 @@ function fakeStripe() {
   return stripe;
 }
 
-async function startCourse({ sales = true, mode = 'live', mail = null, expectedAccount = '' } = {}) {
+async function startCourse({ sales = true, mode = 'live', mail = null, expectedAccount = '', publicSales = true, live = null } = {}) {
   const saved = { ...process.env };
   process.env.CPD_SESSION_SECRET = 'test-secret-longer-than-thirty-two-characters!!';
   process.env.CPD_MODULE02_PRICE_ID = 'price_test_module02';
   process.env.CPD_MODULE02_SALES_ENABLED = sales ? 'true' : 'false';
+  process.env.CPD_MODULE02_PUBLIC_SALES = publicSales ? 'true' : 'false';
+  delete process.env.CPD_PAYMENTS_MODE; delete process.env.CPD_LIVE_MODULE02_PRICE_ID; delete process.env.CPD_LIVE_STRIPE_WEBHOOK_SECRET; delete process.env.CPD_STRIPE_WEBHOOK_SECRET;
+  if (live) {
+    if (live.selected) process.env.CPD_PAYMENTS_MODE = 'live';
+    process.env.CPD_LIVE_MODULE02_PRICE_ID = 'price_live_module02';
+    if (live.webhookSecret) process.env.CPD_LIVE_STRIPE_WEBHOOK_SECRET = live.webhookSecret;
+  }
   if (expectedAccount) process.env.CPD_STRIPE_EXPECTED_ACCOUNT = expectedAccount; else delete process.env.CPD_STRIPE_EXPECTED_ACCOUNT;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cpd02-'));
   const stripe = fakeStripe();
+  const liveStripe = live ? fakeStripe() : null;
+  if (liveStripe) liveStripe.accountId = 'acct_live_athlyrax';
   const app = express();
   app.use(express.json({ limit: '25mb' }));
   const owner = (req, res, next) => (req.headers['x-test-owner'] === 'yes' ? next() : res.status(401).json({ error: 'owner only' }));
-  const hooks = registerCpdModule02(app, { courseStripeClient: stripe, courseStripeMode: mode, storageRoot: root, requireStrictAuth: owner, requireSoftwareOwnerRole: owner,
+  const hooks = registerCpdModule02(app, { courseStripeClient: stripe, courseStripeMode: mode, ...(liveStripe ? { courseLiveStripeClient: liveStripe } : {}), storageRoot: root, requireStrictAuth: owner, requireSoftwareOwnerRole: owner,
     sendMail: mail, isSoftwareOwner: (req) => req.headers['x-test-owner'] === 'yes' });
   const server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   const api = 'http://127.0.0.1:' + server.address().port + '/cpd/module-02';
   const call = (p, { method = 'GET', body, cookie, headers = {} } = {}) => fetch(api + p, { method, headers: { ...(body !== undefined && !(body instanceof Uint8Array) ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}), ...headers }, body: body === undefined ? undefined : body instanceof Uint8Array ? body : JSON.stringify(body) });
   const stop = async () => { await new Promise((r) => server.close(r)); fs.rmSync(root, { recursive: true, force: true }); process.env = saved; };
-  return { root, stripe, hooks, call, stop };
+  return { root, stripe, liveStripe, hooks, call, stop };
 }
 
 function mp4(size) { const b = Buffer.alloc(size, 7); b.writeUInt32BE(24, 0); b.write('ftypisom', 4, 'ascii'); return b; }
@@ -288,4 +297,75 @@ test('the course reports which Stripe key it uses and refuses a key from another
     r = await c.call('/status'); st = await r.json();
     assert.equal(st.salesEnabled, false, 'course closed while the key is on the wrong account');
   } finally { await c.stop(); }
+});
+
+test('CPD live payments are staged separately: sandbox until switched, owner-only until public, sandbox purchases keep access', async () => {
+  const buy = { method: 'POST', body: { email: 'learner@example.com', fullName: 'Real Learner' } };
+  const videos = async (c) => { for (const n of [1, 2, 3]) await upload(c.call, n, mp4(4096)); };
+  // 1. Live configuration staged but not selected: the sandbox stays in use, owner-only.
+  let c = await startCourse({ mode: 'test', live: { selected: false } });
+  try {
+    await videos(c);
+    let st = await (await c.call('/status')).json();
+    assert.deepEqual(st.purchase, { mode: 'test', liveStaged: true, liveSelected: false, audience: 'owner-only' });
+    assert.equal((await c.call('/checkout', buy)).status, 503, 'customers cannot buy in sandbox');
+    assert.equal((await c.call('/checkout', { ...buy, headers: { 'x-test-owner': 'yes' } })).status, 200);
+    assert.equal(c.stripe.created.length, 1, 'sandbox checkout used the sandbox account');
+    assert.equal(c.liveStripe.created.length, 0, 'live account untouched');
+  } finally { await c.stop(); }
+  // 2. Live selected, public sales off: owner-only real purchase test; sandbox purchases still valid.
+  c = await startCourse({ mode: 'test', live: { selected: true }, publicSales: false });
+  try {
+    await videos(c);
+    let st = await (await c.call('/status')).json();
+    assert.equal(st.purchase.mode, 'live'); assert.equal(st.purchase.audience, 'owner-only'); assert.equal(st.stripeConfig.keySource, 'CPD_LIVE_STRIPE_SECRET_KEY');
+    assert.equal((await c.call('/checkout', buy)).status, 503, 'customers still cannot buy');
+    assert.equal((await c.call('/checkout', { ...buy, headers: { 'x-test-owner': 'yes' } })).status, 200);
+    assert.equal(c.liveStripe.created.length, 1, 'owner test purchase goes to the live account');
+    assert.equal(c.liveStripe.created[0].line_items[0].price, 'price_live_module02');
+    // An earlier sandbox purchase is still verified with the sandbox key.
+    c.stripe.add('cs_test_sandboxbuyer000001');
+    let r = await c.call('/claim', { method: 'POST', body: { session_id: 'cs_test_sandboxbuyer000001' } });
+    assert.equal(r.status, 200, 'sandbox purchase keeps access after the switch');
+    // A live purchase is verified with the live key.
+    c.liveStripe.add('cs_live_realbuyer00000001', { livemode: true });
+    r = await c.call('/claim', { method: 'POST', body: { session_id: 'cs_live_realbuyer00000001' } });
+    assert.equal(r.status, 200);
+  } finally { await c.stop(); }
+  // 3. Public sales on: anyone can buy, from the live account.
+  c = await startCourse({ mode: 'test', live: { selected: true }, publicSales: true });
+  try {
+    await videos(c);
+    assert.equal((await (await c.call('/status')).json()).purchase.audience, 'public');
+    assert.equal((await c.call('/checkout', buy)).status, 200);
+    assert.equal(c.liveStripe.created.length, 1);
+  } finally { await c.stop(); }
+});
+
+test('CPD course webhook: signed live purchase grants access, refund revokes it, unsigned or unconfigured refused', async () => {
+  const { default: Stripe } = await import('stripe');
+  const signer = new Stripe('sk_test_signer');
+  const whsec = 'whsec_cpd_live_test_secret';
+  const send = async (c, event, secret = whsec) => {
+    const payload = JSON.stringify(event);
+    return c.hooks.handleWebhook(Buffer.from(payload), signer.webhooks.generateTestHeaderString({ payload, secret }));
+  };
+  let c = await startCourse({ mode: 'test', live: { selected: true, webhookSecret: whsec }, publicSales: true });
+  try {
+    c.liveStripe.add('cs_live_webhookbuyer00001', { livemode: true });
+    let out = await send(c, { id: 'evt_1', type: 'checkout.session.completed', data: { object: { id: 'cs_live_webhookbuyer00001', metadata: { course: 'cpd01-module02' } } } });
+    assert.equal(out.status, 200);
+    let r = await c.call('/claim', { method: 'POST', body: { session_id: 'cs_live_webhookbuyer00001' } });
+    assert.equal(r.status, 200); const cookie = cookieOf(r);
+    assert.equal((await (await c.call('/status', { cookie })).json()).paidAccess, true);
+    c.liveStripe.sessions.get('cs_live_webhookbuyer00001').payment_intent.latest_charge.refunded = true;
+    out = await send(c, { id: 'evt_2', type: 'charge.refunded', data: { object: { payment_intent: 'pi_' + 'cs_live_webhookbuyer00001'.slice(-8) } } });
+    assert.equal(out.status, 200);
+    const st = await (await c.call('/status', { cookie })).json();
+    assert.equal(st.paidAccess, false); assert.equal(st.accessRevoked, 'refunded');
+    assert.equal((await send(c, { id: 'evt_3', type: 'checkout.session.completed', data: { object: {} } }, 'whsec_wrong')).status, 400, 'wrong signature');
+    assert.equal((await c.hooks.handleWebhook(Buffer.from('{}'), '')).status, 400, 'no signature');
+  } finally { await c.stop(); }
+  c = await startCourse({ mode: 'test' });
+  try { assert.equal((await c.hooks.handleWebhook(Buffer.from('{}'), 't=1,v1=x')).status, 503, 'no course webhook secret configured'); } finally { await c.stop(); }
 });
