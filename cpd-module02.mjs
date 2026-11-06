@@ -326,6 +326,7 @@ export function registerCpdModule02(app, deps) {
     if (!checkoutLimit(ipOf(req))) return fail(res, 429, 'Too many attempts. Please try again later.');
     const email = String(req.body?.email || '').trim().toLowerCase(), name = cleanName(req.body?.fullName);
     if (!emailValid(email) || name.length < 2 || name.length > 110) return fail(res, 400, 'Enter your full name (as it should appear on the certificate) and a valid email address.');
+    if (req.body?.digitalContentConsent !== true || req.body?.cancellationAcknowledged !== true) return fail(res, 400, 'Express consent to immediate digital access and acknowledgement of losing the 14-day cancellation right are required.');
     try {
       const price = await stripe.prices.retrieve(priceId);
       if (!price.active || price.type !== 'one_time' || String(price.currency).toLowerCase() !== 'gbp' || price.unit_amount !== PRICE_PENCE) return fail(res, 503, 'Course price is not configured for sale.');
@@ -334,8 +335,8 @@ export function registerCpdModule02(app, deps) {
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: origin + '/education/module-02.html?session_id={CHECKOUT_SESSION_ID}',
         cancel_url: origin + '/education/module-02.html?checkout=cancelled',
-        metadata: { course: CPD_MODULE02_COURSE, learner_name: name },
-        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE }, description: 'AthlyraX Education - CPD 01 Module 02' },
+        metadata: { course: CPD_MODULE02_COURSE, learner_name: name, digital_access_consent: 'yes', cancellation_acknowledged: 'yes', consent_recorded_at: new Date().toISOString(), consent_version: '2026-11-06' },
+        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE, digital_access_consent: 'yes', cancellation_acknowledged: 'yes', consent_version: '2026-11-06' }, description: 'AthlyraX Education - CPD 01 Module 02' },
         allow_promotion_codes: false,
       });
       noStore(res).json({ url: cs.url });
