@@ -3640,6 +3640,42 @@ function applyScheduleOccurrenceSuppressionsToDbShape(dbShape, suppressions) {
 	return { dbShape: next, blockedResurrections };
 }
 
+// ATHLYRAX_OWNERSHIP_KEEP_UNCHANGED_ROWS: a whole-club save stamps modification metadata only on
+// rows whose content actually changed. A row identical to the stored one (ignoring the ownership
+// metadata itself) is written back exactly as stored, so its audit history is preserved.
+const OWNERSHIP_METADATA_FIELDS = new Set(['createdByUserId', 'createdAt', 'updatedByUserId', 'updatedAt', 'tenantId', 'attributionStatus']);
+function ownershipContentSignature(value, depth = 0) {
+	if (Array.isArray(value)) return `[${value.map((item) => ownershipContentSignature(item, depth + 1)).join(',')}]`;
+	if (value && typeof value === 'object') {
+		const keys = Object.keys(value).filter((k) => value[k] !== undefined && !(depth === 0 && OWNERSHIP_METADATA_FIELDS.has(k))).sort();
+		return `{${keys.map((k) => `${JSON.stringify(k)}:${ownershipContentSignature(value[k], depth + 1)}`).join(',')}}`;
+	}
+	return JSON.stringify(value ?? null);
+}
+function buildExistingDbRowsById(dbShape, key) {
+	const byId = new Map();
+	const rows = Array.isArray(dbShape?.[key]) ? dbShape[key] : [];
+	for (const row of rows) {
+		const rowId = toRowId(row?.id);
+		if (rowId && row && typeof row === 'object' && !byId.has(rowId)) byId.set(rowId, row);
+	}
+	return byId;
+}
+function keepUnchangedOwnedRow(storedRow, row, actorTenantId) {
+	if (!storedRow || ownershipContentSignature(storedRow) !== ownershipContentSignature(row)) return null;
+	const storedCreatedBy = String(storedRow?.createdByUserId || '').trim().toLowerCase();
+	const storedTenant = String(storedRow?.tenantId || '').trim().toLowerCase();
+	if (storedCreatedBy && storedTenant && storedRow.attributionStatus) return storedRow;
+	// Legacy row stored without attribution: add attribution only, never a modification time.
+	const createdByUserId = storedCreatedBy || 'legacy-unattributed';
+	return {
+		...storedRow,
+		createdByUserId,
+		tenantId: storedTenant || actorTenantId,
+		attributionStatus: storedRow.attributionStatus || (createdByUserId === 'legacy-unattributed' ? 'unattributed-legacy' : 'attributed'),
+	};
+}
+
 function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 	const actorUsername = String(auth?.username || '').trim().toLowerCase() || 'unknown-actor';
 	const actorTenantId = String(resolveAuthTenantId(auth) || '').trim().toLowerCase();
@@ -3650,6 +3686,7 @@ function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 	for (const key of OWNERSHIP_TRACKED_COLLECTION_KEYS) {
 		const rows = Array.isArray(nextShape?.[key]) ? nextShape[key] : null;
 		if (!rows) continue;
+		const existingRowsById = buildExistingDbRowsById(existingDbShape, key);
 		const existingIds = existingRowIdIndex.get(key) || new Set();
 		nextShape[key] = rows.map((row) => {
 			if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
@@ -3659,6 +3696,8 @@ function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 			const createdByUserId = existingCreatedBy
 				|| (isExistingRow ? 'legacy-unattributed' : actorUsername);
 			const attributionStatus = createdByUserId === 'legacy-unattributed' ? 'unattributed-legacy' : 'attributed';
+			const unchangedRow = keepUnchangedOwnedRow(rowId ? existingRowsById.get(rowId) : null, row, actorTenantId);
+			if (unchangedRow) return unchangedRow;
 			return {
 				...row,
 				createdByUserId,

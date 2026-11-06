@@ -58,5 +58,8 @@ jobs:
       - name: Coach Pool Console connection (session load, results per set/rep, lane plan)
         run: node --test tests/coach-poolside-console.integration.test.mjs
 
+      - name: Whole-club save keeps audit metadata of unchanged rows
+        run: node --test tests/ownership-metadata-unchanged-rows.integration.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
