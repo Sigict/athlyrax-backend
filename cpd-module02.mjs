@@ -22,6 +22,7 @@ const UPLOAD_CHUNK_MAX = 8 * 1024 * 1024;
 const UPLOAD_TOTAL_MAX = 2 * 1024 * 1024 * 1024;
 const WATCH_REQUIRED = 0.8;                        // share of a lesson file that must have been streamed
 const PRICE_PENCE = 499;
+const CONSENT_VERSION = 'immediate-access-waiver-v1';
 const LESSONS = Object.freeze([
   { n: 1, file: 'lesson-1.mp4', title: 'Our Body, Our Engine', duration: '7:16' },
   { n: 2, file: 'lesson-2.mp4', title: 'Six Purposes of Training', duration: '7:56' },
@@ -143,16 +144,29 @@ export function registerCpdModule02(app, deps) {
   const root = path.join(storageRoot, 'cpd', 'module-02');
   const store = makeStore(root);
   const secret = String(process.env.CPD_SESSION_SECRET || '').trim();
-  const priceId = String(process.env.CPD_MODULE02_PRICE_ID || '').trim();
   const salesFlag = process.env.CPD_MODULE02_SALES_ENABLED === 'true';
   const origin = String(process.env.CPD_SITE_ORIGIN || 'https://athlyrax.com').replace(/\/+$/, '');
   const courseKey = String(process.env.CPD_STRIPE_SECRET_KEY || '').trim();
-  const stripe = deps.courseStripeClient || (courseKey ? new Stripe(courseKey) : deps.stripeClient) || null;
-  const stripeMode = deps.courseStripeMode || (courseKey ? (courseKey.startsWith('sk_test_') ? 'test' : 'live') : (String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test_') ? 'test' : 'live'));
+  // CPD_LIVE_PAYMENTS: the course has its own live Stripe configuration, separate from Coaching
+  // Software billing. It is staged in CPD_LIVE_* variables and used only when CPD_PAYMENTS_MODE=live.
+  // Even then, only the software owner can buy until CPD_MODULE02_PUBLIC_SALES=true.
+  const liveKey = String(process.env.CPD_LIVE_STRIPE_SECRET_KEY || '').trim();
+  const testClient = deps.courseStripeClient || (courseKey ? new Stripe(courseKey) : deps.stripeClient) || null;
+  const liveClient = deps.courseLiveStripeClient || (/^(sk|rk)_live_/.test(liveKey) ? new Stripe(liveKey) : null);
+  const liveSelected = String(process.env.CPD_PAYMENTS_MODE || '').trim().toLowerCase() === 'live';
+  // Fail closed: selecting live must never silently send anyone to sandbox checkout.
+  const live = liveSelected;
+  const stripe = live ? liveClient : testClient;
+  const priceId = String((live ? process.env.CPD_LIVE_MODULE02_PRICE_ID : process.env.CPD_MODULE02_PRICE_ID) || '').trim();
+  const publicSales = process.env.CPD_MODULE02_PUBLIC_SALES === 'true';
+  const stripeMode = live ? 'live' : (deps.courseStripeMode || (courseKey ? (courseKey.startsWith('sk_test_') ? 'test' : 'live') : (String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test_') ? 'test' : 'live')));
+  // Each purchase is verified in the Stripe account it was made in: sandbox purchases with the
+  // sandbox key, live purchases with the live key, so switching mode never revokes either.
+  const clientForSession = (id) => (String(id || '').startsWith('cs_live_') ? liveClient : testClient);
   // Optional guard: the Stripe account the course must use (non-secret, e.g. acct_...).
   // When set, the course stays closed unless the key in use belongs to that account.
-  const expectedAccount = String(process.env.CPD_STRIPE_EXPECTED_ACCOUNT || '').trim();
-  const keySource = deps.courseStripeClient ? 'injected' : courseKey ? 'CPD_STRIPE_SECRET_KEY' : 'shared STRIPE_SECRET_KEY fallback';
+  const expectedAccount = String((live ? process.env.CPD_LIVE_STRIPE_EXPECTED_ACCOUNT : process.env.CPD_STRIPE_EXPECTED_ACCOUNT) || '').trim();
+  const keySource = live ? 'CPD_LIVE_STRIPE_SECRET_KEY' : deps.courseStripeClient ? 'injected' : courseKey ? 'CPD_STRIPE_SECRET_KEY' : 'shared STRIPE_SECRET_KEY fallback';
   // Environment variables are read once when the server process starts; a changed
   // Render variable takes effect only after the service restarts or redeploys.
   const serverStartedAt = new Date().toISOString();
@@ -205,7 +219,9 @@ export function registerCpdModule02(app, deps) {
     return '';
   }
   async function fetchSession(id) {
-    return stripe.checkout.sessions.retrieve(id, { expand: ['payment_intent.latest_charge'] });
+    const client = clientForSession(id);
+    if (!client) throw new Error('No Stripe key for this purchase mode.');
+    return client.checkout.sessions.retrieve(id, { expand: ['payment_intent.latest_charge'] });
   }
   function entitlementFromSession(cs, previous) {
     const pi = typeof cs.payment_intent === 'object' ? cs.payment_intent?.id : cs.payment_intent;
@@ -257,7 +273,7 @@ export function registerCpdModule02(app, deps) {
     const c = readCookie(req); if (!c) return null;
     let ent = store.read('entitlements', c.id);
     if (!ent || ent.status !== 'active') return null;
-    if (Date.now() - Number(ent.verifiedAt || 0) > REVERIFY_MS && stripe) {
+    if (Date.now() - Number(ent.verifiedAt || 0) > REVERIFY_MS && clientForSession(c.id)) {
       try { ent = (await verifyPurchase(c.id)).ent; } catch { if (Date.now() - Number(ent.verifiedAt || 0) > STRIPE_OUTAGE_GRACE_MS) return null; }
     }
     return ent && ent.status === 'active' ? ent : null;
@@ -302,6 +318,8 @@ export function registerCpdModule02(app, deps) {
     res.json({
       course: CPD_MODULE02_COURSE, title: COURSE_TITLE, price: { amount: PRICE_PENCE, currency: 'gbp' },
       salesEnabled: salesOpen(), testMode: stripeMode === 'test', setup: setup(),
+      // Who can buy right now: 'owner-only' until public sales are switched on in live mode.
+      purchase: { mode: stripeMode, liveStaged: Boolean(liveClient), liveSelected, audience: stripeMode === 'live' && publicSales ? 'public' : 'owner-only' },
       // Non-secret: which key is in use and whether the configured price exists in
       // that key's Stripe account. No key, account ID or raw provider error.
       stripeConfig: { keySource, mode: stripeMode, serverStartedAt,
@@ -318,7 +336,7 @@ export function registerCpdModule02(app, deps) {
 
   app.post(base + '/checkout', async (req, res) => {
     if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
-    if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
+    if ((stripeMode === 'test' || !publicSales) && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
     if (expectedAccount) {
       let check = null; try { check = await stripeConfigCheck(true); } catch {}
       if (check?.expectedAccountMatches !== true) return fail(res, 503, 'Course Stripe key belongs to a different Stripe account than CPD_STRIPE_EXPECTED_ACCOUNT.');
@@ -326,6 +344,11 @@ export function registerCpdModule02(app, deps) {
     if (!checkoutLimit(ipOf(req))) return fail(res, 429, 'Too many attempts. Please try again later.');
     const email = String(req.body?.email || '').trim().toLowerCase(), name = cleanName(req.body?.fullName);
     if (!emailValid(email) || name.length < 2 || name.length > 110) return fail(res, 400, 'Enter your full name (as it should appear on the certificate) and a valid email address.');
+    // UK Consumer Contracts Regulations: digital content may start within the 14-day cancellation
+    // period only with the buyer's express request and acknowledgement that the right to cancel
+    // is then lost. The agreement is recorded on the Stripe payment.
+    if (req.body?.immediateAccessConsent !== true) return fail(res, 400, 'Please confirm that you want immediate access and understand that the 14-day right to cancel ends once you start the course.');
+    const consentAt = new Date().toISOString();
     try {
       const price = await stripe.prices.retrieve(priceId);
       if (!price.active || price.type !== 'one_time' || String(price.currency).toLowerCase() !== 'gbp' || price.unit_amount !== PRICE_PENCE) return fail(res, 503, 'Course price is not configured for sale.');
@@ -334,8 +357,9 @@ export function registerCpdModule02(app, deps) {
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: origin + '/education/module-02.html?session_id={CHECKOUT_SESSION_ID}',
         cancel_url: origin + '/education/module-02.html?checkout=cancelled',
-        metadata: { course: CPD_MODULE02_COURSE, learner_name: name },
-        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE }, description: 'AthlyraX Education - CPD 01 Module 02' },
+        metadata: { course: CPD_MODULE02_COURSE, learner_name: name, immediate_access_consent: CONSENT_VERSION, consent_at: consentAt },
+        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE, immediate_access_consent: CONSENT_VERSION, consent_at: consentAt }, description: 'AthlyraX Education - CPD 01 Module 02' },
+        custom_text: { submit: { message: 'You asked for immediate access to this digital course. Your 14-day right to cancel ends once you start the course.' } },
         allow_promotion_codes: false,
       });
       noStore(res).json({ url: cs.url });
@@ -363,6 +387,7 @@ export function registerCpdModule02(app, deps) {
 
   app.post(base + '/claim', async (req, res) => {
     if (secret.length < 32 || !stripe) return fail(res, 503, 'Course access is not configured.');
+    if (!clientForSession(String(req.body?.session_id || '').trim())) return fail(res, 503, 'Course access is not configured.');
     const id = String(req.body?.session_id || '').trim();
     if (!sessionIdValid(id)) return fail(res, 400, 'Invalid checkout reference.');
     let result; try { result = await verifyPurchase(id); } catch { return fail(res, 502, 'Payment could not be verified just now. Please reload the page.'); }
@@ -517,14 +542,14 @@ export function registerCpdModule02(app, deps) {
   // ---------- Stripe webhook hooks (called from the existing signed /billing/webhook) ----------
   async function onCheckoutCompleted(session) {
     if (session?.metadata?.course !== CPD_MODULE02_COURSE || !sessionIdValid(String(session.id || ''))) return false;
-    try { if (stripe) await verifyPurchase(session.id); } catch {}
+    try { if (clientForSession(session.id)) await verifyPurchase(session.id); } catch {}
     return true;
   }
   // The event only says which payment to look at; the refund/dispute itself is confirmed with Stripe.
   async function onRefundOrDispute(object) {
     const pi = String(object?.payment_intent?.id || object?.payment_intent || '');
     const ref = pi && store.read('payments', pi);
-    if (!ref || !stripe) return false;
+    if (!ref || !clientForSession(ref.sessionId)) return false;
     try { await verifyPurchase(ref.sessionId); } catch {}
     return true;
   }
@@ -642,5 +667,23 @@ export function registerCpdModule02(app, deps) {
   // Viewing progress is buffered briefly; flush it every 15 s (timer does not keep the process alive).
   const flush = () => { for (const [id, e] of progressCache) if (e.dirty) { try { store.write('progress', id, e.record); e.dirty = false; e.savedAt = Date.now(); } catch {} } };
   setInterval(flush, 15000).unref();
-  return { onCheckoutCompleted, onRefundOrDispute, flush, isCourseSession: (s) => s?.metadata?.course === CPD_MODULE02_COURSE };
+  // Course-only Stripe webhook (live account): verified with CPD_LIVE_STRIPE_WEBHOOK_SECRET, or the
+  // optional sandbox CPD_STRIPE_WEBHOOK_SECRET. Coaching subscription events never reach it.
+  const webhookSecrets = [process.env.CPD_LIVE_STRIPE_WEBHOOK_SECRET, process.env.CPD_STRIPE_WEBHOOK_SECRET].map((x) => String(x || '').trim()).filter((x) => x.startsWith('whsec_'));
+  async function handleWebhook(rawBody, signature) {
+    if (!webhookSecrets.length) return { status: 503, body: { error: 'Course webhook is not configured.' } };
+    if (!signature) return { status: 400, body: { error: 'Stripe webhook signature is required.' } };
+    let event = null;
+    const verifier = new Stripe('sk_test_webhook_verifier_only').webhooks; // signature check only, no API call
+    for (const whsec of webhookSecrets) { try { event = verifier.constructEvent(rawBody, signature, whsec); break; } catch {} }
+    if (!event) return { status: 400, body: { error: 'Invalid webhook signature.' } };
+    const object = event?.data?.object;
+    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+      if (object?.metadata?.course === CPD_MODULE02_COURSE) await onCheckoutCompleted(object);
+    } else if (event.type === 'charge.refunded' || event.type === 'charge.dispute.created' || event.type === 'charge.dispute.closed') {
+      await onRefundOrDispute(object);
+    }
+    return { status: 200, body: { received: true } };
+  }
+  return { onCheckoutCompleted, onRefundOrDispute, handleWebhook, flush, isCourseSession: (s) => s?.metadata?.course === CPD_MODULE02_COURSE };
 }

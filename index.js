@@ -357,6 +357,17 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 	}
 });
 
+// ATHLYRAX_CPD_WEBHOOK_V1: CPD course payments (live Stripe account) have their own webhook,
+// separate from Coaching Software billing. Raw body for signature verification.
+app.post('/cpd/module-02/webhook', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
+	try {
+		const out = cpdModule02 ? await cpdModule02.handleWebhook(req.body, String(req.headers?.['stripe-signature'] || '').trim()) : { status: 503, body: { error: 'Course service unavailable.' } };
+		res.status(out.status).json(out.body);
+	} catch {
+		res.status(500).json({ error: 'Course webhook handling failed.' });
+	}
+});
+
 // This anonymous collection route must never inherit the larger application JSON body allowance.
 app.use('/website-analytics/collect', express.json({ limit: '1kb' }));
 app.use(express.json({ limit: '25mb' }));
