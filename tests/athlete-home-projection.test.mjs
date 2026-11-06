@@ -143,4 +143,10 @@ test('an invitation-managed account sees only its explicitly linked swimmer, nev
   // Unlinked (after a correction): no record at all, not the email match.
   db.swimmers[1].swimmerAccountUsername = '';
   assert.equal(buildAthleteHomeProjection(db, { username: 'me.athlete', email: 'me@example.com', athleteInviteManaged: true }), null);
+// Send-offs saved as plain seconds are shown as clock time.
+test('athlete sets show numeric send-offs as clock time', () => {
+  const db = { swimmers: [{ id: 'a', swimmerAccountUsername: 'a.user', squadId: 'sq' }], trainingSessions: [{ id: 's', date: '2026-11-20', squadId: 'sq' }],
+    trainingSessionSets: [{ id: 'x', trainingSessionId: 's', sendOff: 105 }, { id: 'y', trainingSessionId: 's', sendOff: '1:40' }, { id: 'z', trainingSessionId: 's', sendoff: '95' }] };
+  const sets = buildAthleteHomeProjection(db, { username: 'a.user' }).sessions[0].sets;
+  assert.deepEqual(sets.map((x) => x.sendoff), ['1:45', '1:40', '1:35']);
 });
