@@ -122,6 +122,7 @@ export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
       squadIds: rowSquadIds(session),
       coachIds: ids(session.coachIds).length ? ids(session.coachIds) : [text(session.coachId)].filter(Boolean),
       sets: (setsBySession.get(sessionId(session)) || []).sort((a, b) => a.order - b.order),
+      lanePlan: session.poolsideLanePlan && typeof session.poolsideLanePlan === 'object' ? session.poolsideLanePlan : null,
     })),
     swimmers,
     attendance,
