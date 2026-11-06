@@ -6732,7 +6732,7 @@ async function applyCoachPoolsideMutation(req, res, mutator) {
 			res.status(Number(output?.status || 400)).json({ error: String(output?.error || 'Poolside change was rejected.') });
 			return;
 		}
-		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution, result: output.result, event: output.event, fixture: output.fixture, observation: output.observation, written: output.written, kept: output.kept, lanePlan: output.lanePlan });
+		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution, result: output.result, event: output.event, fixture: output.fixture, observation: output.observation, written: output.written, kept: output.kept, conflicts: output.conflicts, lanePlan: output.lanePlan });
 	} catch {
 		res.status(503).json({ error: 'Poolside change could not be saved.' });
 	}
