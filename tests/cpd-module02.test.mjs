@@ -84,6 +84,22 @@ test('closed until configured; nothing is served without a verified purchase', a
   } finally { await c.stop(); }
 });
 
+test('CPD logout clears the path-scoped private learner cookie without deleting a purchase', async () => {
+  const c = await startCourse();
+  try {
+    const r = await c.call('/logout', { method: 'POST' });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).ok, true);
+    const header = r.headers.get('set-cookie') || '';
+    assert.match(header, /athlyrax_cpd02=/);
+    assert.match(header, /Path=\\/api\\/cpd\\/module-02/);
+    assert.match(header, /HttpOnly/i);
+    assert.match(header, /Max-Age=0|Expires=Thu, 01 Jan 1970/i);
+    const status = await c.call('/status');
+    assert.equal((await status.json()).paidAccess, false);
+  } finally { await c.stop(); }
+});
+
 test('owner uploads private videos in chunks; only MP4 files, in order, owner only', async () => {
   const c = await startCourse();
   try {
