@@ -334,6 +334,7 @@ export function registerCpdModule02(app, deps) {
     // customer checkout after a process restart can be incorrectly denied.
     if (expectedAccount) {
       let check = null; try { check = await stripeConfigCheck(true); } catch {}
+      if (check?.expectedAccountMatches === false) return fail(res, 503, 'Course Stripe key belongs to a different Stripe account than CPD_STRIPE_EXPECTED_ACCOUNT.');
       if (check?.expectedAccountMatches !== true && check?.verifiedByPrice !== true) return fail(res, 503, 'Course Stripe key cannot verify the configured live course price or expected account.');
     }
     if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
