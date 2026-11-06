@@ -171,6 +171,12 @@ test('Coach Pool Console: load session, save results per set and rep without ove
     assert.equal(saved.response.status, 200, JSON.stringify(saved.payload));
     assert.equal(saved.payload.written, 1);
     assert.equal(saved.payload.kept, 1);
+    // ATHLYRAX_POOLSIDE_RESULT_CONFLICTS: the kept rep 1 differs from the incoming time and is reported.
+    assert.deepEqual(saved.payload.conflicts, [{ rep: 1, recorded: '1:10.00', incoming: '1:20.00' }]);
+    // The same time again is kept without a conflict (70.00 and 1:10.00 are the same time).
+    const same = await request(base, '/coach/poolside/sessions/sessionA/sets/set-2/results', { ...coach, method: 'POST', body: { swimmerId: 'swimmerA', source: 'coach-pool-console', reps: [{ rep: 1, overallTime: '70.00' }] } });
+    assert.equal(same.payload.kept, 1);
+    assert.deepEqual(same.payload.conflicts, []);
     const db = (await request(base, '/db', coach)).payload;
     const set2 = db.trainingSessionSets.find((s) => s.id === 'set-2');
     assert.equal(set2.resultsBySwimmer.swimmerA.reps[0].overallTime, '1:10.00');

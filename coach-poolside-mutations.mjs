@@ -141,6 +141,16 @@ function repHasRecordedTime(rep = {}) {
     || list(rep?.splits).some((split) => text(split?.time) || text(split?.strokeCount)));
 }
 
+function timeSeconds(value) {
+  const t = text(value);
+  if (!/^\d+(?::\d{1,2}){0,2}(?:\.\d+)?$/.test(t)) return null;
+  return t.split(':').reduce((a, p) => a * 60 + Number(p), 0);
+}
+function sameRecordedTime(a, b) {
+  const x = timeSeconds(a); const y = timeSeconds(b);
+  return x !== null && y !== null ? Math.abs(x - y) < 0.005 : text(a) === text(b);
+}
+
 function normalizeCanonicalResultRep(rep = {}) {
   const splits = list(rep?.splits).map((split) => ({
     ...split,
@@ -188,9 +198,17 @@ export function applyCoachPoolsideCanonicalResult(db = {}, input = {}) {
   const mergedReps = list(currentResult.reps).map((rep) => ({ ...rep }));
   let written = 0;
   let kept = 0;
+  // ATHLYRAX_POOLSIDE_RESULT_CONFLICTS: a kept repetition whose recorded time differs from the
+  // incoming time is reported, so the coach knows the club record and the device disagree.
+  const conflicts = [];
   reps.forEach((rep, position) => {
     const own = Number(rep?.rep);
     const at = rep?.rep !== undefined && rep?.rep !== null && rep?.rep !== '' ? own - 1 : position;
+    if (repHasRecordedTime(mergedReps[at]) && repHasRecordedTime(rep)) {
+      const recorded = text(mergedReps[at]?.overallTime || mergedReps[at]?.time);
+      const incoming = text(rep?.overallTime || rep?.time);
+      if (recorded && incoming && !sameRecordedTime(recorded, incoming)) conflicts.push({ rep: at + 1, recorded, incoming });
+    }
     while (mergedReps.length < at) mergedReps.push({});
     if (repHasRecordedTime(mergedReps[at])) { kept += 1; return; }
     if (!repHasRecordedTime(rep)) return;
@@ -211,8 +229,8 @@ export function applyCoachPoolsideCanonicalResult(db = {}, input = {}) {
     updatedAt: now,
     updatedBy: text(input.updatedBy),
   };
-  if (!written) return { ok: true, db, result: currentResult, set: sets[index], written, kept, unchanged: true };
-  return { ok: true, db: { ...db, trainingSessionSets: nextSets }, result: nextResult, set: nextSets[index], written, kept };
+  if (!written) return { ok: true, db, result: currentResult, set: sets[index], written, kept, conflicts, unchanged: true };
+  return { ok: true, db: { ...db, trainingSessionSets: nextSets }, result: nextResult, set: nextSets[index], written, kept, conflicts };
 }
 
 
