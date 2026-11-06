@@ -184,7 +184,8 @@ export function registerCpdModule02(app, deps) {
   const lessonSize = (n) => { try { const st = fs.statSync(lessonPath(n)); return st.isFile() && st.size > 1024 ? st.size : 0; } catch { return 0; } };
   const videosReady = () => LESSONS.every((l) => lessonSize(l.n) > 0);
   const setup = () => ({ videos: videosReady(), signingKey: secret.length >= 32, price: Boolean(priceId), stripe: Boolean(stripe) && accountGuardOk(), salesSwitch: salesFlag, recoveryEmail: Boolean(sendMail) });
-  const salesOpen = () => Object.values(setup()).slice(0, 5).every(Boolean);
+  // Purchase confirmation must be deliverable to the buyer on a durable medium.
+  const salesOpen = () => Object.values(setup()).every(Boolean);
   const ipOf = (req) => String(req.ip || req.socket?.remoteAddress || '');
 
   // ---------- Stripe verification ----------
@@ -317,15 +318,18 @@ export function registerCpdModule02(app, deps) {
   });
 
   app.post(base + '/checkout', async (req, res) => {
-    if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
-    if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
+    // Warm the account guard before checking salesOpen: otherwise the first
+    // customer checkout after a process restart can be incorrectly denied.
     if (expectedAccount) {
       let check = null; try { check = await stripeConfigCheck(true); } catch {}
       if (check?.expectedAccountMatches !== true) return fail(res, 503, 'Course Stripe key belongs to a different Stripe account than CPD_STRIPE_EXPECTED_ACCOUNT.');
     }
+    if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
+    if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
     if (!checkoutLimit(ipOf(req))) return fail(res, 429, 'Too many attempts. Please try again later.');
     const email = String(req.body?.email || '').trim().toLowerCase(), name = cleanName(req.body?.fullName);
     if (!emailValid(email) || name.length < 2 || name.length > 110) return fail(res, 400, 'Enter your full name (as it should appear on the certificate) and a valid email address.');
+    if (req.body?.digitalContentConsent !== true || req.body?.cancellationAcknowledged !== true) return fail(res, 400, 'Express consent to immediate digital access and acknowledgement of losing the 14-day cancellation right are required.');
     try {
       const price = await stripe.prices.retrieve(priceId);
       if (!price.active || price.type !== 'one_time' || String(price.currency).toLowerCase() !== 'gbp' || price.unit_amount !== PRICE_PENCE) return fail(res, 503, 'Course price is not configured for sale.');
@@ -334,8 +338,8 @@ export function registerCpdModule02(app, deps) {
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: origin + '/education/module-02.html?session_id={CHECKOUT_SESSION_ID}',
         cancel_url: origin + '/education/module-02.html?checkout=cancelled',
-        metadata: { course: CPD_MODULE02_COURSE, learner_name: name },
-        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE }, description: 'AthlyraX Education - CPD 01 Module 02' },
+        metadata: { course: CPD_MODULE02_COURSE, learner_name: name, digital_access_consent: 'yes', cancellation_acknowledged: 'yes', consent_recorded_at: new Date().toISOString(), consent_version: '2026-11-06' },
+        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE, digital_access_consent: 'yes', cancellation_acknowledged: 'yes', consent_version: '2026-11-06' }, description: 'AthlyraX Education - CPD 01 Module 02' },
         allow_promotion_codes: false,
       });
       noStore(res).json({ url: cs.url });
@@ -517,7 +521,40 @@ export function registerCpdModule02(app, deps) {
   // ---------- Stripe webhook hooks (called from the existing signed /billing/webhook) ----------
   async function onCheckoutCompleted(session) {
     if (session?.metadata?.course !== CPD_MODULE02_COURSE || !sessionIdValid(String(session.id || ''))) return false;
-    try { if (stripe) await verifyPurchase(session.id); } catch {}
+    try {
+      if (stripe) {
+        const { ent, problem } = await verifyPurchase(session.id);
+        // Email a durable confirmation of the buyer's explicit consent and
+        // acknowledgement. Stripe metadata retains the timestamped evidence.
+        if (!problem && ent?.status === 'active' && ent.email && sendMail
+          && session.metadata?.digital_access_consent === 'yes'
+          && session.metadata?.cancellation_acknowledged === 'yes'
+          && !store.read('purchase-confirmations', session.id)) {
+          try {
+            await sendMail({
+              to: ent.email,
+              subject: 'AthlyraX Education — Module 2 purchase confirmation',
+              text: [
+                'Your purchase of CPD 01 Module 02: Our Body, Our Engine is confirmed.',
+                'Price paid: £4.99 (one-time digital course purchase).',
+                '',
+                'Before purchase, you expressly consented to immediate digital access',
+                'and acknowledged that once access begins you lose the statutory',
+                '14-day right to cancel. This does not affect your statutory rights',
+                'if digital content is faulty or not as described.',
+                '',
+                'Open your course: ' + origin + '/education/module-02.html',
+                'Your purchase is associated with this email address. You can',
+                'restore access from the course page if you change devices.',
+                '',
+                'AthlyraX Education',
+              ].join('\n'),
+            });
+            store.write('purchase-confirmations', session.id, { sentAt: new Date().toISOString(), consentVersion: '2026-11-06' });
+          } catch { /* keep the learner's paid entitlement and retry on a repeated signed event */ }
+        }
+      }
+    } catch {}
     return true;
   }
   // The event only says which payment to look at; the refund/dispute itself is confirmed with Stripe.

@@ -30,7 +30,7 @@ function fakeStripe() {
   return stripe;
 }
 
-async function startCourse({ sales = true, mode = 'live', mail = null, expectedAccount = '' } = {}) {
+async function startCourse({ sales = true, mode = 'live', mail = async () => {}, expectedAccount = '' } = {}) {
   const saved = { ...process.env };
   process.env.CPD_SESSION_SECRET = 'test-secret-longer-than-thirty-two-characters!!';
   process.env.CPD_MODULE02_PRICE_ID = 'price_test_module02';
@@ -71,7 +71,7 @@ test('closed until configured; nothing is served without a verified purchase', a
   try {
     let r = await c.call('/status'); const st = await r.json();
     assert.equal(st.salesEnabled, false); assert.equal(st.paidAccess, false); assert.equal(st.setup.videos, false);
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' } }); assert.equal(r.status, 503);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', digitalContentConsent: true, cancellationAcknowledged: true } }); assert.equal(r.status, 503);
     r = await c.call('/video/1'); assert.equal(r.status, 401);
     r = await c.call('/certificate'); assert.equal(r.status, 401);
     r = await c.call('/assessment', { method: 'POST', body: { section: 'final', answers: Array(10).fill(0) } }); assert.equal(r.status, 401);
@@ -127,11 +127,13 @@ test('full learner journey: pay, watch, checks, 7/10 fails, 8/10 passes, certifi
     let r = await c.call('/status'); assert.equal((await r.json()).salesEnabled, true);
 
     r = await c.call('/checkout', { method: 'POST', body: { email: 'bad', fullName: 'X' } }); assert.equal(r.status, 400);
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'Alex@Example.com', fullName: '  Alex   Learner ' } }); assert.equal(r.status, 200);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'alex@example.com', fullName: 'Alex Learner' } }); assert.equal(r.status, 400, 'buyer consent is required');
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'Alex@Example.com', fullName: '  Alex   Learner ', digitalContentConsent: true, cancellationAcknowledged: true } }); assert.equal(r.status, 200);
     const params = c.stripe.created[0];
     assert.equal(params.mode, 'payment', 'one-time payment, not a subscription');
     assert.deepEqual(params.line_items, [{ price: 'price_test_module02', quantity: 1 }]);
     assert.equal(params.metadata.course, 'cpd01-module02'); assert.equal(params.metadata.learner_name, 'Alex Learner');
+    assert.equal(params.metadata.digital_access_consent, 'yes'); assert.equal(params.metadata.cancellation_acknowledged, 'yes');
     assert.equal(params.client_reference_id, undefined, 'never looks like a subscription checkout');
     assert.match(params.success_url, /module-02\.html\?session_id=\{CHECKOUT_SESSION_ID\}$/);
 
@@ -243,13 +245,15 @@ test('Stripe test mode: only the signed-in owner can start a checkout', async ()
   try {
     for (const n of [1, 2, 3]) await upload(c.call, n, mp4(4096));
     let r = await c.call('/status'); assert.equal((await r.json()).testMode, true);
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' } }); assert.equal(r.status, 503, 'public cannot buy with test cards');
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' }, headers: { 'x-test-owner': 'yes' } }); assert.equal(r.status, 200);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', digitalContentConsent: true, cancellationAcknowledged: true } }); assert.equal(r.status, 503, 'public cannot buy with test cards');
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', digitalContentConsent: true, cancellationAcknowledged: true }, headers: { 'x-test-owner': 'yes' } }); assert.equal(r.status, 200);
   } finally { await c.stop(); }
 });
 
 test('recovery by email says so plainly when no email service is configured', async () => {
   const c = await startCourse({ mail: null });
+  const noMailStatus = await c.call('/status');
+  assert.equal((await noMailStatus.json()).salesEnabled, false, 'course sales are closed without purchase confirmation email');
   try {
     const r = await c.call('/recover', { method: 'POST', body: { email: 'a@example.com' } }); assert.equal(r.status, 503);
     assert.match((await r.json()).error, /athlyrax@outlook\.com/);
@@ -277,11 +281,11 @@ test('the course reports which Stripe key it uses and refuses a key from another
     assert.match(st.stripeConfig.serverStartedAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(JSON.stringify(st).includes('acct_'), false, 'no account ID on the public status');
     assert.equal(st.salesEnabled, true);
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' }, headers: { 'x-test-owner': 'yes' } });
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', digitalContentConsent: true, cancellationAcknowledged: true }, headers: { 'x-test-owner': 'yes' } });
     assert.equal(r.status, 200, 'owner test checkout on the expected sandbox account');
     // The key now belongs to another account (e.g. the live account's own test mode).
     c.stripe.accountId = 'acct_1UY3W3AROMWHD0h9';
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' }, headers: { 'x-test-owner': 'yes' } });
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', digitalContentConsent: true, cancellationAcknowledged: true }, headers: { 'x-test-owner': 'yes' } });
     assert.equal(r.status, 503); assert.match((await r.json()).error, /different Stripe account/);
     r = await c.call('/admin/videos', { headers: { 'x-test-owner': 'yes' } }); const admin = await r.json();
     assert.equal(admin.stripeAccount.id, 'acct_1UY3W3AROMWHD0h9'); assert.equal(admin.expectedAccountMatches, false); assert.equal(admin.setup.stripe, false);
