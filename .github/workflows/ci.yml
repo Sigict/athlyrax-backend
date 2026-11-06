@@ -53,7 +53,7 @@ jobs:
         run: node --test tests/coaching-billing.test.mjs tests/coaching-billing.integration.test.mjs
 
       - name: Results inbox (Stopwatch/Assistant/Video results sent to the club)
-        run: node --test tests/results-inbox.integration.test.mjs
+        run: node --test tests/results-inbox.integration.test.mjs tests/checkout-stale-customer.test.mjs
 
       - name: Full backend storage and security contract
         run: npm run test:storage-all
