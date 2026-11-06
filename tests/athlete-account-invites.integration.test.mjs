@@ -369,7 +369,7 @@ test('correction: if revoking the old account cannot be saved, nothing changes; 
     assert.equal((await request(server.baseUrl, '/db', oldSession)).response.status, 401);
     const relog = await login(server.baseUrl, 'amelia.athlete', 'Athlete!Pass1234');
     assert.notEqual((await request(server.baseUrl, '/swimmer/athlete-home', relog)).response.status, 200, 'no club data for the revoked login');
-    assert.deepEqual((await request(server.baseUrl, '/db', relog)).payload.swimmers, []);
+    assert.equal((await request(server.baseUrl, '/db', relog)).response.status, 403, 'revoked login gets no club data');
     assert.equal(tenantDb(server).swimmers.length, 3, 'no swimmer created');
   } finally { await server.stop(); }
 });
@@ -387,7 +387,7 @@ test('correction: if the link removal fails after revocation, access is already 
     server = await server.restart();
     const relog = await login(server.baseUrl, 'amelia.athlete', 'Athlete!Pass1234');
     assert.notEqual((await request(server.baseUrl, '/swimmer/athlete-home', relog)).response.status, 200, 'revoked even though the link is still there');
-    assert.deepEqual((await request(server.baseUrl, '/db', relog)).payload.swimmers, []);
+    assert.equal((await request(server.baseUrl, '/db', relog)).response.status, 403, 'revoked login gets no club data');
     coach = await login(server.baseUrl, 'coachA', 'CoachA!Pass1234');
     const status = await request(server.baseUrl, '/coach/swimmers/amelia/athlete-invites', coach);
     assert.equal(status.payload.linkedUsername, '', 'link removed by the recovery step');
@@ -430,5 +430,185 @@ test('simultaneous acceptances and registrations: one account, one link', async 
     const linked = after.swimmers.filter((r) => r.swimmerAccountUsername).map((r) => r.swimmerAccountUsername);
     assert.equal(new Set(linked).size, linked.length, 'no account linked to two swimmers');
     assert.equal(linked.length, 3, 'amelia, one samename winner, one shared-email winner');
+  } finally { await server.stop(); }
+});
+
+// ATHLYRAX_ATHLETE_REVOKED_WRITE_GUARD — security review finding (PR #143): a login removed by
+// "Correct account link" re-signed in, used /swimmer/profile/sync to append a duplicate of the
+// swimmer row with a client-chosen id, and the next whole-club save moved the real row's link to it.
+const ATHLETE_ENDPOINTS = [
+  ['GET', '/db'], ['GET', '/swimmer/athlete-home'],
+  ['POST', '/swimmer/profile/sync', { swimmer: { id: 'amelia', name: 'Mallory' } }],
+  ['POST', '/swimmer/profile/targets', { swimmer: { id: 'amelia' }, targetPreference: { mode: 'independent' } }],
+  ['POST', '/swimmer/coach/disconnect', {}], ['POST', '/swimmer/coach/request', { coachEmail: 'x@example.com' }],
+  ['POST', '/swimmer/athlete-sessions', { date: '2026-11-20', title: 'X', sets: [] }],
+  ['POST', '/swimmer/athlete-sessions/ts-1/wearable-sync', {}],
+  ['POST', '/swimmer/capability/compute', {}], ['POST', '/swimmer/capability/apply-event', {}],
+  ['POST', '/swimmer/wearable-connections/terra/widget', {}],
+];
+const snapshotOf = (db) => JSON.stringify(noMeta({ s: db.trainingSessions, ss: db.trainingSessionSets, a: db.attendance, t: db.tests, o: db.coachObservations, an: db.swimmerAnalyses,
+  amelia: (({ swimmerAccountUsername, swimmerAccountEmail, accountLinkedAt, accountLinkInviteId, accountLinkHistory, ...rest }) => rest)(db.swimmers.find((r) => r.id === 'amelia')) }));
+
+test('security: a corrected (revoked) login cannot write, cannot duplicate the swimmer, cannot take the link back', async () => {
+  let server = await startServer({}, seedInvites);
+  try {
+    let base = server.baseUrl;
+    let coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const inv1 = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
+    assert.equal((await signup(base, inv1.payload.athleteToken, 'mallory')).response.status, 201);
+    const before = snapshotOf(tenantDb(server));
+    assert.equal((await post(base, '/coach/swimmers/amelia/athlete-link/correct', { reason: 'Wrong person linked' }, coach)).response.status, 200);
+    const inv2 = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
+    assert.equal((await signup(base, inv2.payload.athleteToken, 'carol')).response.status, 201);
+    // Logout/login and an application restart: the revocation holds.
+    server = await server.restart(); base = server.baseUrl;
+    coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const mallory = await login(base, 'mallory', 'Athlete!Pass1234');
+    // The original exploit: profile sync with the swimmer's id.
+    const exploit = await post(base, '/swimmer/profile/sync', { swimmer: { id: 'amelia', name: 'Mallory Override', dob: '1990-01-01' }, snapshots: [{ id: 'x' }], history: [{ id: 'h' }], pbRows: [] }, mallory);
+    assert.equal(exploit.response.status, 403, `exploit must be refused: ${JSON.stringify(exploit.payload)}`);
+    // Every protected endpoint refuses the revoked account.
+    for (const [method, route, body] of ATHLETE_ENDPOINTS) {
+      const r = await request(base, route, { ...mallory, method, ...(body !== undefined ? { body } : {}) });
+      assert.equal(r.response.status, 403, `${method} ${route} -> ${r.response.status}`);
+    }
+    // A whole-club save afterwards cannot move the link; no duplicate swimmer exists.
+    const full = (await request(base, '/db', coach)).payload;
+    assert.equal((await request(base, '/db', { ...coach, method: 'PUT', body: full })).response.status, 200);
+    const db = tenantDb(server);
+    assert.equal(db.swimmers.filter((r) => r.id === 'amelia').length, 1, 'no duplicate swimmer id');
+    assert.equal(db.swimmers.length, 3, 'no swimmer created');
+    const amelia = db.swimmers.find((r) => r.id === 'amelia');
+    assert.equal(amelia.swimmerAccountUsername, 'carol', 'the correctly linked athlete keeps the record');
+    assert.deepEqual(amelia.accountLinkHistory.map((h) => h.action), ['linked', 'unlinked', 'linked'], 'link history intact');
+    assert.equal(snapshotOf(db), before, 'swimmer measurements, history and profile unchanged');
+    // The correctly linked athlete keeps access.
+    const carol = await login(base, 'carol', 'Athlete!Pass1234');
+    const home = await request(base, '/swimmer/athlete-home', carol);
+    assert.equal(home.response.status, 200);
+    assert.equal(home.payload.athlete.id, 'amelia');
+    assert.deepEqual((await request(base, '/db', carol)).payload.swimmers.map((r) => r.id), ['amelia']);
+  } finally { await server.stop(); }
+});
+
+test('security: invitation-managed accounts never create swimmer rows; client swimmer ids never decide identity', async () => {
+  const server = await startServer({}, seedInvites);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const inv = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
+    assert.equal((await signup(base, inv.payload.athleteToken, 'amelia.athlete')).response.status, 201);
+    const athlete = await login(base, 'amelia.athlete', 'Athlete!Pass1234');
+    // Her own record is updated (not a new one), whatever id the app sends.
+    const r = await post(base, '/swimmer/profile/targets', { swimmer: { id: 'other' }, targetPreference: { mode: 'independent' } }, athlete);
+    assert.equal(r.response.status, 200, JSON.stringify(r.payload));
+    let db = tenantDb(server);
+    assert.equal(db.swimmers.length, 3);
+    assert.equal(db.swimmers.find((x) => x.id === 'other').swimmerAccountUsername, undefined, 'another swimmer untouched');
+    // A coach whole-club save cannot introduce a duplicate swimmer id.
+    const full = (await request(base, '/db', coach)).payload;
+    full.swimmers.push({ ...full.swimmers.find((x) => x.id === 'amelia'), name: 'Copy' });
+    const dup = await request(base, '/db', { ...coach, method: 'PUT', body: full });
+    assert.equal(dup.response.status, 400, JSON.stringify(dup.payload));
+    assert.match(dup.payload.error, /duplicate swimmer/i);
+    db = tenantDb(server);
+    assert.equal(db.swimmers.filter((x) => x.id === 'amelia').length, 1);
+  } finally { await server.stop(); }
+});
+
+test('independent athletes still work, and new records always get a server-generated id', async () => {
+  const server = await startServer({}, (paths) => {
+    seedInvites(paths);
+    const usersPath = path.join(paths.storageRoot, 'auth', 'auth-users.json');
+    const users = JSON.parse(fs.readFileSync(usersPath, 'utf8'));
+    users.push({ username: 'indie', password: 'Indie!Pass1234', role: 'swimmer', tenantId: 'athlete-indie', createdVia: 'admin', isApproved: true, onboardingCompletedAt: new Date().toISOString() });
+    writeJson(usersPath, users); writeJson(path.join(paths.storageRoot, 'auth', 'auth-users.backup.json'), users);
+    writeJson(path.join(paths.storageRoot, 'tenants', 'athlete-indie', 'db.json'), { swimmers: [] });
+  });
+  const base = server.baseUrl;
+  try {
+    const indie = await login(base, 'indie', 'Indie!Pass1234');
+    const sync = await post(base, '/swimmer/profile/sync', { swimmer: { id: 'amelia', name: 'Indie Athlete' }, snapshots: [], history: [], pbRows: [] }, indie);
+    assert.equal(sync.response.status, 200, JSON.stringify(sync.payload));
+    const own = JSON.parse(fs.readFileSync(path.join(server.paths.storageRoot, 'tenants', 'athlete-indie', 'db.json'), 'utf8'));
+    assert.equal(own.swimmers.length, 1);
+    assert.notEqual(own.swimmers[0].id, 'amelia', 'the client id is not used');
+    assert.match(own.swimmers[0].id, /^swimmer-/);
+    assert.equal(sync.payload.swimmerId, own.swimmers[0].id);
+    // A second sync updates the same record.
+    assert.equal((await post(base, '/swimmer/profile/sync', { swimmer: { name: 'Indie Athlete' }, snapshots: [], history: [], pbRows: [] }, indie)).response.status, 200);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(server.paths.storageRoot, 'tenants', 'athlete-indie', 'db.json'), 'utf8')).swimmers.length, 1);
+    // Personal sessions and the Athlete App still work.
+    assert.equal((await post(base, '/swimmer/athlete-sessions', { date: '2026-11-20', title: 'My 6x100', disciplineId: 'swimming', sets: [{ reps: 6, distance: 100 }] }, indie)).response.status, 201);
+    const home = await request(base, '/swimmer/athlete-home', indie);
+    assert.equal(home.response.status, 200);
+    assert.deepEqual(home.payload.sessions.map((s) => s.title), ['My 6x100']);
+    // The club's data was not touched.
+    assert.equal(tenantDb(server).swimmers.length, 3);
+  } finally { await server.stop(); }
+});
+
+test('security: writes racing a link correction never survive it, never duplicate the swimmer, never keep the link', async () => {
+  const server = await startServer({}, seedInvites);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const inv = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
+    assert.equal((await signup(base, inv.payload.athleteToken, 'mallory')).response.status, 201);
+    const mallory = await login(base, 'mallory', 'Athlete!Pass1234');
+    const sync = (i) => post(base, '/swimmer/profile/sync', { swimmer: { id: `client-${i}`, name: 'Mallory Override' }, snapshots: [], history: [], pbRows: [] }, mallory);
+    const results = await Promise.all([
+      sync(0), sync(1), sync(2),
+      post(base, '/coach/swimmers/amelia/athlete-link/correct', { reason: 'Wrong person linked' }, coach),
+      sync(3), sync(4), sync(5),
+    ]);
+    assert.equal(results[3].response.status, 200, JSON.stringify(results[3].payload));
+    for (const r of [...results.slice(0, 3), ...results.slice(4)]) assert.ok([200, 401, 403].includes(r.response.status), `unexpected ${r.response.status}`);
+    const settled = tenantDb(server);
+    assert.equal(settled.swimmers.length, 3, 'no swimmer created by any racing write');
+    assert.equal(settled.swimmers.filter((r) => r.id === 'amelia').length, 1);
+    assert.ok(!settled.swimmers.some((r) => String(r.id).startsWith('client-')), 'client ids never used');
+    assert.equal(settled.swimmers.find((r) => r.id === 'amelia').swimmerAccountUsername || '', '', 'link removed');
+    // After the correction, nothing from the old login gets through, before or after re-login.
+    const after = snapshotOf(settled);
+    assert.equal((await sync(6)).response.status, 401, 'earlier session refused');
+    const relog = await login(base, 'mallory', 'Athlete!Pass1234');
+    assert.equal((await post(base, '/swimmer/profile/sync', { swimmer: { id: 'amelia', name: 'Mallory Override' } }, relog)).response.status, 403);
+    assert.equal(snapshotOf(tenantDb(server)), after, 'no write after the correction');
+  } finally { await server.stop(); }
+});
+
+test('legacy data: stored duplicate swimmer ids are left exactly as saved; nothing new can be duplicated or linked to them', async () => {
+  const legacy = [
+    { id: 'legacy', firstName: 'Lee', lastName: 'One', squadId: 'sq-a', dob: '2001-03-03' },
+    { id: 'legacy', firstName: 'Lee', lastName: 'Two', squadId: 'sq-a', dob: '2001-03-03' },
+  ];
+  const server = await startServer({}, (paths) => {
+    seedInvites(paths);
+    const file = path.join(paths.storageRoot, 'tenants', 'tenant-a', 'db.json');
+    const db = JSON.parse(fs.readFileSync(file, 'utf8'));
+    db.swimmers.push(...legacy);
+    writeJson(file, db);
+  });
+  const base = server.baseUrl;
+  try {
+    const before = JSON.parse(fs.readFileSync(path.join(server.tempRoot, 'storage', 'tenants', 'tenant-a', 'db.json'), 'utf8'));
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    // An ordinary whole-club save of the data as loaded still works and changes no stored record.
+    const full = (await request(base, '/db', coach)).payload;
+    assert.equal((await request(base, '/db', { ...coach, method: 'PUT', body: full })).response.status, 200);
+    let db = tenantDb(server);
+    assert.deepEqual(noMeta(db.swimmers), noMeta(before.swimmers), 'swimmer rows unchanged');
+    for (const k of Object.keys(BIG)) assert.deepEqual(noMeta(db[k]), noMeta(before[k]), `${k} unchanged`);
+    // A third copy is refused before anything is written.
+    full.swimmers.push({ ...legacy[0], lastName: 'Three' });
+    const third = await request(base, '/db', { ...coach, method: 'PUT', body: full });
+    assert.equal(third.response.status, 400);
+    assert.deepEqual(third.payload.duplicateSwimmerIds, ['legacy']);
+    assert.deepEqual(noMeta(tenantDb(server).swimmers), noMeta(before.swimmers));
+    // An ambiguous record cannot be invited or linked.
+    assert.equal((await post(base, '/coach/swimmers/legacy/athlete-invites', {}, coach)).response.status, 409);
+    db = tenantDb(server);
+    assert.equal((db.athleteAccountInvites || []).length, 0);
   } finally { await server.stop(); }
 });

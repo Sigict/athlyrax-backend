@@ -12,7 +12,7 @@ import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
-import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES } from './athlete-account-invites.mjs';
+import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES, DuplicateSwimmerIdError, duplicateSwimmerIds } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -3712,7 +3712,15 @@ function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 	}
 
 	// ATHLYRAX_ATHLETE_INVITES_SERVER_OWNED: invitations and account links change only through their routes.
-	const serverOwned = preserveServerOwnedAthleteData(nextShape, existingDbShape);
+	let serverOwned;
+	try {
+		serverOwned = preserveServerOwnedAthleteData(nextShape, existingDbShape);
+	} catch (error) {
+		if (error instanceof DuplicateSwimmerIdError) {
+			throw Object.assign(new Error(error.message), { status: 400, body: { error: 'Duplicate swimmer records: the same swimmer id appears more than once. Nothing was saved; remove the duplicate and save again.', duplicateSwimmerIds: error.ids } });
+		}
+		throw error;
+	}
 	for (const key of Object.keys(serverOwned)) nextShape[key] = serverOwned[key];
 	if (!Object.prototype.hasOwnProperty.call(serverOwned, ATHLETE_INVITE_COLLECTION)) delete nextShape[ATHLETE_INVITE_COLLECTION];
 	nextShape.__meta = {
@@ -3816,6 +3824,25 @@ app.use((req, res, next) => {
 
 app.use(attachAuthContext);
 app.use(requireCsrf);
+
+// ATHLYRAX_ATHLETE_REVOKED_WRITE_GUARD: a swimmer account whose access to its club was revoked by the
+// club's link correction is refused on every route (reads and writes) except signing in/out and the
+// session check. The revocation is stored on the account, so it holds after logout, login and restart.
+function athleteClubAccessRevoked(user) {
+	if (String(user?.role || '').trim().toLowerCase() !== 'swimmer') return false;
+	const own = normalizeTenantId(user?.tenantId);
+	return (Array.isArray(user?.athleteTenantConnections) ? user.athleteTenantConnections : [])
+		.some((c) => normalizeTenantId(c?.tenantId) === own && String(c?.status || '').toLowerCase() === 'revoked');
+}
+const REVOKED_ATHLETE_ALLOWED_PATHS = new Set(['/auth/login', '/auth/logout', '/auth/me', '/auth/config']);
+app.use((req, res, next) => {
+	if (!req.auth || String(req.auth?.role || '').trim().toLowerCase() !== 'swimmer') { next(); return; }
+	if (REVOKED_ATHLETE_ALLOWED_PATHS.has(req.path)) { next(); return; }
+	const user = findAuthUser(String(req.auth.username || '').trim());
+	if (!athleteClubAccessRevoked(user)) { next(); return; }
+	appendAuthAuditEvent({ action: 'revoked_athlete_access_blocked', req, status: 'blocked', reason: 'club_access_revoked', details: { method: req.method, path: req.path } });
+	res.status(403).json({ error: 'Your access to this club was removed by the club. Contact the club if this is a mistake.' });
+});
 
 // CPD 01 Module 02: separate one-time course payments, private videos and verified certificates.
 // Routes fail closed until video files, Stripe price and dedicated signing key are configured.
@@ -6739,9 +6766,15 @@ app.post('/swimmer/profile/targets', requireStrictAuth, requireSwimmerRole, (req
 	});
 
 	let resolvedSwimmerIndex = swimmerIndex;
+	// ATHLYRAX_ATHLETE_REVOKED_WRITE_GUARD: invitation-managed accounts only ever update their linked
+	// record; a client-supplied swimmer id never decides identity, and new rows get a server id.
+	if (resolvedSwimmerIndex < 0 && findAuthUser(authUsername)?.athleteInviteManaged === true) {
+		res.status(403).json({ error: 'No swimmer record is linked to this account. Ask your club for an invitation.' });
+		return;
+	}
 	if (resolvedSwimmerIndex < 0) {
 		swimmersRows.push({
-			id: swimmerId || `swimmer-${Date.now().toString(36)}`,
+			id: makeSwimmerBindingRowId(),
 			firstName: splitName.firstName,
 			lastName: splitName.lastName,
 			name: fullName,
@@ -6842,9 +6875,13 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 		strictAccountBinding: true,
 	});
 
+	if (swimmerIndex < 0 && authUser?.athleteInviteManaged === true) {
+		res.status(403).json({ error: 'No swimmer record is linked to this account. Ask your club for an invitation.' });
+		return;
+	}
 	if (swimmerIndex < 0) {
 		swimmersRows.push({
-			id: swimmerId || `swimmer-${Date.now().toString(36)}`,
+			id: makeSwimmerBindingRowId(),
 			firstName: splitName.firstName,
 			lastName: splitName.lastName,
 			name: fullName,
@@ -6863,7 +6900,7 @@ app.post('/swimmer/profile/sync', requireStrictAuth, requireSwimmerRole, (req, r
 
 	swimmersRows[swimmerIndex] = {
 		...existingRow,
-		id: String(existingRow?.id || swimmerId || `swimmer-${Date.now().toString(36)}`),
+		id: String(existingRow?.id || makeSwimmerBindingRowId()),
 		firstName: splitName.firstName || String(existingRow?.firstName || ''),
 		lastName: splitName.lastName || String(existingRow?.lastName || ''),
 		name: fullName || String(existingRow?.name || ''),

@@ -45,6 +45,19 @@ export function parseInviteToken(token) {
   return { kind: kind === 'AXA1' ? 'athlete' : 'guardian', tenantKey, inviteId, secret: sec };
 }
 
+// One record per swimmer id: when an id appears more than once the record is ambiguous and nothing
+// that changes ownership or account links may act on it.
+export function uniqueSwimmerRow(db = {}, swimmerId) {
+  const rows = list(db.swimmers).filter((s) => text(s?.id) === text(swimmerId));
+  return { row: rows.length === 1 ? rows[0] : null, duplicate: rows.length > 1 };
+}
+
+export function duplicateSwimmerIds(rows = []) {
+  const seen = new Map();
+  for (const r of list(rows)) { const id = text(r?.id); if (id) seen.set(id, (seen.get(id) || 0) + 1); }
+  return [...seen.entries()].filter(([, n]) => n > 1).map(([id]) => id);
+}
+
 export function swimmerDisplayName(row = {}) {
   return text(row.name) || `${text(row.firstName)} ${text(row.lastName)}`.trim() || text(row.id);
 }
@@ -90,8 +103,8 @@ export function publicInvite(invite = {}, now = Date.now()) {
 }
 
 export function createAthleteInvite(db = {}, { swimmerId, tenantKey, clubName = '', actor, targetEmail = '', guardianEmail = '', ttlHours = 168, now = new Date() } = {}) {
-  const swimmers = list(db.swimmers);
-  const row = swimmers.find((s) => text(s?.id) === text(swimmerId));
+  const { row, duplicate } = uniqueSwimmerRow(db, swimmerId);
+  if (duplicate) return { ok: false, status: 409, error: 'This swimmer id appears more than once in the club data; correct the duplicate before inviting.' };
   if (!row) return { ok: false, status: 404, error: 'Swimmer not found in this club.' };
   if (text(row.status).toLowerCase() === 'deleted' || row.deletedAt) return { ok: false, status: 409, error: 'This swimmer record is deleted.' };
   const linked = linkedAccountOf(row);
@@ -186,7 +199,8 @@ export function checkAcceptance(db = {}, parsed, account = {}, now = new Date())
   if (!invite) return { ok: false, status: 404, error: 'This invitation link is not valid.' };
   const username = text(account.username); const email = text(account.email).toLowerCase();
   const swimmers = list(db.swimmers);
-  const row = swimmers.find((s) => text(s?.id) === text(invite.swimmerId));
+  const { row, duplicate } = uniqueSwimmerRow(db, invite.swimmerId);
+  if (duplicate) return { ok: false, status: 409, error: 'The swimmer record for this invitation is ambiguous. Ask the club to correct it.' };
   const status = inviteStatus(invite, now.getTime());
   if (status === 'accepted') {
     if (username && text(invite.acceptedBy).toLowerCase() === username.toLowerCase()) return { ok: true, already: true, invite, row };
@@ -238,7 +252,8 @@ export function revokeInvite(db = {}, inviteId, actor, now = new Date()) {
 // observation and analysis stays on the swimmer record; the history keeps who was linked and why.
 export function unlinkAthleteAccount(db = {}, swimmerId, { actor, reason, now = new Date() } = {}) {
   if (text(reason).length < 5) return { ok: false, status: 400, error: 'Give a reason for correcting the link (at least 5 characters).' };
-  const row = list(db.swimmers).find((s) => text(s?.id) === text(swimmerId));
+  const { row, duplicate } = uniqueSwimmerRow(db, swimmerId);
+  if (duplicate) return { ok: false, status: 409, error: 'This swimmer id appears more than once in the club data; correct the duplicate first.' };
   if (!row) return { ok: false, status: 404, error: 'Swimmer not found in this club.' };
   const previous = linkedAccountOf(row);
   if (!previous.username && !previous.email) return { ok: false, status: 409, error: 'This swimmer has no linked account.' };
@@ -256,6 +271,13 @@ export function unlinkAthleteAccount(db = {}, swimmerId, { actor, reason, now = 
 
 // Whole-club saves (PUT /db) cannot touch server-owned data: the invitation collection and the
 // account-link fields of swimmer rows always keep the stored values.
+export class DuplicateSwimmerIdError extends Error {
+  constructor(ids) { super(`Duplicate swimmer ids: ${ids.join(', ')}`); this.ids = ids; }
+}
+
+// ATHLYRAX_ATHLETE_DUPLICATE_ID_GUARD: duplicate swimmer ids are rejected before writing when a save
+// would introduce them (more copies than are stored) or when any copy carries an account link. Legacy
+// duplicates that are already stored and carry no link are passed through unchanged (no choice is made).
 export function preserveServerOwnedAthleteData(nextShape = {}, existingShape = {}) {
   const out = { ...nextShape };
   for (const key of SERVER_OWNED_COLLECTIONS) {
@@ -263,10 +285,23 @@ export function preserveServerOwnedAthleteData(nextShape = {}, existingShape = {
     else delete out[key];
   }
   if (Array.isArray(out.swimmers)) {
-    const stored = new Map(list(existingShape?.swimmers).map((s) => [text(s?.id), s]));
+    const storedRows = list(existingShape?.swimmers);
+    const storedCount = new Map(); const storedById = new Map();
+    for (const r of storedRows) { const id = text(r?.id); if (!id) continue; storedCount.set(id, (storedCount.get(id) || 0) + 1); if (!storedById.has(id)) storedById.set(id, []); storedById.get(id).push(r); }
+    const hasLink = (r) => ATHLETE_LINK_FIELDS.some((f) => r && r[f] !== undefined && r[f] !== '' && !(Array.isArray(r[f]) && !r[f].length));
+    const incomingCount = new Map();
+    for (const r of out.swimmers) { const id = text(r?.id); if (id) incomingCount.set(id, (incomingCount.get(id) || 0) + 1); }
+    const bad = [];
+    for (const [id, n] of incomingCount) {
+      const storedN = storedCount.get(id) || 0;
+      const linked = (storedById.get(id) || []).some(hasLink) || out.swimmers.some((r) => text(r?.id) === id && hasLink(r));
+      if ((n > 1 && (n > storedN || linked)) || (storedN > 1 && linked)) bad.push(id);
+    }
+    if (bad.length) throw new DuplicateSwimmerIdError(bad);
     out.swimmers = out.swimmers.map((row) => {
       if (!row || typeof row !== 'object') return row;
-      const prev = stored.get(text(row.id));
+      const prevRows = storedById.get(text(row.id)) || [];
+      const prev = prevRows.length === 1 ? prevRows[0] : null; // several stored copies: none is linked (checked above)
       const next = { ...row };
       for (const f of ATHLETE_LINK_FIELDS) {
         if (prev && prev[f] !== undefined) next[f] = prev[f];
