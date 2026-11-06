@@ -3894,11 +3894,19 @@ async function mutateAthleteTenantDb(paths, mutate) {
 }
 // Test-only failure switches (ignored in production) used by the regression tests.
 const athleteInviteTestFailure = (name) => !IS_PRODUCTION && String(process.env[name] || '') === '1';
-const athleteAccountExists = (username) => authUsers.some((u) => String(u?.username || '').trim().toLowerCase() === String(username || '').trim().toLowerCase());
+const findAthleteAccount = (username) => authUsers.find((u) => String(u?.username || '').trim().toLowerCase() === String(username || '').trim().toLowerCase()) || null;
+// A linked account is active for a club unless it does not exist or the club revoked its access.
+const athleteAccountActiveFor = (tenantKey) => (username) => {
+	const user = findAthleteAccount(username);
+	if (!user) return false;
+	return !(Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).some((c) => normalizeTenantId(c?.tenantId) === tenantKey && String(c?.status || '').toLowerCase() === 'revoked');
+};
+// Server-secret key for guardian code digests (HMAC), derived from AUTH_SECRET.
+const ATHLETE_GUARDIAN_CODE_KEY = crypto.createHmac('sha256', AUTH_SECRET).update('athlyrax-athlete-guardian-code-v1').digest();
 // Recovery: revert any invitation link whose login account does not exist (see reconcileOrphanedAthleteLinks).
 async function reconcileAthleteLinks(t, req) {
 	try {
-		const out = await mutateAthleteTenantDb(t.paths, (db) => reconcileOrphanedAthleteLinks(db, athleteAccountExists));
+		const out = await mutateAthleteTenantDb(t.paths, (db) => reconcileOrphanedAthleteLinks(db, athleteAccountActiveFor(t.key)));
 		if (out?.reverted?.length) appendAuthAuditEvent({ action: 'athlete_link_reconciled', req, status: 'success', target: t.key, details: { reverted: out.reverted } });
 	} catch {}
 }
@@ -3906,10 +3914,17 @@ function guardianDeliveryMode() {
 	if (AUTH_SMTP_HOST && AUTH_SMTP_FROM) return 'smtp';
 	return IS_PRODUCTION ? '' : 'console';
 }
+// Email content (verification codes) never goes to application logs. Outside production without
+// SMTP, messages are written only to the developer outbox file when ATHLYRAX_DEV_EMAIL_OUTBOX is set.
 async function sendAthleteGuardianEmail(to, subject, lines) {
 	const mode = guardianDeliveryMode();
 	if (mode === 'smtp') { await getAuthResetMailTransport().sendMail({ from: AUTH_SMTP_FROM, to, subject, text: lines.join('\n') }); return 'smtp'; }
-	if (mode === 'console') { console.log(`[athlete-invite] email to ${to}: ${subject} | ${lines.join(' | ')}`); return 'console'; }
+	if (mode === 'console') {
+		const outbox = String(process.env.ATHLYRAX_DEV_EMAIL_OUTBOX || '').trim();
+		if (outbox) fs.appendFileSync(outbox, `${JSON.stringify({ to, subject, text: lines.join('\n'), at: new Date().toISOString() })}\n`);
+		console.log(`[athlete-invite] development email to ${maskEmail(to)}: ${subject} (content not logged)`);
+		return 'console';
+	}
 	throw new Error('Email delivery is not configured.');
 }
 
@@ -3970,22 +3985,52 @@ app.post('/coach/swimmers/:swimmerId/athlete-link/correct', requireStrictAuth, r
 	if (!ATHLETE_LINK_CORRECTION_ROLES.has(String(req.auth?.role || '').trim())) { res.status(403).json({ error: 'Only the head coach can correct an Athlete App link.' }); return; }
 	const t = athleteTenantPaths(athleteInviteActorTenant(req));
 	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
-	const out = await mutateAthleteTenantDb(t.paths, (db) => unlinkAthleteAccount(db, req.params.swimmerId, { actor: req.auth?.username, reason: req.body?.reason })).catch(() => null);
-	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'The link could not be corrected safely.' }); return; }
-	const user = authUsers.find((u) => String(u?.username || '').trim().toLowerCase() === out.previous.username.toLowerCase());
+	const swimmerId = String(req.params.swimmerId || '');
+	const reason = String(req.body?.reason || '');
+	// Validate against the current data first (no writes).
+	const check = unlinkAthleteAccount(readJsonFile(t.paths.dbPath) || {}, swimmerId, { actor: req.auth?.username, reason });
+	if (!check.ok) { res.status(check.status || 400).json({ error: check.error }); return; }
+	const previousUsername = check.previous.username;
+	// ATHLYRAX_ATHLETE_LINK_REVOCATION step 1: revoke the old account's access durably (club connection
+	// revoked, every existing session invalid). If this cannot be saved, nothing changes.
+	const user = previousUsername ? findAthleteAccount(previousUsername) : null;
 	if (user) {
+		const snapshot = { tokenValidAfter: user.tokenValidAfter, athleteInviteManaged: user.athleteInviteManaged, athleteTenantConnections: user.athleteTenantConnections };
+		const at = new Date().toISOString();
+		const rows = (Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).filter((c) => normalizeTenantId(c?.tenantId) !== t.key);
+		user.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, status: 'revoked', source: 'link-correction', revokedAt: at, revokedBy: String(req.auth?.username || '') }];
 		user.athleteInviteManaged = true;
-		user.athleteTenantConnections = (Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).map((c) => (normalizeTenantId(c?.tenantId) === t.key ? { ...c, status: 'revoked', revokedAt: new Date().toISOString() } : c));
 		user.tokenValidAfter = getNowEpochSeconds() + 1;
-		try { persistAuthUsers(); } catch {}
+		try {
+			if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_LINK_CORRECTION_AUTH_PERSIST')) throw new Error('test: account save failed');
+			persistAuthUsers();
+		} catch {
+			Object.assign(user, snapshot);
+			appendAuthAuditEvent({ action: 'athlete_link_correction_failed', req, status: 'error', target: swimmerId, reason: 'account_revocation_not_saved', details: { tenantId: t.key } });
+			res.status(503).json({ error: 'The old login\'s access could not be revoked safely, so nothing was changed. Please try again.' });
+			return;
+		}
 	}
-	appendAuthAuditEvent({ action: 'athlete_link_corrected', req, status: 'success', target: String(req.params.swimmerId), reason: String(req.body?.reason || '').slice(0, 200), details: { previousUsername: out.previous.username, tenantId: t.key } });
-	res.status(200).json({ ok: true, swimmerId: String(req.params.swimmerId), previousUsername: out.previous.username });
+	// Step 2: remove the link. If this write fails, the account is already revoked for this club, and
+	// reconcileOrphanedAthleteLinks removes the link on the next club access.
+	let out = null;
+	try {
+		if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_LINK_CORRECTION_DB_WRITE')) throw new Error('test: link removal failed');
+		out = await mutateAthleteTenantDb(t.paths, (db) => unlinkAthleteAccount(db, swimmerId, { actor: req.auth?.username, reason }));
+	} catch { out = null; }
+	if (!out?.ok) {
+		appendAuthAuditEvent({ action: 'athlete_link_correction_partial', req, status: 'error', target: swimmerId, details: { previousUsername, tenantId: t.key, accessRevoked: Boolean(user) } });
+		res.status(503).json({ error: 'The old login\'s access is revoked, but the link could not be removed yet. It will be removed automatically; you can also try again.', accessRevoked: true });
+		return;
+	}
+	appendAuthAuditEvent({ action: 'athlete_link_corrected', req, status: 'success', target: swimmerId, reason: reason.slice(0, 200), details: { previousUsername, tenantId: t.key } });
+	res.status(200).json({ ok: true, swimmerId, previousUsername });
 });
 
 // Public: what an invitation link is for (club, swimmer first name, state). No account details.
-app.get('/athlete-invites/preview', requireLoginRateLimit, (req, res) => {
-	const parsed = parseInviteToken(req.query?.token);
+// The token travels only in the request body, never in a URL (access logs, proxies, browser history).
+app.post('/athlete-invites/preview', requireLoginRateLimit, (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
 	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
 	const db = t ? readJsonFile(t.paths.dbPath) || {} : {};
 	const invite = t ? resolveInvite(db, parsed, parsed.kind) : null;
@@ -4000,7 +4045,7 @@ app.post('/athlete-invites/guardian-code', requireLoginRateLimit, async (req, re
 	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
 	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
 	if (!guardianDeliveryMode()) { res.status(503).json({ error: 'Email verification is not available right now.' }); return; }
-	const out = await mutateAthleteTenantDb(t.paths, (db) => issueGuardianCode(db, parsed)).catch(() => null);
+	const out = await mutateAthleteTenantDb(t.paths, (db) => issueGuardianCode(db, parsed, { codeKey: ATHLETE_GUARDIAN_CODE_KEY })).catch(() => null);
 	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'A code could not be issued safely.' }); return; }
 	const row = ((readJsonFile(t.paths.dbPath) || {}).swimmers || []).find((r) => String(r?.id) === String(out.invite.swimmerId)) || {};
 	try {
@@ -4026,7 +4071,7 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
 	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
 	const out = await mutateAthleteTenantDb(t.paths, (db) => {
-		const r = recordGuardianConsent(db, parsed, { ...req.body, ip: req.ip });
+		const r = recordGuardianConsent(db, parsed, { ...req.body, ip: req.ip, codeKey: ATHLETE_GUARDIAN_CODE_KEY });
 		return r.already ? { ...r, db: null } : r;
 	}).catch(() => null);
 	if (!out?.ok) {
@@ -4084,6 +4129,12 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 	let out;
 	// The new account is held in memory before the link is written, so a concurrent reconciliation
 	// never sees the link without its account; it is removed again if anything below fails.
+	// Re-checked synchronously right before the account is added: concurrent requests cannot create two
+	// accounts with the same username or email (there is no await between this check and the push).
+	if (newUser && authUsers.some((u) => String(u?.username || '').toLowerCase() === newUser.username || String(u?.email || '').toLowerCase() === newUser.email.toLowerCase())) {
+		res.status(409).json({ error: 'That username or email was just taken. Choose another.' });
+		return;
+	}
 	if (newUser) authUsers.push(newUser);
 	const dropNewUser = () => { if (newUser) { const i = authUsers.indexOf(newUser); if (i >= 0) authUsers.splice(i, 1); } };
 	try {
@@ -7170,6 +7221,9 @@ app.get('/db', requireAuth, (req, res) => {
 							// Ignore auto-heal read-path failures and return empty scoped payload.
 						}
 					}
+					// ATHLYRAX_ATHLETE_LINK_REVOCATION: an account whose access to this club was revoked sees nothing.
+					const ownTenant = normalizeTenantId(authUser?.tenantId);
+					if ((Array.isArray(authUser?.athleteTenantConnections) ? authUser.athleteTenantConnections : []).some((c) => normalizeTenantId(c?.tenantId) === ownTenant && String(c?.status || '').toLowerCase() === 'revoked')) scopedSwimmers = [];
 					responsePayload = JSON.stringify({ swimmers: scopedSwimmers });
 				} catch {
 					responsePayload = JSON.stringify({ swimmers: [] });

@@ -25,6 +25,12 @@ const text = (v) => String(v ?? '').trim();
 const list = (v) => (Array.isArray(v) ? v : []);
 const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
 const secret = () => crypto.randomBytes(32).toString('base64url');
+// Guardian codes are short (6 digits), so their digest is keyed with a server secret (HMAC): a copy of
+// the database alone does not allow the codes to be recovered by trying all one million values.
+const codeDigest = (codeKey, inviteId, code) => {
+  if (!codeKey || String(codeKey).length < 16) throw new Error('Guardian code key is not configured.');
+  return crypto.createHmac('sha256', codeKey).update(`${text(inviteId)}:${text(code)}`).digest('hex');
+};
 
 export function sameHash(a, b) {
   const x = Buffer.from(text(a), 'hex'); const y = Buffer.from(text(b), 'hex');
@@ -130,7 +136,7 @@ export function resolveInvite(db = {}, parsed, kind) {
 
 // The parent/guardian proves control of the email address the club specified: a one-time code is
 // sent there and must be entered with the consent. Only a hash of the code is stored.
-export function issueGuardianCode(db = {}, parsed, { now = new Date() } = {}) {
+export function issueGuardianCode(db = {}, parsed, { now = new Date(), codeKey } = {}) {
   const invite = resolveInvite(db, parsed, 'guardian');
   if (!invite) return { ok: false, status: 404, error: 'This parent/guardian link is not valid.' };
   const status = inviteStatus(invite, now.getTime());
@@ -140,7 +146,7 @@ export function issueGuardianCode(db = {}, parsed, { now = new Date() } = {}) {
   if (Number(prev.sends || 0) >= GUARDIAN_CODE_MAX_SENDS) return { ok: false, status: 429, error: 'Too many codes were requested. Ask the club for a new invitation.' };
   if (prev.sentAt && now.getTime() - Date.parse(prev.sentAt) < GUARDIAN_CODE_RESEND_SECONDS * 1000) return { ok: false, status: 429, error: 'A code was sent less than a minute ago. Check the inbox, then try again.' };
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-  const guardianCode = { hash: sha256(`${invite.id}:${code}`), sentAt: now.toISOString(), expiresAt: new Date(now.getTime() + GUARDIAN_CODE_TTL_MINUTES * 60000).toISOString(), attempts: 0, sends: Number(prev.sends || 0) + 1 };
+  const guardianCode = { hash: codeDigest(codeKey, invite.id, code), alg: 'hmac-sha256', sentAt: now.toISOString(), expiresAt: new Date(now.getTime() + GUARDIAN_CODE_TTL_MINUTES * 60000).toISOString(), attempts: 0, sends: Number(prev.sends || 0) + 1 };
   const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id ? { ...inv, guardianCode } : inv));
   return { ok: true, code, email: invite.guardianEmail, invite, db: { ...db, [ATHLETE_INVITE_COLLECTION]: invites } };
 }
@@ -151,7 +157,7 @@ export function maskEmail(email) {
   return `${user.slice(0, 1)}${'*'.repeat(Math.max(2, user.length - 1))}@${domain}`;
 }
 
-export function recordGuardianConsent(db = {}, parsed, { name, relationship, code, consent, consentVersion, now = new Date(), ip = '' } = {}) {
+export function recordGuardianConsent(db = {}, parsed, { name, relationship, code, consent, consentVersion, now = new Date(), ip = '', codeKey } = {}) {
   const invite = resolveInvite(db, parsed, 'guardian');
   if (!invite) return { ok: false, status: 404, error: 'This parent/guardian link is not valid.' };
   const status = inviteStatus(invite, now.getTime());
@@ -163,7 +169,7 @@ export function recordGuardianConsent(db = {}, parsed, { name, relationship, cod
   if (!gc?.hash) return { ok: false, status: 403, error: `Request a verification code first: it is sent to ${maskEmail(invite.guardianEmail)}.` };
   if (Number(gc.attempts || 0) >= GUARDIAN_CODE_MAX_ATTEMPTS) return { ok: false, status: 429, error: 'Too many wrong codes. Request a new code.' };
   if (!(Date.parse(gc.expiresAt) > now.getTime())) return { ok: false, status: 403, error: 'The verification code has expired. Request a new code.' };
-  const good = /^\d{6}$/.test(text(code)) && sameHash(sha256(`${invite.id}:${text(code)}`), gc.hash);
+  const good = /^\d{6}$/.test(text(code)) && gc.alg === 'hmac-sha256' && sameHash(codeDigest(codeKey, invite.id, code), gc.hash);
   if (!good) {
     // Wrong code: count the attempt (persisted) and refuse.
     const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id ? { ...inv, guardianCode: { ...gc, attempts: Number(gc.attempts || 0) + 1 } } : inv));
@@ -289,16 +295,16 @@ export function revertAcceptance(db = {}, invite, username, { reason = 'account 
   return { ok: true, reverted: true, db: { ...db, swimmers, [ATHLETE_INVITE_COLLECTION]: invites } };
 }
 
-// Recovery: a link made by an invitation whose login account does not exist (for example, the
-// account save failed and so did the immediate undo) is reverted, so no swimmer stays linked to an
-// account nobody can sign in to.
-export function reconcileOrphanedAthleteLinks(db = {}, accountExists = () => true, { now = new Date() } = {}) {
+// Recovery: a link made by an invitation whose login account does not exist, or whose access to this
+// club was revoked (a correction whose link removal did not complete), is reverted, so no swimmer stays
+// linked to an account that cannot or must not use it.
+export function reconcileOrphanedAthleteLinks(db = {}, accountActive = () => true, { now = new Date() } = {}) {
   let current = db; const reverted = [];
   for (const row of list(db.swimmers)) {
     const username = text(row?.swimmerAccountUsername); const inviteId = text(row?.accountLinkInviteId);
-    if (!username || !inviteId || accountExists(username)) continue;
+    if (!username || !inviteId || accountActive(username)) continue;
     const invite = list(current[ATHLETE_INVITE_COLLECTION]).find((inv) => text(inv.id) === inviteId) || { id: inviteId, swimmerId: row.id };
-    const out = revertAcceptance(current, invite, username, { reason: 'login account missing (recovered automatically)', now });
+    const out = revertAcceptance(current, invite, username, { reason: 'login account missing or its club access revoked (recovered automatically)', now });
     if (out.reverted) { current = out.db; reverted.push({ swimmerId: text(row.id), username }); }
   }
   return reverted.length ? { ok: true, reverted, db: current } : { ok: true, reverted, db: null };
