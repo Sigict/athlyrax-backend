@@ -148,7 +148,8 @@ export function registerCpdModule02(app, deps) {
   const origin = String(process.env.CPD_SITE_ORIGIN || 'https://athlyrax.com').replace(/\/+$/, '');
   const courseKey = String(process.env.CPD_STRIPE_SECRET_KEY || '').trim();
   const stripe = deps.courseStripeClient || (courseKey ? new Stripe(courseKey) : deps.stripeClient) || null;
-  const stripeMode = deps.courseStripeMode || (courseKey ? (courseKey.startsWith('sk_test_') ? 'test' : 'live') : (String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test_') ? 'test' : 'live'));
+  const configuredKey = courseKey || String(process.env.STRIPE_SECRET_KEY || '');
+  const stripeMode = deps.courseStripeMode || (/^(sk|rk)_test_/.test(configuredKey) ? 'test' : 'live');
   // Optional guard: the Stripe account the course must use (non-secret, e.g. acct_...).
   // When set, the course stays closed unless the key in use belongs to that account.
   const expectedAccount = String(process.env.CPD_STRIPE_EXPECTED_ACCOUNT || '').trim();
@@ -161,9 +162,14 @@ export function registerCpdModule02(app, deps) {
   async function stripeConfigCheck(force = false) {
     if (!stripe) return null;
     if (!force && configCheck && Date.now() - configCheckAt < 600000) return configCheck;
-    const out = { accountId: null, livemode: null, accountError: null, price: null };
+    const out = { accountId: null, livemode: null, accountError: null, accountLookupRestricted: false, price: null, verifiedByPrice: false };
     try { const a = await stripe.accounts.retrieve(); out.accountId = String(a?.id || ''); out.livemode = Boolean(a?.livemode); }
-    catch (err) { out.accountError = err?.statusCode === 401 ? 'Stripe API key rejected' : 'Stripe account lookup unavailable'; }
+    catch (err) {
+      out.accountLookupRestricted = err?.statusCode === 403 || err?.type === 'StripePermissionError';
+      out.accountError = err?.statusCode === 401 ? 'Stripe API key rejected'
+        : out.accountLookupRestricted ? 'Restricted Stripe key cannot retrieve account details'
+        : 'Stripe account lookup unavailable';
+    }
     if (priceId) {
       try {
         const p = await stripe.prices.retrieve(priceId);
@@ -172,10 +178,16 @@ export function registerCpdModule02(app, deps) {
       } catch (err) { out.price = { found: false, error: err?.code === 'resource_missing' ? 'Price ID does not exist in this Stripe account' : err?.statusCode === 401 ? 'Stripe key rejected' : 'Price lookup failed' }; }
     }
     out.expectedAccountMatches = expectedAccount ? (out.accountId ? out.accountId === expectedAccount : null) : null;
+    // Stripe restricted keys may not have GET /v1/account permission. A successful
+    // retrieval of the *specific configured* active GBP 499 price in the expected
+    // mode proves that this key can reach the selected course price; do not
+    // require wider account permissions just for this optional account-ID check.
+    out.verifiedByPrice = Boolean(expectedAccount && out.accountLookupRestricted && !out.accountId
+      && out.price?.validForSale && out.price?.livemode === (stripeMode === 'live'));
     configCheck = out; configCheckAt = Date.now();
     return out;
   }
-  const accountGuardOk = () => !expectedAccount || configCheck?.expectedAccountMatches === true;
+  const accountGuardOk = () => !expectedAccount || configCheck?.expectedAccountMatches === true || configCheck?.verifiedByPrice === true;
   const questions = loadQuestions();
   let logoJpeg = null;
   try { logoJpeg = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'cpd-assets', 'athlyrax-logo.jpg')); } catch {}
@@ -308,7 +320,7 @@ export function registerCpdModule02(app, deps) {
       stripeConfig: { keySource, mode: stripeMode, serverStartedAt,
         priceInKeyAccount: check?.price ? check.price.found === true : null,
         priceValidForSale: check?.price?.found ? check.price.validForSale : null,
-        expectedAccountMatches: check ? check.expectedAccountMatches : null },
+        expectedAccountMatches: check ? check.expectedAccountMatches : null, verifiedByPrice: check?.verifiedByPrice === true },
       lessons: LESSONS.map((l) => ({ n: l.n, title: l.title, duration: l.duration })),
       paidAccess: Boolean(ent), accessRevoked: revoked,
       learner: ent ? { name: ent.name, email: ent.email.replace(/^(.).*(@.*)$/, '$1***$2') } : null,
@@ -322,7 +334,7 @@ export function registerCpdModule02(app, deps) {
     // customer checkout after a process restart can be incorrectly denied.
     if (expectedAccount) {
       let check = null; try { check = await stripeConfigCheck(true); } catch {}
-      if (check?.expectedAccountMatches !== true) return fail(res, 503, 'Course Stripe key belongs to a different Stripe account than CPD_STRIPE_EXPECTED_ACCOUNT.');
+      if (check?.expectedAccountMatches !== true && check?.verifiedByPrice !== true) return fail(res, 503, 'Course Stripe key cannot verify the configured live course price or expected account.');
     }
     if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
     if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
@@ -600,6 +612,7 @@ export function registerCpdModule02(app, deps) {
       stripeKeySource: keySource,
       expectedAccount: expectedAccount || null,
       expectedAccountMatches: expectedAccount && stripeAccount?.id ? stripeAccount.id === expectedAccount : null,
+      verifiedByPrice: configCheck?.verifiedByPrice === true,
       serverStartedAt,
       priceId, priceCheck,
     });
