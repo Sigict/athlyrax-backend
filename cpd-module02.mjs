@@ -285,6 +285,13 @@ export function registerCpdModule02(app, deps) {
   const base = '/cpd/module-02';
   const noStore = (res) => res.set('Cache-Control', 'no-store');
 
+  // Signing out clears only this device's learner session; the purchase and progress remain.
+  app.post(base + '/logout', (req, res) => {
+    noStore(res);
+    res.clearCookie(COOKIE, { httpOnly: true, secure: true, sameSite: 'lax', path: COOKIE_PATH });
+    res.status(200).json({ ok: true });
+  });
+
   app.get(base + '/status', async (req, res) => {
     noStore(res);
     let ent = null; try { ent = await learner(req); } catch {}
