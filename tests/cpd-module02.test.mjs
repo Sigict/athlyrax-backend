@@ -80,7 +80,7 @@ test('closed until configured; nothing is served without a verified purchase', a
   try {
     let r = await c.call('/status'); const st = await r.json();
     assert.equal(st.salesEnabled, false); assert.equal(st.paidAccess, false); assert.equal(st.setup.videos, false);
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' } }); assert.equal(r.status, 503);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', immediateAccessConsent: true } }); assert.equal(r.status, 503);
     r = await c.call('/video/1'); assert.equal(r.status, 401);
     r = await c.call('/certificate'); assert.equal(r.status, 401);
     r = await c.call('/assessment', { method: 'POST', body: { section: 'final', answers: Array(10).fill(0) } }); assert.equal(r.status, 401);
@@ -135,8 +135,8 @@ test('full learner journey: pay, watch, checks, 7/10 fails, 8/10 passes, certifi
     for (const n of [1, 2, 3]) await upload(c.call, n, mp4(sizes[n]), 2 * 1024 * 1024);
     let r = await c.call('/status'); assert.equal((await r.json()).salesEnabled, true);
 
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'bad', fullName: 'X' } }); assert.equal(r.status, 400);
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'Alex@Example.com', fullName: '  Alex   Learner ' } }); assert.equal(r.status, 200);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'bad', fullName: 'X', immediateAccessConsent: true } }); assert.equal(r.status, 400);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'Alex@Example.com', fullName: '  Alex   Learner ', immediateAccessConsent: true } }); assert.equal(r.status, 200);
     const params = c.stripe.created[0];
     assert.equal(params.mode, 'payment', 'one-time payment, not a subscription');
     assert.deepEqual(params.line_items, [{ price: 'price_test_module02', quantity: 1 }]);
@@ -252,8 +252,8 @@ test('Stripe test mode: only the signed-in owner can start a checkout', async ()
   try {
     for (const n of [1, 2, 3]) await upload(c.call, n, mp4(4096));
     let r = await c.call('/status'); assert.equal((await r.json()).testMode, true);
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' } }); assert.equal(r.status, 503, 'public cannot buy with test cards');
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' }, headers: { 'x-test-owner': 'yes' } }); assert.equal(r.status, 200);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', immediateAccessConsent: true } }); assert.equal(r.status, 503, 'public cannot buy with test cards');
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', immediateAccessConsent: true }, headers: { 'x-test-owner': 'yes' } }); assert.equal(r.status, 200);
   } finally { await c.stop(); }
 });
 
@@ -286,11 +286,11 @@ test('the course reports which Stripe key it uses and refuses a key from another
     assert.match(st.stripeConfig.serverStartedAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(JSON.stringify(st).includes('acct_'), false, 'no account ID on the public status');
     assert.equal(st.salesEnabled, true);
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' }, headers: { 'x-test-owner': 'yes' } });
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', immediateAccessConsent: true }, headers: { 'x-test-owner': 'yes' } });
     assert.equal(r.status, 200, 'owner test checkout on the expected sandbox account');
     // The key now belongs to another account (e.g. the live account's own test mode).
     c.stripe.accountId = 'acct_1UY3W3AROMWHD0h9';
-    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' }, headers: { 'x-test-owner': 'yes' } });
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', immediateAccessConsent: true }, headers: { 'x-test-owner': 'yes' } });
     assert.equal(r.status, 503); assert.match((await r.json()).error, /different Stripe account/);
     r = await c.call('/admin/videos', { headers: { 'x-test-owner': 'yes' } }); const admin = await r.json();
     assert.equal(admin.stripeAccount.id, 'acct_1UY3W3AROMWHD0h9'); assert.equal(admin.expectedAccountMatches, false); assert.equal(admin.setup.stripe, false);
@@ -300,7 +300,7 @@ test('the course reports which Stripe key it uses and refuses a key from another
 });
 
 test('CPD live payments are staged separately: sandbox until switched, owner-only until public, sandbox purchases keep access', async () => {
-  const buy = { method: 'POST', body: { email: 'learner@example.com', fullName: 'Real Learner' } };
+  const buy = { method: 'POST', body: { email: 'learner@example.com', fullName: 'Real Learner', immediateAccessConsent: true } };
   const videos = async (c) => { for (const n of [1, 2, 3]) await upload(c.call, n, mp4(4096)); };
   // 1. Live configuration staged but not selected: the sandbox stays in use, owner-only.
   let c = await startCourse({ mode: 'test', live: { selected: false } });
@@ -368,4 +368,23 @@ test('CPD course webhook: signed live purchase grants access, refund revokes it,
   } finally { await c.stop(); }
   c = await startCourse({ mode: 'test' });
   try { assert.equal((await c.hooks.handleWebhook(Buffer.from('{}'), 't=1,v1=x')).status, 503, 'no course webhook secret configured'); } finally { await c.stop(); }
+});
+
+test('checkout requires the immediate-access agreement and records it on the payment', async () => {
+  const c = await startCourse({ mode: 'test', live: { selected: true }, publicSales: true });
+  try {
+    for (const n of [1, 2, 3]) await upload(c.call, n, mp4(4096));
+    let r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner' } });
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, /14-day right to cancel/);
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', immediateAccessConsent: 'yes' } });
+    assert.equal(r.status, 400, 'only an explicit true counts');
+    r = await c.call('/checkout', { method: 'POST', body: { email: 'a@example.com', fullName: 'A Learner', immediateAccessConsent: true } });
+    assert.equal(r.status, 200);
+    const created = c.liveStripe.created[0];
+    assert.equal(created.metadata.immediate_access_consent, 'immediate-access-waiver-v1');
+    assert.ok(created.metadata.consent_at);
+    assert.equal(created.payment_intent_data.metadata.immediate_access_consent, 'immediate-access-waiver-v1');
+    assert.match(created.custom_text.submit.message, /14-day right to cancel/);
+  } finally { await c.stop(); }
 });

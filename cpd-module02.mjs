@@ -22,6 +22,7 @@ const UPLOAD_CHUNK_MAX = 8 * 1024 * 1024;
 const UPLOAD_TOTAL_MAX = 2 * 1024 * 1024 * 1024;
 const WATCH_REQUIRED = 0.8;                        // share of a lesson file that must have been streamed
 const PRICE_PENCE = 499;
+const CONSENT_VERSION = 'immediate-access-waiver-v1';
 const LESSONS = Object.freeze([
   { n: 1, file: 'lesson-1.mp4', title: 'Our Body, Our Engine', duration: '7:16' },
   { n: 2, file: 'lesson-2.mp4', title: 'Six Purposes of Training', duration: '7:56' },
@@ -342,6 +343,11 @@ export function registerCpdModule02(app, deps) {
     if (!checkoutLimit(ipOf(req))) return fail(res, 429, 'Too many attempts. Please try again later.');
     const email = String(req.body?.email || '').trim().toLowerCase(), name = cleanName(req.body?.fullName);
     if (!emailValid(email) || name.length < 2 || name.length > 110) return fail(res, 400, 'Enter your full name (as it should appear on the certificate) and a valid email address.');
+    // UK Consumer Contracts Regulations: digital content may start within the 14-day cancellation
+    // period only with the buyer's express request and acknowledgement that the right to cancel
+    // is then lost. The agreement is recorded on the Stripe payment.
+    if (req.body?.immediateAccessConsent !== true) return fail(res, 400, 'Please confirm that you want immediate access and understand that the 14-day right to cancel ends once you start the course.');
+    const consentAt = new Date().toISOString();
     try {
       const price = await stripe.prices.retrieve(priceId);
       if (!price.active || price.type !== 'one_time' || String(price.currency).toLowerCase() !== 'gbp' || price.unit_amount !== PRICE_PENCE) return fail(res, 503, 'Course price is not configured for sale.');
@@ -350,8 +356,9 @@ export function registerCpdModule02(app, deps) {
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: origin + '/education/module-02.html?session_id={CHECKOUT_SESSION_ID}',
         cancel_url: origin + '/education/module-02.html?checkout=cancelled',
-        metadata: { course: CPD_MODULE02_COURSE, learner_name: name },
-        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE }, description: 'AthlyraX Education - CPD 01 Module 02' },
+        metadata: { course: CPD_MODULE02_COURSE, learner_name: name, immediate_access_consent: CONSENT_VERSION, consent_at: consentAt },
+        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE, immediate_access_consent: CONSENT_VERSION, consent_at: consentAt }, description: 'AthlyraX Education - CPD 01 Module 02' },
+        custom_text: { submit: { message: 'You asked for immediate access to this digital course. Your 14-day right to cancel ends once you start the course.' } },
         allow_promotion_codes: false,
       });
       noStore(res).json({ url: cs.url });
