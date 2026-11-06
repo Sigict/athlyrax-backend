@@ -337,7 +337,8 @@ test('if even the undo fails, the orphaned link is reverted automatically on the
     assert.equal(row.swimmerAccountUsername, undefined);
     assert.equal(row.accountLinkHistory.at(-1).action, 'reverted');
     assert.match(row.accountLinkHistory.at(-1).reason, /login account missing/);
-    assert.equal(status.payload.invites[0].status, 'pending', 'invitation usable again');
+    assert.equal(status.payload.invites[0].status, 'revoked', 'a recovered link withdraws its invitation; the club sends a new one');
+    assert.notEqual((await signup(base, inv.payload.athleteToken, 'amelia.second')).response.status, 201, 'the old link cannot be replayed');
   } finally { await server.stop(); }
 });
 
@@ -610,5 +611,29 @@ test('legacy data: stored duplicate swimmer ids are left exactly as saved; nothi
     assert.equal((await post(base, '/coach/swimmers/legacy/athlete-invites', {}, coach)).response.status, 409);
     db = tenantDb(server);
     assert.equal((db.athleteAccountInvites || []).length, 0);
+  } finally { await server.stop(); }
+});
+
+test('security: deleting a linked login does not revive its used invitation link', async () => {
+  const server = await startServer({}, seedInvites);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const inv = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
+    assert.equal((await signup(base, inv.payload.athleteToken, 'mallory')).response.status, 201);
+    const del = await request(base, '/auth/users/mallory', { ...coach, method: 'DELETE' });
+    assert.ok([200, 204].includes(del.response.status), `delete -> ${del.response.status} ${JSON.stringify(del.payload)}`);
+    // Any club access runs the recovery; then the old token is replayed with a new login.
+    const replay1 = await signup(base, inv.payload.athleteToken, 'mallory2', { email: 'mallory2@example.com' });
+    const replay2 = await signup(base, inv.payload.athleteToken, 'mallory3', { email: 'mallory3@example.com' });
+    assert.notEqual(replay1.response.status, 201, JSON.stringify(replay1.payload));
+    assert.notEqual(replay2.response.status, 201, JSON.stringify(replay2.payload));
+    const row = tenantDb(server).swimmers.find((r) => r.id === 'amelia');
+    assert.equal(row.swimmerAccountUsername, undefined, 'swimmer not re-linked');
+    assert.equal(tenantDb(server).swimmers.length, 3);
+    assert.equal(tenantDb(server).athleteAccountInvites.find((i) => i.id === inv.payload.invite.id).tokenHash, '');
+    // A new invitation from the club still works.
+    const fresh = await post(base, '/coach/swimmers/amelia/athlete-invites', {}, coach);
+    assert.equal((await signup(base, fresh.payload.athleteToken, 'amelia.right')).response.status, 201);
   } finally { await server.stop(); }
 });

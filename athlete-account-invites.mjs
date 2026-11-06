@@ -314,8 +314,10 @@ export function preserveServerOwnedAthleteData(nextShape = {}, existingShape = {
 }
 
 // Compensation: undo an acceptance whose login account could not be saved. Only reverts the exact
-// link made by this invitation for this username; the invitation becomes usable again.
-export function revertAcceptance(db = {}, invite, username, { reason = 'account not saved', now = new Date() } = {}) {
+// link made by this invitation for this username. reopen=true (only the immediate compensation inside
+// the acceptance request) makes the invitation usable again; otherwise it is withdrawn for good, so an
+// accepted link can never be replayed after the login was deleted or its club access revoked.
+export function revertAcceptance(db = {}, invite, username, { reason = 'account not saved', now = new Date(), reopen = true } = {}) {
   const at = now.toISOString();
   let reverted = false;
   const swimmers = list(db.swimmers).map((s) => {
@@ -326,7 +328,7 @@ export function revertAcceptance(db = {}, invite, username, { reason = 'account 
     return next;
   });
   if (!reverted) return { ok: true, reverted: false, db: null };
-  const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id && text(inv.acceptedBy).toLowerCase() === text(username).toLowerCase() ? { ...inv, acceptedAt: '', acceptedBy: '' } : inv));
+  const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id && text(inv.acceptedBy).toLowerCase() === text(username).toLowerCase() ? (reopen ? { ...inv, acceptedAt: '', acceptedBy: '' } : { ...inv, revokedAt: at, revokedBy: 'system (login missing or access revoked)', tokenHash: '' }) : inv));
   return { ok: true, reverted: true, db: { ...db, swimmers, [ATHLETE_INVITE_COLLECTION]: invites } };
 }
 
@@ -339,7 +341,7 @@ export function reconcileOrphanedAthleteLinks(db = {}, accountActive = () => tru
     const username = text(row?.swimmerAccountUsername); const inviteId = text(row?.accountLinkInviteId);
     if (!username || !inviteId || accountActive(username)) continue;
     const invite = list(current[ATHLETE_INVITE_COLLECTION]).find((inv) => text(inv.id) === inviteId) || { id: inviteId, swimmerId: row.id };
-    const out = revertAcceptance(current, invite, username, { reason: 'login account missing or its club access revoked (recovered automatically)', now });
+    const out = revertAcceptance(current, invite, username, { reason: 'login account missing or its club access revoked (recovered automatically)', now, reopen: false });
     if (out.reverted) { current = out.db; reverted.push({ swimmerId: text(row.id), username }); }
   }
   return reverted.length ? { ok: true, reverted, db: current } : { ok: true, reverted, db: null };
