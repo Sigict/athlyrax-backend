@@ -184,7 +184,8 @@ export function registerCpdModule02(app, deps) {
   const lessonSize = (n) => { try { const st = fs.statSync(lessonPath(n)); return st.isFile() && st.size > 1024 ? st.size : 0; } catch { return 0; } };
   const videosReady = () => LESSONS.every((l) => lessonSize(l.n) > 0);
   const setup = () => ({ videos: videosReady(), signingKey: secret.length >= 32, price: Boolean(priceId), stripe: Boolean(stripe) && accountGuardOk(), salesSwitch: salesFlag, recoveryEmail: Boolean(sendMail) });
-  const salesOpen = () => Object.values(setup()).slice(0, 5).every(Boolean);
+  // Purchase confirmation must be deliverable to the buyer on a durable medium.
+  const salesOpen = () => Object.values(setup()).every(Boolean);
   const ipOf = (req) => String(req.ip || req.socket?.remoteAddress || '');
 
   // ---------- Stripe verification ----------
@@ -520,7 +521,40 @@ export function registerCpdModule02(app, deps) {
   // ---------- Stripe webhook hooks (called from the existing signed /billing/webhook) ----------
   async function onCheckoutCompleted(session) {
     if (session?.metadata?.course !== CPD_MODULE02_COURSE || !sessionIdValid(String(session.id || ''))) return false;
-    try { if (stripe) await verifyPurchase(session.id); } catch {}
+    try {
+      if (stripe) {
+        const { ent, problem } = await verifyPurchase(session.id);
+        // Email a durable confirmation of the buyer's explicit consent and
+        // acknowledgement. Stripe metadata retains the timestamped evidence.
+        if (!problem && ent?.status === 'active' && ent.email && sendMail
+          && session.metadata?.digital_access_consent === 'yes'
+          && session.metadata?.cancellation_acknowledged === 'yes'
+          && !store.read('purchase-confirmations', session.id)) {
+          try {
+            await sendMail({
+              to: ent.email,
+              subject: 'AthlyraX Education — Module 2 purchase confirmation',
+              text: [
+                'Your purchase of CPD 01 Module 02: Our Body, Our Engine is confirmed.',
+                'Price paid: £4.99 (one-time digital course purchase).',
+                '',
+                'Before purchase, you expressly consented to immediate digital access',
+                'and acknowledged that once access begins you lose the statutory',
+                '14-day right to cancel. This does not affect your statutory rights',
+                'if digital content is faulty or not as described.',
+                '',
+                'Open your course: ' + origin + '/education/module-02.html',
+                'Your purchase is associated with this email address. You can',
+                'restore access from the course page if you change devices.',
+                '',
+                'AthlyraX Education',
+              ].join('\n'),
+            });
+            store.write('purchase-confirmations', session.id, { sentAt: new Date().toISOString(), consentVersion: '2026-11-06' });
+          } catch { /* keep the learner's paid entitlement and retry on a repeated signed event */ }
+        }
+      }
+    } catch {}
     return true;
   }
   // The event only says which payment to look at; the refund/dispute itself is confirmed with Stripe.
