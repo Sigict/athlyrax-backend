@@ -4034,10 +4034,9 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		if (newUser) authUsers.push(newUser);
 		const user = newUser || signedIn;
 		user.athleteInviteManaged = true;
-		if (normalizeTenantId(user.tenantId) !== t.key) {
-			const rows = Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections.filter((c) => normalizeTenantId(c?.tenantId) !== t.key) : [];
-			user.athleteTenantConnections = [...rows, { tenantId: t.key, status: 'active', source: 'athlete-invite', clubName: clubDisplayName(t.key), connectedAt: new Date().toISOString() }];
-		}
+		// The club connection the Athlete App shows (also for the account's own club).
+		const rows = Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections.filter((c) => normalizeTenantId(c?.tenantId) !== t.key) : [];
+		user.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, clubName: clubDisplayName(t.key) || 'Club', status: 'active', source: 'athlete-invite', connectedAt: new Date().toISOString() }];
 		persistAuthUsers();
 	} catch (error) {
 		if (newUser) authUsers.splice(authUsers.indexOf(newUser), 1);
@@ -7064,6 +7063,8 @@ app.get('/db', requireAuth, (req, res) => {
 						const rowAccountEmail = String(row?.swimmerAccountEmail || '').trim().toLowerCase();
 						const rowEmail = String(row?.email || '').trim().toLowerCase();
 						if (authUsername && rowUsername === authUsername) return true;
+						// ATHLYRAX_ATHLETE_EXPLICIT_LINK_FIRST: invitation-managed accounts see only their linked record.
+						if (authUser?.athleteInviteManaged === true) return false;
 						if (authEmail && (rowAccountEmail === authEmail || rowEmail === authEmail)) return true;
 						return false;
 					});
@@ -7078,6 +7079,7 @@ app.get('/db', requireAuth, (req, res) => {
 									const rowAccountEmail = String(row?.swimmerAccountEmail || '').trim().toLowerCase();
 									const rowEmail = String(row?.email || '').trim().toLowerCase();
 									if (authUsername && rowUsername === authUsername) return true;
+									if (authUser?.athleteInviteManaged === true) return false;
 									if (authEmail && (rowAccountEmail === authEmail || rowEmail === authEmail)) return true;
 									return false;
 								});

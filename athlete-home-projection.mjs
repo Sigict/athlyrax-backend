@@ -288,7 +288,10 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
         (scheduleId && parentScheduleId === scheduleId)
       );
     });
-    return safeSession(row, linkedSets);
+    const safe = safeSession(row, linkedSets);
+    // Club sessions read from this club's data belong to this club's context in the Athlete App.
+    if (safe.ownerType === 'club' && !safe.ownerClubId && contextConnection?.clubId) safe.ownerClubId = text(contextConnection.clubId);
+    return safe;
   }));
 
   return {

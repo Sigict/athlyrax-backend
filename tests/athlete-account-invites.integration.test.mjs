@@ -151,7 +151,7 @@ const seedInvites = (paths) => {
     swimmers: [
       { id: 'amelia', firstName: 'Amelia', lastName: 'Test', squadId: 'sq-a', dob: '2000-02-01', integratedProfile: { overall: 71 } },
       { id: 'kid', firstName: 'Kit', lastName: 'Young', squadId: 'sq-a', dob: '2014-05-01' },
-      { id: 'other', firstName: 'Olive', lastName: 'Other', squadId: 'sq-b', dob: '1999-01-01', email: 'olive@example.com' },
+      { id: 'other', firstName: 'Olive', lastName: 'Other', squadId: 'sq-b', dob: '1999-01-01', email: 'amelia.athlete@example.com' },
     ],
     ...BIG,
   });
@@ -202,6 +202,8 @@ test('Athlete App invitations link a login to the existing swimmer record, secur
     assert.equal(home.response.status, 200, JSON.stringify(home.payload));
     assert.equal(home.payload.athlete.id, 'amelia');
     assert.deepEqual(home.payload.sessions.map((s) => [s.id, s.sets.map((x) => [x.reps, x.distance, x.sendoff])]), [['ts-1', [[3, 100, '1:40']]]]);
+    assert.deepEqual(home.payload.clubConnections.map((c) => [c.clubId, c.status]), [['tenant-a', 'active']], 'the Athlete App shows her club');
+    assert.equal(home.payload.sessions[0].ownerClubId, 'tenant-a', 'club sessions belong to the club context');
     const own = await request(base, '/db', athlete);
     assert.deepEqual((own.payload.swimmers || []).map((r) => r.id), ['amelia'], 'only her own swimmer record');
     assert.ok(!JSON.stringify(own.payload).includes('59.90'), 'no other swimmer results');
