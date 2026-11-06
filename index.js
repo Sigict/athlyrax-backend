@@ -4595,6 +4595,17 @@ app.post('/billing/checkout-session', requireStrictAuth, async (req, res) => {
 			...(partnerCommissionMonths > 0 ? { partnerCommissionMonths: String(partnerCommissionMonths) } : {}),
 		};
 		let customerId = String(billing?.customerId || '').trim();
+		// ATHLYRAX_CHECKOUT_STALE_CUSTOMER: a stored customer that no longer exists in the configured
+		// Stripe account (key or account changed, customer deleted) is replaced instead of failing checkout.
+		if (customerId) {
+			try {
+				const existing = await stripeClient.customers.retrieve(customerId);
+				if (!existing || existing.deleted) customerId = '';
+			} catch (error) {
+				if (String(error?.code || error?.raw?.code || '') === 'resource_missing' || Number(error?.statusCode) === 404) customerId = '';
+				else throw error;
+			}
+		}
 		if (!customerId) {
 			const createdCustomer = await stripeClient.customers.create({
 				email: String(user?.email || '').trim() || undefined,
