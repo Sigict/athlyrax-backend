@@ -229,3 +229,27 @@ test('lane plan saves on the session with known swimmers only and appears in the
   assert.deepEqual(projection.sessions[0].lanePlan.lanes[0].swimmerIds, ['a', 'b']);
   assert.equal(applyCoachPoolsideLanePlan(db, { sessionId: 'nope', lanes: [] }).status, 404);
 });
+
+test('poolside results: stroke-only reps are saved and protected; rep numbers up to 1000; invalid numbers refused', async () => {
+  const { applyCoachPoolsideCanonicalResult: save } = await import('../coach-poolside-mutations.mjs');
+  const db = { swimmers: [{ id: 'amelia' }], trainingSessionSets: [{ id: 'set-a', trainingSessionId: 's1', reps: 300 }] };
+  const strokes = save(db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 1, overallStrokeCount: '18' }] });
+  assert.equal(strokes.written, 1, 'stroke-only measurement saved');
+  const timeLater = save(strokes.db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 1, overallTime: '31.00' }] });
+  assert.equal(timeLater.written, 0);
+  assert.equal(timeLater.db.trainingSessionSets[0].resultsBySwimmer.amelia.reps[0].overallStrokeCount, '18', 'stroke count not erased');
+  const high = save(db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 201, overallTime: '30.00' }] });
+  assert.equal(high.written, 1);
+  assert.equal(high.db.trainingSessionSets[0].resultsBySwimmer.amelia.reps[200].overallTime, '30.00', 'rep 201 stored as rep 201');
+  for (const bad of [0, 1001, 2.5, 'x']) assert.equal(save(db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: bad, overallTime: '30.00' }] }).status, 400, String(bad));
+});
+
+test('lane plan requires an explicit list; [] clears it', async () => {
+  const { applyCoachPoolsideLanePlan } = await import('../coach-poolside-mutations.mjs');
+  const db = { swimmers: [{ id: 'a' }], trainingSessions: [{ id: 's1', poolsideLanePlan: { lanes: [{ lane: 'Lane 1', swimmerIds: ['a'] }] } }] };
+  assert.equal(applyCoachPoolsideLanePlan(db, { sessionId: 's1' }).status, 400);
+  assert.equal(applyCoachPoolsideLanePlan(db, { sessionId: 's1', lanes: {} }).status, 400);
+  const cleared = applyCoachPoolsideLanePlan(db, { sessionId: 's1', lanes: [] });
+  assert.equal(cleared.ok, true);
+  assert.deepEqual(cleared.db.trainingSessions[0].poolsideLanePlan.lanes, []);
+});

@@ -134,8 +134,11 @@ export function applyCoachPoolsideExecution(db = {}, input = {}) {
 }
 
 
+// A repetition counts as recorded when it holds any measurement: a time, a stroke count, or a
+// split time or split stroke count. Such repetitions are never overwritten by a poolside save.
 function repHasRecordedTime(rep = {}) {
-  return Boolean(text(rep?.overallTime || rep?.time) || list(rep?.splits).some((split) => text(split?.time)));
+  return Boolean(text(rep?.overallTime || rep?.time) || text(rep?.overallStrokeCount) || text(rep?.strokeCycles)
+    || list(rep?.splits).some((split) => text(split?.time) || text(split?.strokeCount)));
 }
 
 function normalizeCanonicalResultRep(rep = {}) {
@@ -177,12 +180,17 @@ export function applyCoachPoolsideCanonicalResult(db = {}, input = {}) {
   // ATHLYRAX_POOLSIDE_RESULTS_MERGE: each incoming rep goes to its own repetition (rep number when
   // given, else its position). Recorded repetitions are never overwritten, so a second save of the
   // same poolside results, or a save from another device, cannot replace what is already recorded.
+  // Explicit rep numbers must be whole numbers from 1 to 1000 (the set limit); the position in the
+  // request is used only when no number is given.
+  const badRep = list(input.reps).find((rep) => rep?.rep !== undefined && rep?.rep !== null && rep?.rep !== ''
+    && !(Number.isInteger(Number(rep.rep)) && Number(rep.rep) >= 1 && Number(rep.rep) <= 1000));
+  if (badRep) return { ok: false, status: 400, error: 'Repetition numbers must be whole numbers from 1 to 1000.' };
   const mergedReps = list(currentResult.reps).map((rep) => ({ ...rep }));
   let written = 0;
   let kept = 0;
   reps.forEach((rep, position) => {
     const own = Number(rep?.rep);
-    const at = Number.isInteger(own) && own >= 1 && own <= 200 ? own - 1 : position;
+    const at = rep?.rep !== undefined && rep?.rep !== null && rep?.rep !== '' ? own - 1 : position;
     while (mergedReps.length < at) mergedReps.push({});
     if (repHasRecordedTime(mergedReps[at])) { kept += 1; return; }
     if (!repHasRecordedTime(rep)) return;
@@ -327,6 +335,8 @@ export function applyCoachPoolsideCompetitionEvidence(db = {}, input = {}) {
 export function applyCoachPoolsideLanePlan(db = {}, input = {}) {
   const sessionId = text(input.sessionId);
   if (!sessionId) return { ok: false, status: 400, error: 'Canonical session is required.' };
+  // Only an explicit list replaces the plan ([] clears it); a missing or malformed field is refused.
+  if (!Array.isArray(input.lanes)) return { ok: false, status: 400, error: 'Lanes must be a list.' };
   const swimmerIds = new Set(list(db.swimmers).map((row) => text(row.id)).filter(Boolean));
   const lanes = list(input.lanes).slice(0, 12).map((lane) => ({
     lane: text(lane?.lane).slice(0, 20),
