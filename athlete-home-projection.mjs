@@ -92,6 +92,15 @@ function setScheduleId(set = {}) {
   return text(set.scheduleId || set.scheduleSessionId || set.occurrenceId);
 }
 
+// Send-offs saved as plain seconds (e.g. 105) are shown as clock time (1:45).
+function clockOrText(value) {
+  if (typeof value === 'number' || /^\d+$/.test(text(value))) {
+    const s = Math.max(0, Math.round(Number(value)));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+  return text(value);
+}
+
 function safeSet(set = {}) {
   if (set.coachPrivate === true || set.athleteVisible === false) return null;
   return {
@@ -103,7 +112,7 @@ function safeSet(set = {}) {
     distance: set.distance ?? set.distancePerRep ?? null,
     distanceUnit: text(set.distanceUnit || set.unit || 'm'),
     stroke: text(set.stroke || set.strokeType),
-    sendoff: text(set.sendoff || set.sendOff || set.interval),
+    sendoff: clockOrText(set.sendoff ?? set.sendOff ?? set.interval),
     rest: text(set.rest || set.restTime),
     target: text(set.target || set.targetTime || set.targetPace),
     energySystem: text(set.energySystem || set.energy),

@@ -85,6 +85,11 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
   return { ok: true, db: { ...db, attendance: retained }, rows: changedRows };
 }
 
+function clockText(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 export function applyCoachPoolsideSetChange(db = {}, input = {}) {
   const sessionId = text(input.sessionId);
   const setId = text(input.setId);
@@ -102,8 +107,10 @@ export function applyCoachPoolsideSetChange(db = {}, input = {}) {
   next[index] = {
     ...next[index],
     reps: Math.trunc(reps),
-    sendoff: sendoffSeconds,
-    sendOff: sendoffSeconds,
+    // ATHLYRAX_SENDOFF_PLANNER_FORMAT: stored the way the Planner stores it ("1:45"), with the seconds alongside.
+    sendoff: clockText(sendoffSeconds),
+    sendOff: clockText(sendoffSeconds),
+    sendoffSeconds: Math.round(sendoffSeconds),
     updatedAt: now,
     updatedBy: text(input.updatedBy),
   };
