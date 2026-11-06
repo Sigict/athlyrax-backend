@@ -75,8 +75,11 @@ test('closed until configured; nothing is served without a verified purchase', a
     r = await c.call('/video/1'); assert.equal(r.status, 401);
     r = await c.call('/certificate'); assert.equal(r.status, 401);
     r = await c.call('/assessment', { method: 'POST', body: { section: 'final', answers: Array(10).fill(0) } }); assert.equal(r.status, 401);
-    r = await c.call('/questions?section=final'); const q = await r.json();
-    assert.equal(q.questions.length, 10); assert.ok(q.questions.every((x) => !('correct_option_index' in x) && !('explanation' in x)), 'no answer key before submission');
+    // Questions are paid content: none are sent without a verified purchase.
+    for (const section of ['check-1', 'check-2', 'final']) {
+      r = await c.call(`/questions?section=${section}`); assert.equal(r.status, 401, `${section} questions refused without purchase`);
+      assert.equal(JSON.stringify(await r.json()).includes('question'), false);
+    }
     r = await c.call('/video/1', { cookie: 'athlyrax_cpd02=eyJjb3Vyc2UiOiJjcGQwMS1tb2R1bGUwMiJ9.forged' }); assert.equal(r.status, 401, 'forged cookie refused');
   } finally { await c.stop(); }
 });
@@ -140,10 +143,16 @@ test('full learner journey: pay, watch, checks, 7/10 fails, 8/10 passes, certifi
     r = await c.call('/video/1', { cookie, headers: { Range: 'bytes=999999999-' } }); assert.equal(r.status, 416);
 
     // Order: watch the lesson before its check; checks before the next lesson.
+    r = await c.call('/questions?section=check-1', { cookie }); assert.equal(r.status, 409, 'check 1 questions locked until lesson 1 is watched');
+    r = await c.call('/questions?section=final', { cookie }); assert.equal(r.status, 409, 'final questions locked for a new purchaser');
     r = await c.call('/assessment', { method: 'POST', cookie, body: { section: 'check-1', answers: key('check-1') } }); assert.equal(r.status, 409, 'lesson 1 not completed yet');
     r = await c.call('/lesson-complete', { method: 'POST', cookie, body: { lesson: 1 } }); assert.equal(r.status, 409, 'not fully watched');
     await watchAll(c.call, cookie, 1, sizes[1]);
     r = await c.call('/lesson-complete', { method: 'POST', cookie, body: { lesson: 1 } }); assert.equal(r.status, 200);
+    r = await c.call('/questions?section=check-1', { cookie }); assert.equal(r.status, 200);
+    const q1 = await r.json(); assert.equal(q1.questions.length, 4);
+    assert.ok(q1.questions.every((x) => !('correct_option_index' in x) && !('explanation' in x)), 'no answer key before submission');
+    r = await c.call('/questions?section=final', { cookie }); assert.equal(r.status, 409, 'final still locked after lesson 1');
     r = await c.call('/assessment', { method: 'POST', cookie, body: { section: 'check-1', answers: key('check-1').map((a, i) => (i === 0 ? wrong(a) : a)) } });
     let res = await r.json(); assert.equal(res.score, 3); assert.equal(res.feedback[0].correct, false); assert.equal(typeof res.feedback[0].explanation, 'string');
     await watchAll(c.call, cookie, 2, sizes[2]);
@@ -152,6 +161,9 @@ test('full learner journey: pay, watch, checks, 7/10 fails, 8/10 passes, certifi
     r = await c.call('/assessment', { method: 'POST', cookie, body: { section: 'check-2', answers: key('check-2') } }); assert.equal(r.status, 200);
     await watchAll(c.call, cookie, 3, sizes[3]);
     r = await c.call('/lesson-complete', { method: 'POST', cookie, body: { lesson: 3 } }); assert.equal(r.status, 200);
+    r = await c.call('/questions?section=final', { cookie }); assert.equal(r.status, 200, 'final questions open after all lessons and checks');
+    const qf = await r.json(); assert.equal(qf.questions.length, 10);
+    assert.ok(qf.questions.every((x) => !('correct_option_index' in x) && !('explanation' in x)), 'no final answer key');
 
     // 7/10 fails, answers are not revealed, no certificate.
     const final = key('final');

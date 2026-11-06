@@ -431,9 +431,15 @@ export function registerCpdModule02(app, deps) {
     fs.createReadStream(lessonPath(n), { start, end }).on('error', () => res.destroy()).pipe(res);
   });
 
-  app.get(base + '/questions', (req, res) => {
+  // Questions are paid course content: only a verified purchaser who has reached that step gets them.
+  app.get(base + '/questions', async (req, res) => {
     const section = String(req.query.section || '');
     if (!SECTIONS[section]) return fail(res, 400, 'Unknown assessment.');
+    let ent = null; try { ent = await learner(req); } catch {}
+    if (!ent) return fail(res, 401, 'Course purchase required.');
+    const p = getProgress(ent.sessionId), def = SECTIONS[section];
+    if (!p.lessons.includes(def.afterLesson)) return fail(res, 409, `Watch lesson ${def.afterLesson} first.`);
+    if (section === 'final' && !(p.lessons.length === 3 && p.checks.includes('check-1') && p.checks.includes('check-2'))) return fail(res, 409, 'Complete all three lessons and both knowledge checks first.');
     noStore(res).json({ section, questions: questions.filter((x) => x.section === section).map((x) => ({ id: x.id, question: x.question, options: x.options })) });
   });
 
