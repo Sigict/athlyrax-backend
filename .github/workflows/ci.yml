@@ -56,7 +56,7 @@ jobs:
         run: node --test tests/results-inbox.integration.test.mjs tests/checkout-stale-customer.test.mjs
 
       - name: Coach Pool Console connection (session load, results per set/rep, lane plan)
-        run: node --test tests/coach-poolside-console.integration.test.mjs
+        run: node --test tests/coach-poolside-console.integration.test.mjs tests/coach-poolside-projection.test.mjs
 
       - name: Whole-club save keeps audit metadata of unchanged rows
         run: node --test tests/ownership-metadata-unchanged-rows.integration.test.mjs
