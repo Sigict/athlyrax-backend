@@ -188,3 +188,68 @@ test('coach poolside exposes targeted competition evidence endpoint', () => {
   assert.match(source, /\/coach\/poolside\/competitions\/:fixtureId\/events\/:eventId\/evidence/);
   assert.match(source, /applyCoachPoolsideCompetitionEvidence/);
 });
+
+test('poolside results go to their own repetition and never overwrite recorded repetitions', async () => {
+  const { applyCoachPoolsideCanonicalResult: save } = await import('../coach-poolside-mutations.mjs');
+  const db = {
+    swimmers: [{ id: 'amelia' }],
+    trainingSessionSets: [{ id: 'set-a', trainingSessionId: 's1', reps: 4, resultsBySwimmer: { amelia: { reps: [{ overallTime: '31.00' }] } } }],
+  };
+  const first = save(db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 1, overallTime: '35.00' }, { rep: 3, overallTime: '32.40', splits: [{ time: '15.9' }] }] });
+  assert.equal(first.ok, true);
+  assert.equal(first.written, 1);
+  assert.equal(first.kept, 1);
+  const reps = first.db.trainingSessionSets[0].resultsBySwimmer.amelia.reps;
+  assert.equal(reps[0].overallTime, '31.00', 'recorded rep 1 kept');
+  assert.equal(reps[2].overallTime, '32.40', 'rep 3 saved as rep 3');
+  assert.equal(reps.length, 3);
+  // Same save again: nothing changes.
+  const again = save(first.db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 3, overallTime: '33.00' }] });
+  assert.equal(again.written, 0);
+  assert.equal(again.unchanged, true);
+  assert.equal(again.db.trainingSessionSets[0].resultsBySwimmer.amelia.reps[2].overallTime, '32.40');
+  // Split-only recorded rep is protected too.
+  const splitOnly = { ...db, trainingSessionSets: [{ ...db.trainingSessionSets[0], resultsBySwimmer: { amelia: { reps: [{ splits: [{ time: '15.0' }] }] } } }] };
+  assert.equal(save(splitOnly, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 1, overallTime: '30.00' }] }).written, 0);
+});
+
+test('lane plan saves on the session with known swimmers only and appears in the poolside projection', async () => {
+  const { applyCoachPoolsideLanePlan } = await import('../coach-poolside-mutations.mjs');
+  const { buildCoachPoolsideProjection } = await import('../coach-poolside-projection.mjs');
+  const db = {
+    swimmers: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }],
+    schedule: [{ id: 'sch1', date: '2026-11-06', trainingSessionId: 's1' }],
+    trainingSessions: [{ id: 's1', scheduleId: 'sch1', date: '2026-11-06' }],
+    trainingSessionSets: [],
+  };
+  const out = applyCoachPoolsideLanePlan(db, { sessionId: 's1', lanes: [{ lane: 'Lane 1', swimmerIds: ['a', 'b', 'intruder'], sendoffSeconds: 90, staggerSeconds: 5 }, { lane: '', swimmerIds: ['a'] }], updatedBy: 'coachA' });
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.lanePlan.lanes, [{ lane: 'Lane 1', swimmerIds: ['a', 'b'], sendoffSeconds: 90, staggerSeconds: 5 }]);
+  const projection = buildCoachPoolsideProjection(out.db, { date: '2026-11-06' });
+  assert.deepEqual(projection.sessions[0].lanePlan.lanes[0].swimmerIds, ['a', 'b']);
+  assert.equal(applyCoachPoolsideLanePlan(db, { sessionId: 'nope', lanes: [] }).status, 404);
+});
+
+test('poolside results: stroke-only reps are saved and protected; rep numbers up to 1000; invalid numbers refused', async () => {
+  const { applyCoachPoolsideCanonicalResult: save } = await import('../coach-poolside-mutations.mjs');
+  const db = { swimmers: [{ id: 'amelia' }], trainingSessionSets: [{ id: 'set-a', trainingSessionId: 's1', reps: 300 }] };
+  const strokes = save(db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 1, overallStrokeCount: '18' }] });
+  assert.equal(strokes.written, 1, 'stroke-only measurement saved');
+  const timeLater = save(strokes.db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 1, overallTime: '31.00' }] });
+  assert.equal(timeLater.written, 0);
+  assert.equal(timeLater.db.trainingSessionSets[0].resultsBySwimmer.amelia.reps[0].overallStrokeCount, '18', 'stroke count not erased');
+  const high = save(db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: 201, overallTime: '30.00' }] });
+  assert.equal(high.written, 1);
+  assert.equal(high.db.trainingSessionSets[0].resultsBySwimmer.amelia.reps[200].overallTime, '30.00', 'rep 201 stored as rep 201');
+  for (const bad of [0, 1001, 2.5, 'x']) assert.equal(save(db, { sessionId: 's1', setId: 'set-a', swimmerId: 'amelia', reps: [{ rep: bad, overallTime: '30.00' }] }).status, 400, String(bad));
+});
+
+test('lane plan requires an explicit list; [] clears it', async () => {
+  const { applyCoachPoolsideLanePlan } = await import('../coach-poolside-mutations.mjs');
+  const db = { swimmers: [{ id: 'a' }], trainingSessions: [{ id: 's1', poolsideLanePlan: { lanes: [{ lane: 'Lane 1', swimmerIds: ['a'] }] } }] };
+  assert.equal(applyCoachPoolsideLanePlan(db, { sessionId: 's1' }).status, 400);
+  assert.equal(applyCoachPoolsideLanePlan(db, { sessionId: 's1', lanes: {} }).status, 400);
+  const cleared = applyCoachPoolsideLanePlan(db, { sessionId: 's1', lanes: [] });
+  assert.equal(cleared.ok, true);
+  assert.deepEqual(cleared.db.trainingSessions[0].poolsideLanePlan.lanes, []);
+});

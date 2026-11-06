@@ -134,6 +134,13 @@ export function applyCoachPoolsideExecution(db = {}, input = {}) {
 }
 
 
+// A repetition counts as recorded when it holds any measurement: a time, a stroke count, or a
+// split time or split stroke count. Such repetitions are never overwritten by a poolside save.
+function repHasRecordedTime(rep = {}) {
+  return Boolean(text(rep?.overallTime || rep?.time) || text(rep?.overallStrokeCount) || text(rep?.strokeCycles)
+    || list(rep?.splits).some((split) => text(split?.time) || text(split?.strokeCount)));
+}
+
 function normalizeCanonicalResultRep(rep = {}) {
   const splits = list(rep?.splits).map((split) => ({
     ...split,
@@ -169,10 +176,31 @@ export function applyCoachPoolsideCanonicalResult(db = {}, input = {}) {
   const currentResults = sets[index]?.resultsBySwimmer && typeof sets[index].resultsBySwimmer === 'object'
     ? sets[index].resultsBySwimmer
     : {};
+  const currentResult = currentResults[swimmerId] && typeof currentResults[swimmerId] === 'object' ? currentResults[swimmerId] : {};
+  // ATHLYRAX_POOLSIDE_RESULTS_MERGE: each incoming rep goes to its own repetition (rep number when
+  // given, else its position). Recorded repetitions are never overwritten, so a second save of the
+  // same poolside results, or a save from another device, cannot replace what is already recorded.
+  // Explicit rep numbers must be whole numbers from 1 to 1000 (the set limit); the position in the
+  // request is used only when no number is given.
+  const badRep = list(input.reps).find((rep) => rep?.rep !== undefined && rep?.rep !== null && rep?.rep !== ''
+    && !(Number.isInteger(Number(rep.rep)) && Number(rep.rep) >= 1 && Number(rep.rep) <= 1000));
+  if (badRep) return { ok: false, status: 400, error: 'Repetition numbers must be whole numbers from 1 to 1000.' };
+  const mergedReps = list(currentResult.reps).map((rep) => ({ ...rep }));
+  let written = 0;
+  let kept = 0;
+  reps.forEach((rep, position) => {
+    const own = Number(rep?.rep);
+    const at = rep?.rep !== undefined && rep?.rep !== null && rep?.rep !== '' ? own - 1 : position;
+    while (mergedReps.length < at) mergedReps.push({});
+    if (repHasRecordedTime(mergedReps[at])) { kept += 1; return; }
+    if (!repHasRecordedTime(rep)) return;
+    mergedReps[at] = { ...(mergedReps[at] || {}), ...rep };
+    written += 1;
+  });
   const nextResult = {
-    ...(currentResults[swimmerId] && typeof currentResults[swimmerId] === 'object' ? currentResults[swimmerId] : {}),
-    reps,
-    source: text(input.source) || 'coach-poolside',
+    ...currentResult,
+    reps: mergedReps,
+    source: written ? (text(input.source) || 'coach-poolside') : text(currentResult.source || input.source || 'coach-poolside'),
     updatedAt: now,
     updatedBy: text(input.updatedBy),
   };
@@ -183,7 +211,8 @@ export function applyCoachPoolsideCanonicalResult(db = {}, input = {}) {
     updatedAt: now,
     updatedBy: text(input.updatedBy),
   };
-  return { ok: true, db: { ...db, trainingSessionSets: nextSets }, result: nextResult, set: nextSets[index] };
+  if (!written) return { ok: true, db, result: currentResult, set: sets[index], written, kept, unchanged: true };
+  return { ok: true, db: { ...db, trainingSessionSets: nextSets }, result: nextResult, set: nextSets[index], written, kept };
 }
 
 
@@ -298,4 +327,36 @@ export function applyCoachPoolsideCompetitionEvidence(db = {}, input = {}) {
     event: events[eventIndex],
     fixture: nextFixtures[fixtureIndex],
   };
+}
+
+
+// Lane plan for a session (Coach Pool Console): which swimmers swim in which lane, the lane
+// send-off and the stagger between swimmers. Stored on the session; planned values only.
+export function applyCoachPoolsideLanePlan(db = {}, input = {}) {
+  const sessionId = text(input.sessionId);
+  if (!sessionId) return { ok: false, status: 400, error: 'Canonical session is required.' };
+  // Only an explicit list replaces the plan ([] clears it); a missing or malformed field is refused.
+  if (!Array.isArray(input.lanes)) return { ok: false, status: 400, error: 'Lanes must be a list.' };
+  const swimmerIds = new Set(list(db.swimmers).map((row) => text(row.id)).filter(Boolean));
+  const lanes = list(input.lanes).slice(0, 12).map((lane) => ({
+    lane: text(lane?.lane).slice(0, 20),
+    swimmerIds: [...new Set(list(lane?.swimmerIds).map(text).filter((id) => swimmerIds.has(id)))].slice(0, 20),
+    sendoffSeconds: Number.isFinite(Number(lane?.sendoffSeconds)) && Number(lane.sendoffSeconds) > 0 ? Math.round(Number(lane.sendoffSeconds)) : null,
+    staggerSeconds: Number.isFinite(Number(lane?.staggerSeconds)) && Number(lane.staggerSeconds) >= 0 ? Math.round(Number(lane.staggerSeconds)) : null,
+  })).filter((lane) => lane.lane);
+  const now = text(input.now) || new Date().toISOString();
+  const plan = { lanes, updatedAt: now, updatedBy: text(input.updatedBy) };
+  const sessions = list(db.trainingSessions);
+  const at = sessions.findIndex((row) => text(row.id || row.sessionId || row.trainingSessionId) === sessionId);
+  if (at >= 0) {
+    const next = sessions.slice();
+    next[at] = { ...next[at], poolsideLanePlan: plan, updatedAt: now };
+    return { ok: true, db: { ...db, trainingSessions: next }, lanePlan: plan };
+  }
+  const schedule = list(db.schedule);
+  const sat = schedule.findIndex((row) => text(row.id || row.sessionId || row.trainingSessionId) === sessionId);
+  if (sat < 0) return { ok: false, status: 404, error: 'Session was not found in this club.' };
+  const next = schedule.slice();
+  next[sat] = { ...next[sat], poolsideLanePlan: plan, updatedAt: now };
+  return { ok: true, db: { ...db, schedule: next }, lanePlan: plan };
 }

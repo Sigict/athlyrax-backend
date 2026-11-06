@@ -16,6 +16,7 @@ import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
 import { applyCoachObservation } from './coach-observations.mjs';
+import { applyCoachPoolsideLanePlan } from './coach-poolside-mutations.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3788,6 +3789,35 @@ const cpdModule02 = registerCpdModule02(app, {
 		&& String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
 });
 
+// ATHLYRAX_COACH_ROUTES_OUTSIDE_LINK_REGION: these routes live here because the coach-link build
+// transforms rewrite everything between the swimmer disconnect route and the /db route.
+app.post('/coach/observations', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachObservation(db, {
+		...req.body,
+		source: req.body?.source || 'athlyrax-software',
+		updatedBy: req.auth?.username,
+	}));
+});
+
+app.post('/coach/poolside/sessions/:sessionId/swimmers/:swimmerId/observations', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachObservation(db, {
+		...req.body,
+		sessionId: req.params?.sessionId,
+		swimmerId: req.params?.swimmerId,
+		source: req.body?.source || 'coach-poolside',
+		updatedBy: req.auth?.username,
+	}));
+});
+
+// ATHLYRAX_COACH_POOLSIDE_LANE_PLAN_V1
+app.post('/coach/poolside/sessions/:sessionId/lanes', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachPoolsideLanePlan(db, {
+		sessionId: req.params?.sessionId,
+		lanes: req.body?.lanes,
+		updatedBy: req.auth?.username,
+	}));
+});
+
 // Stopwatch / Assistant / Video results sent to the coach's club for review and import.
 registerResultsInbox(app, {
 	storageRoot: STORAGE_ROOT,
@@ -6665,7 +6695,7 @@ app.post('/swimmer/coach/disconnect', requireStrictAuth, requireSwimmerRole, (re
 // ATHLYRAX_COACH_POOLSIDE_PROJECTION_V1
 app.get('/coach/poolside', requireStrictAuth, (req, res) => {
 	const role = String(req.auth?.role || '').trim().toLowerCase();
-	if (!['software-owner', 'head-coach', 'assistant-coach', 'viewer'].includes(role)) {
+	if (!['software-owner', 'head-coach', 'assistant-coach', 'coach', 'viewer'].includes(role)) {
 		res.status(403).json({ error: 'Coach account required.' });
 		return;
 	}
@@ -6702,7 +6732,7 @@ async function applyCoachPoolsideMutation(req, res, mutator) {
 			res.status(Number(output?.status || 400)).json({ error: String(output?.error || 'Poolside change was rejected.') });
 			return;
 		}
-		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution, result: output.result, event: output.event, fixture: output.fixture, observation: output.observation });
+		res.status(200).json({ ok: true, rows: output.rows, set: output.set, execution: output.execution, result: output.result, event: output.event, fixture: output.fixture, observation: output.observation, written: output.written, kept: output.kept, lanePlan: output.lanePlan });
 	} catch {
 		res.status(503).json({ error: 'Poolside change could not be saved.' });
 	}
@@ -6748,24 +6778,6 @@ app.post('/coach/poolside/competitions/:fixtureId/events/:eventId/evidence', req
 		coachNotes: req.body?.coachNotes,
 		videoAnalyses: req.body?.videoAnalyses,
 		sourceKind: req.body?.sourceKind || 'coach',
-		source: req.body?.source || 'coach-poolside',
-		updatedBy: req.auth?.username,
-	}));
-});
-
-app.post('/coach/observations', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
-	await applyCoachPoolsideMutation(req, res, (db) => applyCoachObservation(db, {
-		...req.body,
-		source: req.body?.source || 'athlyrax-software',
-		updatedBy: req.auth?.username,
-	}));
-});
-
-app.post('/coach/poolside/sessions/:sessionId/swimmers/:swimmerId/observations', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
-	await applyCoachPoolsideMutation(req, res, (db) => applyCoachObservation(db, {
-		...req.body,
-		sessionId: req.params?.sessionId,
-		swimmerId: req.params?.swimmerId,
 		source: req.body?.source || 'coach-poolside',
 		updatedBy: req.auth?.username,
 	}));

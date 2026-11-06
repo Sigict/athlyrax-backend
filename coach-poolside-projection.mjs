@@ -53,6 +53,8 @@ export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
     const list = setsBySession.get(parentId) || [];
     list.push({
       id: text(set.id),
+      title: text(set.setName || set.title || set.name),
+      description: text(set.description || set.detail),
       order: Number(set.order ?? set.setOrder ?? list.length + 1),
       phase: text(set.phase),
       rounds: Number(set.rounds || 0),
@@ -122,6 +124,7 @@ export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
       squadIds: rowSquadIds(session),
       coachIds: ids(session.coachIds).length ? ids(session.coachIds) : [text(session.coachId)].filter(Boolean),
       sets: (setsBySession.get(sessionId(session)) || []).sort((a, b) => a.order - b.order),
+      lanePlan: session.poolsideLanePlan && typeof session.poolsideLanePlan === 'object' ? session.poolsideLanePlan : null,
     })),
     swimmers,
     attendance,

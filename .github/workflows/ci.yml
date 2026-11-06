@@ -55,5 +55,8 @@ jobs:
       - name: Results inbox (Stopwatch/Assistant/Video results sent to the club)
         run: node --test tests/results-inbox.integration.test.mjs tests/checkout-stale-customer.test.mjs
 
+      - name: Coach Pool Console connection (session load, results per set/rep, lane plan)
+        run: node --test tests/coach-poolside-console.integration.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
