@@ -12,6 +12,7 @@ import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
+import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -3710,6 +3711,10 @@ function applyOwnershipMetadataToDbShape(dbShape, existingDbShape, auth) {
 		});
 	}
 
+	// ATHLYRAX_ATHLETE_INVITES_SERVER_OWNED: invitations and account links change only through their routes.
+	const serverOwned = preserveServerOwnedAthleteData(nextShape, existingDbShape);
+	for (const key of Object.keys(serverOwned)) nextShape[key] = serverOwned[key];
+	if (!Object.prototype.hasOwnProperty.call(serverOwned, ATHLETE_INVITE_COLLECTION)) delete nextShape[ATHLETE_INVITE_COLLECTION];
 	nextShape.__meta = {
 		...(nextShape?.__meta && typeof nextShape.__meta === 'object' ? nextShape.__meta : {}),
 		ownershipVersion: 'v1',
@@ -3855,6 +3860,198 @@ app.post('/coach/poolside/sessions/:sessionId/lanes', requireStrictAuth, require
 		lanes: req.body?.lanes,
 		updatedBy: req.auth?.username,
 	}));
+});
+
+
+// ATHLYRAX_ATHLETE_ACCOUNT_INVITES_V1: link an athlete's login to an existing swimmer record.
+const ATHLETE_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.ATHLETE_INVITE_TTL_HOURS || '168', 10) || 168);
+const ATHLETE_INVITE_MANAGER_ROLES = new Set(['head-coach', 'coach', 'software-owner']);
+const ATHLETE_LINK_CORRECTION_ROLES = new Set(['head-coach', 'software-owner']);
+function athleteInviteActorTenant(req) {
+	return resolveTenantKeyFromUser(findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {});
+}
+function requireAthleteInviteManager(req, res, next) {
+	if (ATHLETE_INVITE_MANAGER_ROLES.has(String(req.auth?.role || '').trim())) { next(); return; }
+	res.status(403).json({ error: 'Only club coaches can manage Athlete App invitations.' });
+}
+function athleteTenantPaths(tenantKey) {
+	const key = normalizeTenantId(tenantKey);
+	if (!key || key === 'global-owner') return null;
+	const paths = resolveStoragePathsForTenantKey(key);
+	return paths?.dbPath && fs.existsSync(paths.dbPath) ? { key, paths } : null;
+}
+async function mutateAthleteTenantDb(paths, mutate) {
+	let outcome = null;
+	await enqueueWrite(async () => {
+		const db = readJsonFile(paths.dbPath);
+		if (!db || typeof db !== 'object' || Array.isArray(db)) throw new Error('Club data is unavailable.');
+		outcome = mutate(db);
+		if (!outcome?.ok || !outcome.db) return;
+		writeDbSnapshotIfPossible(paths.dbPath, paths.snapshotDir);
+		writeAtomicJsonFile(paths.dbPath, outcome.db);
+	});
+	return outcome;
+}
+function clubDisplayName(tenantKey) {
+	const coach = authUsers.find((u) => normalizeTenantId(u?.tenantId) === tenantKey && String(u?.swimClub || '').trim());
+	return String(coach?.swimClub || coach?.teamName || '').trim();
+}
+
+// Coach: invitation status for one swimmer (no secrets).
+app.get('/coach/swimmers/:swimmerId/athlete-invites', requireStrictAuth, requireAthleteInviteManager, (req, res) => {
+	const t = athleteTenantPaths(athleteInviteActorTenant(req));
+	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
+	const db = readJsonFile(t.paths.dbPath) || {};
+	const row = (Array.isArray(db.swimmers) ? db.swimmers : []).find((s) => String(s?.id || '') === String(req.params.swimmerId || ''));
+	if (!row) { res.status(404).json({ error: 'Swimmer not found in this club.' }); return; }
+	const invites = (Array.isArray(db[ATHLETE_INVITE_COLLECTION]) ? db[ATHLETE_INVITE_COLLECTION] : []).filter((inv) => String(inv?.swimmerId) === String(row.id)).map((inv) => publicInvite(inv));
+	const linked = linkedAccountOf(row);
+	res.status(200).json({ ok: true, swimmerId: row.id, linkedUsername: linked.username, linkedAt: String(row.accountLinkedAt || ''), history: Array.isArray(row.accountLinkHistory) ? row.accountLinkHistory : [], invites });
+});
+
+// Coach: create an invitation for an existing swimmer. The links are returned once and never stored.
+app.post('/coach/swimmers/:swimmerId/athlete-invites', requireStrictAuth, requireAthleteInviteManager, requireAdminRateLimit, async (req, res) => {
+	const t = athleteTenantPaths(athleteInviteActorTenant(req));
+	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
+	try {
+		const out = await mutateAthleteTenantDb(t.paths, (db) => createAthleteInvite(db, {
+			swimmerId: req.params.swimmerId, tenantKey: t.key, actor: req.auth?.username,
+			targetEmail: String(req.body?.email || '').trim(), guardianEmail: String(req.body?.guardianEmail || '').trim(), ttlHours: ATHLETE_INVITE_TTL_HOURS,
+		}));
+		if (!out?.ok) { res.status(out?.status || 400).json({ error: out?.error || 'Invitation could not be created.' }); return; }
+		appendAuthAuditEvent({ action: 'athlete_invite_created', req, status: 'success', target: out.invite.swimmerId, details: { inviteId: out.invite.id, tenantId: t.key, guardianRequired: out.invite.guardianRequired, expiresAt: out.invite.expiresAt } });
+		res.status(201).json({ ok: true, invite: publicInvite(out.invite), swimmerName: out.swimmerName, athleteToken: out.athleteToken, guardianToken: out.guardianToken });
+	} catch (error) {
+		res.status(503).json({ error: 'Invitation could not be saved safely.' });
+	}
+});
+
+app.post('/coach/athlete-invites/:inviteId/revoke', requireStrictAuth, requireAthleteInviteManager, async (req, res) => {
+	const t = athleteTenantPaths(athleteInviteActorTenant(req));
+	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
+	const out = await mutateAthleteTenantDb(t.paths, (db) => revokeInvite(db, req.params.inviteId, req.auth?.username)).catch(() => null);
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'Invitation could not be withdrawn safely.' }); return; }
+	appendAuthAuditEvent({ action: 'athlete_invite_revoked', req, status: 'success', target: String(req.params.inviteId) });
+	res.status(200).json({ ok: true, invite: publicInvite(out.invite) });
+});
+
+// Head coach: authorised correction of a wrong link. Only the account link is removed; the swimmer's
+// training history stays. The old account loses access to this club and no swimmer row is created for it.
+app.post('/coach/swimmers/:swimmerId/athlete-link/correct', requireStrictAuth, requireAdminRateLimit, async (req, res) => {
+	if (!ATHLETE_LINK_CORRECTION_ROLES.has(String(req.auth?.role || '').trim())) { res.status(403).json({ error: 'Only the head coach can correct an Athlete App link.' }); return; }
+	const t = athleteTenantPaths(athleteInviteActorTenant(req));
+	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
+	const out = await mutateAthleteTenantDb(t.paths, (db) => unlinkAthleteAccount(db, req.params.swimmerId, { actor: req.auth?.username, reason: req.body?.reason })).catch(() => null);
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'The link could not be corrected safely.' }); return; }
+	const user = authUsers.find((u) => String(u?.username || '').trim().toLowerCase() === out.previous.username.toLowerCase());
+	if (user) {
+		user.athleteInviteManaged = true;
+		user.athleteTenantConnections = (Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).map((c) => (normalizeTenantId(c?.tenantId) === t.key ? { ...c, status: 'revoked', revokedAt: new Date().toISOString() } : c));
+		user.tokenValidAfter = getNowEpochSeconds() + 1;
+		try { persistAuthUsers(); } catch {}
+	}
+	appendAuthAuditEvent({ action: 'athlete_link_corrected', req, status: 'success', target: String(req.params.swimmerId), reason: String(req.body?.reason || '').slice(0, 200), details: { previousUsername: out.previous.username, tenantId: t.key } });
+	res.status(200).json({ ok: true, swimmerId: String(req.params.swimmerId), previousUsername: out.previous.username });
+});
+
+// Public: what an invitation link is for (club, swimmer first name, state). No account details.
+app.get('/athlete-invites/preview', requireLoginRateLimit, (req, res) => {
+	const parsed = parseInviteToken(req.query?.token);
+	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
+	const db = t ? readJsonFile(t.paths.dbPath) || {} : {};
+	const invite = t ? resolveInvite(db, parsed, parsed.kind) : null;
+	if (!invite) { res.status(404).json({ error: 'This invitation link is not valid.' }); return; }
+	const row = (Array.isArray(db.swimmers) ? db.swimmers : []).find((s) => String(s?.id) === String(invite.swimmerId)) || {};
+	res.status(200).json({ ok: true, kind: parsed.kind, status: inviteStatus(invite), club: clubDisplayName(t.key), swimmerFirstName: String(row.firstName || swimmerDisplayName(row).split(' ')[0] || ''), expiresAt: invite.expiresAt, guardianRequired: invite.guardianRequired === true, guardianConsented: Boolean(invite.guardianConsent), emailRestricted: Boolean(invite.targetEmail), consentVersion: GUARDIAN_CONSENT_VERSION });
+});
+
+// Public: parent/guardian authorises an under-18 athlete's link.
+app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
+	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
+	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
+	const out = await mutateAthleteTenantDb(t.paths, (db) => {
+		const r = recordGuardianConsent(db, parsed, { ...req.body, ip: req.ip });
+		return r.already ? { ...r, db: null } : r;
+	}).catch(() => null);
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'Consent could not be saved safely.' }); return; }
+	appendAuthAuditEvent({ action: 'athlete_invite_guardian_consent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key, relationship: out.invite.guardianConsent?.relationship } });
+	res.status(200).json({ ok: true, already: Boolean(out.already) });
+});
+
+// Athlete accepts: either while signed in to an existing swimmer account, or by creating one here.
+// The swimmer record comes only from the invitation; any swimmerId in the request is ignored.
+app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
+	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
+	if (!t || parsed.kind !== 'athlete') { res.status(404).json({ error: 'This invitation link is not valid.' }); return; }
+	const signedIn = req.auth ? findAuthUser(String(req.auth.username || '').trim()) : null;
+	if (signedIn && String(signedIn.role || '').trim().toLowerCase() !== 'swimmer') { res.status(403).json({ error: 'Sign out of the coach account first: invitations link athlete accounts.' }); return; }
+	let account; let newUser = null;
+	if (signedIn) {
+		account = { username: String(signedIn.username), email: String(signedIn.email || '') };
+		// One athlete identity: an account that already has its own athlete profile in another space cannot
+		// also take over a club record (the two swimmer ids would be two identities).
+		const primary = normalizeTenantId(signedIn.tenantId);
+		if (primary && primary !== t.key) {
+			const own = athleteTenantPaths(primary);
+			const ownDb = own ? readJsonFile(own.paths.dbPath) || {} : {};
+			if ((Array.isArray(ownDb.swimmers) ? ownDb.swimmers : []).some((r) => String(r?.swimmerAccountUsername || '').toLowerCase() === account.username.toLowerCase())) {
+				res.status(409).json({ error: 'This login already has its own athlete profile. Create a new login from this invitation; joining an existing independent profile to a club record is not supported yet.' });
+				return;
+			}
+		}
+	} else {
+		const password = String(req.body?.password || '');
+		const fullName = String(req.body?.fullName || '').trim();
+		const email = String(req.body?.email || '').trim();
+		const username = String(req.body?.username || '').trim().toLowerCase();
+		if (!AUTH_USERNAME_PATTERN.test(username)) { res.status(400).json({ error: 'Username must be 3-32 letters, numbers, dot, underscore or dash.' }); return; }
+		if (password.length < 10) { res.status(400).json({ error: 'Password must be at least 10 characters.' }); return; }
+		if (!fullName || !AUTH_EMAIL_PATTERN.test(email)) { res.status(400).json({ error: 'Full name and a valid email are required.' }); return; }
+		if (authUsers.some((u) => String(u?.username || '').toLowerCase() === username)) { res.status(409).json({ error: 'That username is taken.' }); return; }
+		if (authUsers.some((u) => String(u?.email || '').toLowerCase() === email.toLowerCase())) { res.status(409).json({ error: 'That email already has an account. Sign in first, then open the invitation again.' }); return; }
+		account = { username, email };
+		newUser = {
+			username, role: 'swimmer', tenantId: t.key, passwordHash: hashPassword(password), tokenValidAfter: 0,
+			createdVia: 'athlete-invite', athleteInviteManaged: true, createdAt: new Date().toISOString(), fullName, email,
+			swimClub: clubDisplayName(t.key), isApproved: true, onboardingCompletedAt: new Date().toISOString(), billing: getDefaultBillingState(),
+		};
+	}
+	const pre = checkAcceptance(readJsonFile(t.paths.dbPath) || {}, parsed, account);
+	if (!pre.ok) { res.status(pre.status || 400).json({ error: pre.error }); return; }
+	if (pre.already) { res.status(200).json({ ok: true, already: true }); return; }
+	let out;
+	try {
+		out = await mutateAthleteTenantDb(t.paths, (db) => {
+			const c = checkAcceptance(db, parsed, account);
+			if (!c.ok || c.already) return { ...c, ok: false, status: c.already ? 409 : c.status, error: c.already ? 'This invitation has already been used.' : c.error };
+			return { ok: true, invite: c.invite, db: applyAcceptance(db, c.invite, account) };
+		});
+	} catch { out = null; }
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'The invitation could not be accepted safely.' }); return; }
+	try {
+		if (newUser) authUsers.push(newUser);
+		const user = newUser || signedIn;
+		user.athleteInviteManaged = true;
+		if (normalizeTenantId(user.tenantId) !== t.key) {
+			const rows = Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections.filter((c) => normalizeTenantId(c?.tenantId) !== t.key) : [];
+			user.athleteTenantConnections = [...rows, { tenantId: t.key, status: 'active', source: 'athlete-invite', clubName: clubDisplayName(t.key), connectedAt: new Date().toISOString() }];
+		}
+		persistAuthUsers();
+	} catch (error) {
+		if (newUser) authUsers.splice(authUsers.indexOf(newUser), 1);
+		res.status(500).json({ error: 'The link was saved but the account could not be updated. Ask the club to check the link.' });
+		return;
+	}
+	appendAuthAuditEvent({ action: 'athlete_invite_accepted', req, status: 'success', target: out.invite.swimmerId, details: { inviteId: out.invite.id, tenantId: t.key, username: account.username, newAccount: Boolean(newUser) } });
+	const payload = { ok: true, linked: true, newAccount: Boolean(newUser) };
+	if (newUser) {
+		const session = issueAuthToken({ username: newUser.username, role: 'swimmer' });
+		setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
+		payload.csrfToken = session.csrf;
+	}
+	res.status(newUser ? 201 : 200).json(payload);
 });
 
 // Stopwatch / Assistant / Video results sent to the coach's club for review and import.
@@ -6157,6 +6354,11 @@ function ensureSwimmerAccountBindingInStorage(authLike) {
 	});
 
 	let updated = false;
+	// ATHLYRAX_ATHLETE_INVITES_NO_AUTO_ROW: accounts linked (or unlinked) through a club invitation never
+	// get a swimmer row created for them; the club's existing record is the only identity.
+	if (swimmerIndex < 0 && authUser?.athleteInviteManaged === true) {
+		return { updated: false, reason: 'invite_managed_unlinked', tenantKey: storagePaths.tenantKey };
+	}
 	if (swimmerIndex < 0) {
 		swimmersRows.push({
 			id: makeSwimmerBindingRowId(),
