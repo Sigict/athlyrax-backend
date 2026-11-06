@@ -48,6 +48,8 @@ function athleteSquadValues(athlete = {}, clubConnections = []) {
     athlete.currentSquadId,
     athlete.squadId,
     athlete.squad,
+    ...asArray(athlete.squadIds),
+    ...asArray(athlete.currentSquadIds),
     ...clubConnections.flatMap((row) => [row?.squadId, row?.squadCode, row?.squadName, row?.squad]),
   ].map(text).filter(Boolean));
 }
@@ -69,7 +71,8 @@ function sessionMatchesAthlete(session = {}, athleteIds = new Set(), squadIds = 
     .filter(Boolean);
   if (explicit.length) return explicit.some((value) => athleteIds.has(value));
 
-  const sessionSquads = [session.squadId, session.squadCode, session.squadName, session.squad]
+  // ATHLYRAX_ATHLETE_HOME_PLANNER_SESSIONS: the Planner stores squads as squadIds / squadNames arrays.
+  const sessionSquads = [session.squadId, session.squadCode, session.squadName, session.squad, ...asArray(session.squadIds), ...asArray(session.squadNames)]
     .map(text)
     .filter(Boolean);
   if (!sessionSquads.some((value) => squadIds.has(value))) return false;
@@ -122,14 +125,15 @@ function safeSession(session = {}, linkedSets = []) {
   const sets = nestedSets.length ? nestedSets : linkedSets;
   return {
     id: sessionId,
-    date: text(session.date || session.sessionDate),
+    date: text(session.date || session.sessionDate || session.scheduleDate).slice(0, 10),
+    scheduleId: text(session.scheduleId || session.trainingScheduleId),
     disciplineId: text(session.disciplineId || session.discipline || 'swimming'),
     ownerType: session.ownerType === 'athlete' ? 'athlete' : 'club',
     ownerClubId: text(session.ownerClubId || session.clubId),
     approvalStatus: text(session.approvalStatus || 'approved'),
     completionStatus: text(session.completionStatus || session.status),
     completed: session.completed === true,
-    title: text(session.title || session.name || session.label || session.sessionType),
+    title: text(session.title || session.name || session.label || session.mainFocus || session.sessionType),
     startTime: text(session.startTime || session.start),
     endTime: text(session.endTime || session.end),
     venue: text(session.venue || session.location || session.pool),
@@ -242,11 +246,30 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
   const clubIds = athleteClubValues(rawClubConnections);
 
   const linkedSetRows = asArray(db.trainingSessionSets);
+  // A Planner session is a schedule row (date, squads, name) plus a training session row holding the
+  // sets (linked by scheduleId). The athlete sees it once, under the training session id, with the
+  // schedule's date, squads and name filled in where the session row has none. Deleted rows are hidden.
+  const isDeleted = (row) => text(row?.status).toLowerCase() === 'deleted' || Boolean(row?.deletedAt);
+  const scheduleRows = [...asArray(db.schedule), ...asArray(db.scheduledSessions)].filter((row) => !isDeleted(row));
+  const scheduleById = new Map(scheduleRows.map((row) => [text(row.id), row]));
+  const sessionRows = [...asArray(db.trainingSessions), ...asArray(db.sessions)].filter((row) => !isDeleted(row));
+  const linkedScheduleIds = new Set();
+  const withSchedule = sessionRows.map((row) => {
+    const scheduleId = text(row.scheduleId || row.trainingScheduleId);
+    const schedule = (scheduleId ? scheduleById.get(scheduleId) : null)
+      || scheduleRows.find((sch) => text(sch.trainingSessionId) && text(sch.trainingSessionId) === canonicalSessionId(row));
+    if (!schedule) return row;
+    linkedScheduleIds.add(text(schedule.id));
+    const filled = { ...row, scheduleId: text(schedule.id) };
+    for (const key of ['date', 'scheduleDate', 'startTime', 'endTime', 'mainFocus', 'secondaryFocus', 'squadId', 'squadIds', 'squadName', 'squadNames', 'ownerClubId', 'clubId', 'venueName', 'venue']) {
+      const empty = filled[key] === undefined || filled[key] === null || filled[key] === '' || (Array.isArray(filled[key]) && !filled[key].length);
+      if (empty && schedule[key] !== undefined) filled[key] = schedule[key];
+    }
+    return filled;
+  });
   const rawSessions = [
-    ...asArray(db.trainingSessions),
-    ...asArray(db.sessions),
-    ...asArray(db.schedule),
-    ...asArray(db.scheduledSessions),
+    ...withSchedule,
+    ...scheduleRows.filter((row) => !linkedScheduleIds.has(text(row.id))),
   ].filter((row) => sessionMatchesAthlete(row, athleteIds, squadIds, clubIds));
 
   const sessions = dedupeSessions(rawSessions.map((row) => {
