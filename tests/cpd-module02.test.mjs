@@ -92,7 +92,7 @@ test('CPD logout clears the path-scoped private learner cookie without deleting 
     assert.equal((await r.json()).ok, true);
     const header = r.headers.get('set-cookie') || '';
     assert.match(header, /athlyrax_cpd02=/);
-    assert.match(header, /Path=\\/api\\/cpd\\/module-02/);
+    assert.ok(header.includes('Path=/api/cpd/module-02'), 'cookie is cleared on the original path');
     assert.match(header, /HttpOnly/i);
     assert.match(header, /Max-Age=0|Expires=Thu, 01 Jan 1970/i);
     const status = await c.call('/status');
