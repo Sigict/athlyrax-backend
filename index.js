@@ -13,6 +13,9 @@ import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
 import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraining, personalTrainingPath } from './athlete-personal-training.mjs';
+import { buildClubResults, buildSelfReportedProgress, testProtocols } from './athlete-tests-races.mjs';
+import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
+import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
 import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES, DuplicateSwimmerIdError, duplicateSwimmerIds } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
@@ -4100,6 +4103,43 @@ app.post('/swimmer/personal-training/sync', requireStrictAuth, requireSwimmerRol
 	}
 	res.set('Cache-Control', 'no-store');
 	res.status(200).json({ ok: true, results: outcome.results, ...listPersonalTraining(outcome.store) });
+});
+
+// ATHLYRAX_ATHLETE_TESTS_RACES: the canonical test catalogue, and the athlete's progress. Self-reported
+// tests and races (from the athlete's own store) are labelled unverified and never feed the capability
+// radar; club tests, races and PBs are read-only, read per authorised club with the same identity rule
+// as the athlete home. Nothing here writes to a club's data.
+app.get('/swimmer/test-catalogue', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	res.status(200).json({ ok: true, protocols: testProtocols() });
+});
+app.get('/swimmer/progress', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const key = personalTrainingAccountKey(req);
+	if (!key) { res.status(401).json({ error: 'Sign in again.' }); return; }
+	res.set('Cache-Control', 'no-store');
+	const store = listPersonalTraining(readPersonalTraining(personalTrainingPath(STORAGE_ROOT, key)));
+	const selfReported = buildSelfReportedProgress(store.tests);
+	const clubs = [];
+	const storageResolution = resolveStoragePathsForRequest(req);
+	if (storageResolution?.ok === true && storageResolution?.storagePaths) {
+		const authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+		const primaryTenantId = String(storageResolution?.tenantId || resolveAuthTenantId(req.auth) || '').trim();
+		for (const connection of athleteTenantRegistry.activeAthleteTenantConnections(authUser, primaryTenantId)) {
+			try {
+				const paths = connection.tenantId === primaryTenantId ? storageResolution.storagePaths : resolveStoragePathsForTenantKey(connection.tenantId);
+				const db = readJsonFile(paths.dbPath);
+				if (!db || typeof db !== 'object' || Array.isArray(db)) { clubs.push({ tenantId: connection.tenantId, clubName: connection.clubName, available: false }); continue; }
+				const swimmer = resolveLinkedSwimmer(db, authUser);
+				if (!swimmer?.id) continue;
+				const results = buildClubResults(db, String(swimmer.id), { tenantId: connection.tenantId, dataScopes: connection.dataScopes });
+				if (results) clubs.push({ tenantId: connection.tenantId, clubName: connection.clubName, available: true, ...results });
+			} catch (error) {
+				console.warn('[athlete-progress] club results unavailable:', String(error?.message || error).slice(0, 200));
+				clubs.push({ tenantId: connection.tenantId, clubName: connection.clubName, available: false });
+			}
+		}
+	}
+	res.status(200).json({ ok: true, selfReported, clubs });
 });
 
 app.post('/athlete-invites/preview', requireLoginRateLimit, (req, res) => {
