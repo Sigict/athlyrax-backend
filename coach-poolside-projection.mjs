@@ -1,3 +1,4 @@
+import { coachSessionName } from './session-name.mjs';
 const rows = (value) => Array.isArray(value) ? value : [];
 const text = (value) => String(value ?? '').trim();
 const ids = (value) => rows(value).map(text).filter(Boolean);
@@ -26,16 +27,9 @@ function fullName(row = {}) {
   return text(row.fullName || row.name || [row.firstName, row.lastName].map(text).filter(Boolean).join(' '));
 }
 
-// The coach's session name is saved as mainFocus by the Planner ("Session name"); older rows may
-// use title/name/sessionName. The first non-empty name from the session, then its schedule, is used.
-function sessionTitle(...sources) {
-  for (const source of sources) {
-    for (const key of ['title', 'name', 'sessionName', 'mainFocus']) {
-      const value = String(source?.[key] ?? '').trim();
-      if (value) return value;
-    }
-  }
-  return '';
+// Session title: the coach's session name (see session-name.mjs), never the automatic capability focus.
+function sessionTitle(session = {}, schedule = null) {
+  return coachSessionName(session, schedule);
 }
 
 export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
