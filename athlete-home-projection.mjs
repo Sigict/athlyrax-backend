@@ -1,3 +1,6 @@
+import { buildClubCapabilityProfile, clubSwimmingDiscipline } from './athlete-club-capability.mjs';
+import { coachSessionName } from './session-name.mjs';
+
 const asArray = (value) => Array.isArray(value) ? value : [];
 const text = (value) => String(value ?? '').trim();
 
@@ -228,6 +231,13 @@ function dedupeSessions(rows = []) {
   return [...byId.values()];
 }
 
+function clubDisciplines(athlete, clubProfile) {
+  const own = asArray(athlete.disciplines);
+  const swimming = clubSwimmingDiscipline(clubProfile);
+  if (!swimming) return own;
+  return [swimming, ...own.filter((row) => text(row?.id).toLowerCase() !== 'swimming')];
+}
+
 export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {}) {
   const authIds = identityValues(authUser);
   // ATHLYRAX_ATHLETE_EXPLICIT_LINK_FIRST: an explicit account link (set by the club's invitation) always
@@ -275,6 +285,10 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
     if (!schedule) return row;
     linkedScheduleIds.add(text(schedule.id));
     const filled = { ...row, scheduleId: text(schedule.id) };
+    // ATHLYRAX_ATHLETE_SESSION_NAME: the title is the coach's session name (see session-name.mjs); the
+    // automatic capability focus stays the session's focus and is never shown as its title.
+    const coachName = coachSessionName(row, schedule);
+    if (coachName) filled.title = coachName;
     for (const key of ['date', 'scheduleDate', 'startTime', 'endTime', 'mainFocus', 'secondaryFocus', 'squadId', 'squadIds', 'squadName', 'squadNames', 'ownerClubId', 'clubId', 'venueName', 'venue']) {
       const empty = filled[key] === undefined || filled[key] === null || filled[key] === '' || (Array.isArray(filled[key]) && !filled[key].length);
       if (empty && schedule[key] !== undefined) filled[key] = schedule[key];
@@ -303,6 +317,14 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
     return safe;
   }));
 
+  // ATHLYRAX_ATHLETE_CLUB_CAPABILITY: the swimmer's profile is calculated on the server from the club's
+  // own evidence for this swimmer with the AthlyraX capability engine (same call as the club's ISP).
+  let clubProfile = null;
+  if (text(athlete.id)) {
+    try { clubProfile = buildClubCapabilityProfile(db, athlete, { tenantId: text(context?.tenantId) }); }
+    catch (error) { console.warn('[athlete-home] capability profile unavailable:', String(error?.message || error).slice(0, 200)); }
+  }
+
   return {
     athlete: {
       id: text(athlete.id || athlete.swimmerId || athlete.userId),
@@ -312,8 +334,8 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
     },
     clubConnections,
     sessions,
-    disciplines: asArray(athlete.disciplines),
-    integratedProfile: athlete.integratedProfile || null,
+    disciplines: clubDisciplines(athlete, clubProfile),
+    integratedProfile: clubProfile || athlete.integratedProfile || null,
     readiness: athlete.readiness || null,
     latestCoachFeedback: athlete.latestCoachFeedback || null,
     nextTarget: athlete.nextTarget || null,
