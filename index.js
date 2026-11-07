@@ -12,6 +12,7 @@ import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
+import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraining, personalTrainingPath } from './athlete-personal-training.mjs';
 import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES, DuplicateSwimmerIdError, duplicateSwimmerIds } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
@@ -4060,6 +4061,47 @@ app.post('/coach/swimmers/:swimmerId/athlete-link/correct', requireStrictAuth, r
 
 // Public: what an invitation link is for (club, swimmer first name, state). No account details.
 // The token travels only in the request body, never in a URL (access logs, proxies, browser history).
+// ATHLYRAX_ATHLETE_PERSONAL_TRAINING: the athlete's own timetable and training days (offline-first).
+// Stored per account under the storage root, never in a club's data; coach plans are never modified.
+function personalTrainingAccountKey(req) {
+	return String(req.auth?.username || '').trim().toLowerCase();
+}
+function readPersonalTraining(filePath) {
+	const stored = readJsonFile(filePath);
+	return stored && typeof stored === 'object' && stored.version === 1 ? stored : emptyPersonalTraining();
+}
+app.get('/swimmer/personal-training', requireStrictAuth, requireSwimmerRole, (req, res) => {
+	const key = personalTrainingAccountKey(req);
+	if (!key) { res.status(401).json({ error: 'Sign in again.' }); return; }
+	res.set('Cache-Control', 'no-store');
+	res.status(200).json({ ok: true, ...listPersonalTraining(readPersonalTraining(personalTrainingPath(STORAGE_ROOT, key))) });
+});
+app.post('/swimmer/personal-training/sync', requireStrictAuth, requireSwimmerRole, async (req, res) => {
+	const key = personalTrainingAccountKey(req);
+	if (!key) { res.status(401).json({ error: 'Sign in again.' }); return; }
+	const changes = Array.isArray(req.body?.changes) ? req.body.changes : [];
+	if (changes.length > 200) { res.status(413).json({ error: 'Too many changes in one sync; send at most 200.' }); return; }
+	const filePath = personalTrainingPath(STORAGE_ROOT, key);
+	let outcome = null;
+	try {
+		await enqueueWrite(async () => {
+			const current = readPersonalTraining(filePath);
+			const applied = applyPersonalTrainingChanges(current, changes, { actor: key });
+			if (applied.store) {
+				if (!IS_PRODUCTION && process.env.ATHLYRAX_TEST_FAIL_PERSONAL_TRAINING_WRITE === '1') throw new Error('test: personal training write failure');
+				writeAtomicJsonFile(filePath, applied.store);
+			}
+			outcome = { results: applied.results, store: applied.store || current };
+		});
+	} catch (error) {
+		console.error('[personal-training] save failed:', String(error?.message || error).slice(0, 200));
+		res.status(503).json({ error: 'Your training could not be saved on the server. It stays on this device and will sync again.' });
+		return;
+	}
+	res.set('Cache-Control', 'no-store');
+	res.status(200).json({ ok: true, results: outcome.results, ...listPersonalTraining(outcome.store) });
+});
+
 app.post('/athlete-invites/preview', requireLoginRateLimit, (req, res) => {
 	const parsed = parseInviteToken(req.body?.token);
 	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
