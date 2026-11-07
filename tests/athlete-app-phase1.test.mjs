@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildScopedAthlyraxCapabilitySnapshot } from '../capability-engine/src/utils/scopedCapabilitySnapshot.js';
+import { officialCapabilityRadar } from '../capability-engine/src/utils/officialCapabilityRadar.js';
 import { buildClubCapabilityProfile, currentCapabilitySeason } from '../athlete-club-capability.mjs';
 import { buildAthleteHomeProjection } from '../athlete-home-projection.mjs';
 import { buildCoachPoolsideProjection } from '../coach-poolside-projection.mjs';
@@ -38,9 +39,13 @@ test('club profile = the ISP engine result for the linked swimmer (same call, no
   assert.equal(profile.axes.length, 8, 'the eight AthlyraX capability axes');
   assert.equal(profile.calculationDate, '2026-08-31', 'season ended: calculated at season end, as the ISP does');
   assert.equal(profile.score, Math.round(isp.integratedScore));
+  // Same display rule as the ISP (swimmersIspEvidence axisValueRows): official radar score, only with evidence.
+  const official = officialCapabilityRadar(isp, isp.axes.map((axis) => axis.key));
   for (const axis of profile.axes) {
     const ref = isp.axes.find((row) => row.key === axis.id);
-    assert.equal(axis.value, Number.isFinite(ref.score) ? Math.round(ref.score) : null, axis.id);
+    const shown = Number(ref.evidenceCount) > 0 && Number.isFinite(official.scores[ref.key]) ? Math.round(official.scores[ref.key]) : null;
+    assert.equal(axis.value, shown, axis.id);
+    assert.equal(axis.validation, shown === null ? 'Not Scored' : String(ref.validation || 'Not Scored'), `${axis.id} validation`);
     if (!axis.scored) assert.ok(axis.reasons.length, `${axis.id}: an unscored axis says why`);
   }
   assert.ok(profile.measuredAxes >= 1 && profile.measuredAxes < 8, 'partial evidence: some axes measured, none invented');
@@ -89,4 +94,15 @@ test('Athlete App profile comes from the club evidence of the linked swimmer onl
   assert.equal(home.disciplines[0].metrics.length, 8);
   const other = buildAthleteHomeProjection(db, { username: 'someone.else', athleteInviteManaged: true });
   assert.equal(other, null, 'no profile for an account without the explicit link');
+});
+
+test('an axis with a score but no evidence is Not Scored, exactly as the ISP shows it', async () => {
+  const engine = await import('../capability-engine/src/utils/scopedCapabilitySnapshot.js');
+  const swimmer = engineFixtureDb.swimmers[0];
+  const profile = buildClubCapabilityProfile(engineFixtureDb, swimmer, { season: SEASON, today: '2026-11-07' });
+  for (const axis of profile.axes) {
+    if (axis.scored) assert.ok(axis.evidenceCount > 0, `${axis.id}: scored only with evidence`);
+    else assert.equal(axis.value, null);
+  }
+  assert.ok(engine);
 });

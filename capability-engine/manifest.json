@@ -16,6 +16,7 @@
     "src/utils/demoCompetitionCourse.js": "4f3a6669a5bda7d70e17124468c24d3bf7418491c3eac989e05832a8ae30cdf6",
     "src/utils/efficiencyAdaptabilityIndicators.js": "2bd4759f3bc1bad7d9248f51ce144224f3b4c47c3f9144d5117bf26c7b85532e",
     "src/utils/ispPlannerSource.js": "c80c5b99d18e444c5a9e82b9bf495645ca19ddfc61fad558e641a10735897d3a",
+    "src/utils/officialCapabilityRadar.js": "67c0e2df4406f1ed7d72ef08183b311459beb47acf86f4c5bbf290ad4f28d9e2",
     "src/utils/olympicCapabilityCalibration.js": "88aaecf0e1bd370774e045033bcce4b3a3d25c0f6a114af95e589be56d9d1c5e",
     "src/utils/plannerCanonicalSession.js": "291ae57a82c175616a1bb18458fada1dab3e5a78649b40584aa2a531996fc1e8",
     "src/utils/plannerSetValidity.js": "5eee65c557d24d676f14f47914a8f9b0cc2528283e0acf7198ea4d15e5143c17",

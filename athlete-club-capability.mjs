@@ -5,6 +5,7 @@
 // Nothing is estimated: axes without enough evidence stay unscored, with the engine's reason.
 import { buildScopedAthlyraxCapabilitySnapshot } from './capability-engine/src/utils/scopedCapabilitySnapshot.js';
 import { swimmingReportConfig } from './capability-engine/src/sports/swimming/swimmingReports.js';
+import { officialCapabilityRadar } from './capability-engine/src/utils/officialCapabilityRadar.js';
 
 const text = (value) => String(value ?? '').trim();
 const asArray = (value) => (Array.isArray(value) ? value : []);
@@ -29,14 +30,24 @@ export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = cur
     calculationDate,
   });
   if (!snapshot || !snapshot.selectedSingleSwimmer) return null;
-  const axes = asArray(snapshot.axes).map((axis) => ({
-    id: text(axis.key || axis.id),
-    label: text(axis.label || axis.name || axis.key),
-    value: roundOrNull(axis.score),
-    confidence: roundOrNull(axis.confidence),
-    scored: Number.isFinite(axis.score),
-    reasons: asArray(axis.reasons).map(text).filter(Boolean).slice(0, 3),
-  }));
+  // Displayed exactly as the club's ISP displays them (swimmersIspEvidence): the official ISP radar
+  // rule scores an axis only with a finite score AND evidence; everything else is Not Scored.
+  const official = officialCapabilityRadar(snapshot, asArray(snapshot.axes).map((axis) => axis.key));
+  const axes = asArray(snapshot.axes).map((axis) => {
+    const officialScore = official?.scores?.[axis.key];
+    const evidenceCount = Math.max(0, Number(axis?.evidenceCount) || 0);
+    const scored = evidenceCount > 0 && Number.isFinite(officialScore);
+    return {
+      id: text(axis.key || axis.id),
+      label: text(axis.label || axis.name || axis.key),
+      value: scored ? Math.round(officialScore) : null,
+      validation: scored ? text(axis.validation || 'Not Scored') : 'Not Scored',
+      evidenceCount,
+      confidence: roundOrNull(axis.confidence),
+      scored,
+      reasons: asArray(axis.reasons).map(text).filter(Boolean).slice(0, 3),
+    };
+  });
   const scored = axes.filter((axis) => axis.scored);
   const loadSummary = snapshot.loadSummary || {};
   return {
