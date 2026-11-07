@@ -13,10 +13,11 @@
 // Deletions are kept as tombstones so a device that was offline cannot bring a deleted record back.
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { normalizeTest, InvalidTest } from './athlete-tests-races.mjs';
 
-export const PERSONAL_TRAINING_KINDS = Object.freeze(['plan', 'day']);
+export const PERSONAL_TRAINING_KINDS = Object.freeze(['plan', 'day', 'test']);
 export const PERSONAL_TRAINING_LIMITS = Object.freeze({
-  plans: 3000, days: 5000, changesPerSync: 200,
+  plans: 3000, days: 5000, tests: 10000, changesPerSync: 200,
   sessionsPerDay: 12, setsPerSession: 60, setsPerPlan: 60,
   rounds: 20, reps: 100, distance: 3000, splitsPerRep: 120, text: 3000, shortText: 160,
 });
@@ -136,17 +137,17 @@ export function normalizeDay(raw = {}) {
   };
 }
 
-const normalizers = { plan: normalizePlan, day: normalizeDay };
-const collection = (kind) => (kind === 'plan' ? 'plans' : 'days');
+const normalizers = { plan: (raw) => normalizePlan(raw), day: (raw) => normalizeDay(raw), test: (raw, previous, now) => normalizeTest(raw, previous, { now }) };
+const collection = (kind) => ({ plan: 'plans', day: 'days', test: 'tests' }[kind]);
 
 export function emptyPersonalTraining() {
-  return { version: 1, plans: {}, days: {}, updatedAt: '' };
+  return { version: 1, plans: {}, days: {}, tests: {}, updatedAt: '' };
 }
 
 // Applies a batch of offline changes. Returns the next store (or null when nothing changed) and, per
 // change, applied / conflict / invalid. Never throws for a bad change: it is reported and skipped.
 export function applyPersonalTrainingChanges(store = emptyPersonalTraining(), changes = [], { now = new Date().toISOString(), actor = '' } = {}) {
-  const next = { ...emptyPersonalTraining(), ...store, plans: { ...(store.plans || {}) }, days: { ...(store.days || {}) } };
+  const next = { ...emptyPersonalTraining(), ...store, plans: { ...(store.plans || {}) }, days: { ...(store.days || {}) }, tests: { ...(store.tests || {}) } };
   const results = [];
   let changed = false;
   for (const change of asArray(changes).slice(0, PERSONAL_TRAINING_LIMITS.changesPerSync)) {
@@ -159,17 +160,19 @@ export function applyPersonalTrainingChanges(store = emptyPersonalTraining(), ch
     const deleted = change.deleted === true;
     let data = null;
     if (!deleted) {
-      try { data = normalizers[kind](change.data || {}); }
+      try { data = normalizers[kind](change.data || {}, current && !current.deleted ? current.data : null, now); }
       catch (error) {
-        if (error instanceof InvalidRecord) { results.push({ kind, id, status: 'invalid', error: error.message }); continue; }
+        if (error instanceof InvalidRecord || error instanceof InvalidTest) { results.push({ kind, id, status: 'invalid', error: error.message }); continue; }
         throw error;
       }
     }
-    const same = current && current.deleted === deleted && JSON.stringify(current.data) === JSON.stringify(data);
+    // Server-owned fields (the amendment trail) do not count when deciding whether a change repeats.
+    const comparable = (d) => (d && typeof d === 'object' ? { ...d, amendments: undefined } : d);
+    const same = current && current.deleted === deleted && JSON.stringify(comparable(current.data)) === JSON.stringify(comparable(kind === 'test' && data ? normalizers.test(change.data || {}, null, now) : data));
     if (same) { results.push({ kind, id, status: 'applied', rev: current.rev, unchanged: true }); continue; }
     if ((current ? current.rev : 0) !== baseRev) { results.push({ kind, id, status: 'conflict', server: current }); continue; }
     if (!current && deleted) { results.push({ kind, id, status: 'applied', rev: 0, unchanged: true }); continue; }
-    const limit = kind === 'plan' ? PERSONAL_TRAINING_LIMITS.plans : PERSONAL_TRAINING_LIMITS.days;
+    const limit = PERSONAL_TRAINING_LIMITS[collection(kind)];
     if (!current && Object.keys(bucket).length >= limit) { results.push({ kind, id, status: 'invalid', error: 'Storage limit reached for this record type.' }); continue; }
     const record = { kind, id, rev: (current ? current.rev : 0) + 1, deleted, data: deleted ? null : data, updatedAt: now, updatedBy: actor, createdAt: current?.createdAt || now };
     bucket[id] = record;
@@ -184,6 +187,7 @@ export function listPersonalTraining(store = emptyPersonalTraining()) {
   return {
     plans: Object.values(store.plans || {}),
     days: Object.values(store.days || {}),
+    tests: Object.values(store.tests || {}),
     updatedAt: store.updatedAt || '',
   };
 }

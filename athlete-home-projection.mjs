@@ -238,14 +238,19 @@ function clubDisciplines(athlete, clubProfile) {
   return [swimming, ...own.filter((row) => text(row?.id).toLowerCase() !== 'swimming')];
 }
 
-export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {}) {
-  const authIds = identityValues(authUser);
-  // ATHLYRAX_ATHLETE_EXPLICIT_LINK_FIRST: an explicit account link (set by the club's invitation) always
-  // decides which swimmer this account is; invitation-managed accounts never fall back to loose matching
-  // (email, id, membership number), so a matching email cannot reveal another swimmer's record.
+// ATHLYRAX_ATHLETE_EXPLICIT_LINK_FIRST: an explicit account link (set by the club's invitation) always
+// decides which swimmer this account is; invitation-managed accounts never fall back to loose matching
+// (email, id, membership number), so a matching email cannot reveal another swimmer's record.
+// Shared by every athlete route that reads a club's data, so all of them resolve the same swimmer.
+export function resolveLinkedSwimmer(db = {}, authUser = {}) {
   const username = text(authUser.username).toLowerCase();
   const explicit = username ? asArray(db.swimmers).find((row) => text(row?.swimmerAccountUsername).toLowerCase() === username) : null;
-  const athlete = explicit || (authUser.athleteInviteManaged === true ? null : asArray(db.swimmers).find((row) => rowMatchesIdentity(row, authIds)));
+  return explicit || (authUser.athleteInviteManaged === true ? null : asArray(db.swimmers).find((row) => rowMatchesIdentity(row, identityValues(authUser)))) || null;
+}
+
+export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {}) {
+  const authIds = identityValues(authUser);
+  const athlete = resolveLinkedSwimmer(db, authUser);
   if (!athlete) return null;
 
   const athleteIds = athleteIdentityValues(athlete, authIds);

@@ -70,5 +70,8 @@ jobs:
       - name: Athlete App phase 2 (personal training, offline sync, conflicts)
         run: node --test tests/athlete-personal-training.test.mjs
 
+      - name: Athlete App phase 3A (tests and races, read-only club results)
+        run: node --test tests/athlete-tests-races.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
