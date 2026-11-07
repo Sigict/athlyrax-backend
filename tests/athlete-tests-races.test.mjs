@@ -17,6 +17,17 @@ test('protocols come from the canonical catalogue, including the 5x400 aerobic c
   const aerobic = testProtocols().find((p) => p.id === 'aerobic-5x400');
   assert.deepEqual([aerobic.reps, aerobic.distance, aerobic.category], [5, 400, 'aerobic']);
   assert.ok(ids.includes('race'));
+  // Owner decision 07-11-2026: exactly these swim tests, no Max 75 and no other types.
+  assert.deepEqual(ids, ['max-25', 'max-50', 'max-100', 'max-200', 'max-400', 'rep-25', 'rep-50', 'rep-100', 'aerobic-5x400', 'race']);
+});
+
+test('coaches are offered the 5x400 Aerobic / Durability Check again; its definition is unchanged', async () => {
+  const { canonicalBuiltInTestTemplates, canonicalBuiltInTestTemplate } = await import('../capability-engine/src/utils/testTemplateCatalog.js');
+  const names = canonicalBuiltInTestTemplates().map((t) => t.name);
+  assert.deepEqual(names.slice(0, 3), ['Max', 'Repeatability', 'Aerobic / Durability Check']);
+  assert.deepEqual(canonicalBuiltInTestTemplate('Max').rows.map((r) => r.distance), [25, 50, 100, 200, 400]);
+  assert.deepEqual(canonicalBuiltInTestTemplate('Repeatability').rows.map((r) => [r.reps, r.distance]), [[8, 25], [8, 50], [8, 100]]);
+  assert.deepEqual(canonicalBuiltInTestTemplate('5x400').rows.map((r) => [r.reps, r.distance]), [[5, 400]]);
 });
 
 test('validation follows Master v31: splits, strokes, repetitions, check-in', () => {

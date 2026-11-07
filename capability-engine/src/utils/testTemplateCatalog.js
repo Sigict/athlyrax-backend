@@ -548,9 +548,10 @@ export function canonicalBuiltInTestTemplate(name) {
 }
 
 export function canonicalBuiltInTestTemplates() {
-  // Owner decision 30-10-2026: the 5x400 Aerobic / Durability Check is not offered
-  // as a template. Its definition stays, so recorded 5x400 results are still read.
-  return ['Max', 'Repeatability', 'Height & Weight', '50m Run', 'High Jump', '500m Row', 'Gym Strength']
+  // Owner decision 07-11-2026 (supersedes 30-10-2026): the 5x400 Aerobic / Durability Check is
+  // offered again so coaches can conduct and record it manually. Swim tests are Max effort
+  // (1x25/50/100/200/400), Repeatability (8x25/50/100) and this check; no other swim tests.
+  return ['Max', 'Repeatability', 'Aerobic / Durability Check', 'Height & Weight', '50m Run', 'High Jump', '500m Row', 'Gym Strength']
     .map((name) => canonicalBuiltInTestTemplate(name));
 }
 
