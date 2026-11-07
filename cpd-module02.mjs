@@ -148,7 +148,8 @@ export function registerCpdModule02(app, deps) {
   const origin = String(process.env.CPD_SITE_ORIGIN || 'https://athlyrax.com').replace(/\/+$/, '');
   const courseKey = String(process.env.CPD_STRIPE_SECRET_KEY || '').trim();
   const stripe = deps.courseStripeClient || (courseKey ? new Stripe(courseKey) : deps.stripeClient) || null;
-  const stripeMode = deps.courseStripeMode || (courseKey ? (courseKey.startsWith('sk_test_') ? 'test' : 'live') : (String(process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test_') ? 'test' : 'live'));
+  const configuredKey = courseKey || String(process.env.STRIPE_SECRET_KEY || '');
+  const stripeMode = deps.courseStripeMode || (/^(sk|rk)_test_/.test(configuredKey) ? 'test' : 'live');
   // Optional guard: the Stripe account the course must use (non-secret, e.g. acct_...).
   // When set, the course stays closed unless the key in use belongs to that account.
   const expectedAccount = String(process.env.CPD_STRIPE_EXPECTED_ACCOUNT || '').trim();
@@ -161,9 +162,14 @@ export function registerCpdModule02(app, deps) {
   async function stripeConfigCheck(force = false) {
     if (!stripe) return null;
     if (!force && configCheck && Date.now() - configCheckAt < 600000) return configCheck;
-    const out = { accountId: null, livemode: null, accountError: null, price: null };
+    const out = { accountId: null, livemode: null, accountError: null, accountLookupRestricted: false, price: null, verifiedByPrice: false };
     try { const a = await stripe.accounts.retrieve(); out.accountId = String(a?.id || ''); out.livemode = Boolean(a?.livemode); }
-    catch (err) { out.accountError = err?.statusCode === 401 ? 'Stripe API key rejected' : 'Stripe account lookup unavailable'; }
+    catch (err) {
+      out.accountLookupRestricted = err?.statusCode === 403 || err?.type === 'StripePermissionError';
+      out.accountError = err?.statusCode === 401 ? 'Stripe API key rejected'
+        : out.accountLookupRestricted ? 'Restricted Stripe key cannot retrieve account details'
+        : 'Stripe account lookup unavailable';
+    }
     if (priceId) {
       try {
         const p = await stripe.prices.retrieve(priceId);
@@ -172,10 +178,16 @@ export function registerCpdModule02(app, deps) {
       } catch (err) { out.price = { found: false, error: err?.code === 'resource_missing' ? 'Price ID does not exist in this Stripe account' : err?.statusCode === 401 ? 'Stripe key rejected' : 'Price lookup failed' }; }
     }
     out.expectedAccountMatches = expectedAccount ? (out.accountId ? out.accountId === expectedAccount : null) : null;
+    // Stripe restricted keys may not have GET /v1/account permission. A successful
+    // retrieval of the *specific configured* active GBP 499 price in the expected
+    // mode proves that this key can reach the selected course price; do not
+    // require wider account permissions just for this optional account-ID check.
+    out.verifiedByPrice = Boolean(expectedAccount && out.accountLookupRestricted && !out.accountId
+      && out.price?.validForSale && out.price?.livemode === (stripeMode === 'live'));
     configCheck = out; configCheckAt = Date.now();
     return out;
   }
-  const accountGuardOk = () => !expectedAccount || configCheck?.expectedAccountMatches === true;
+  const accountGuardOk = () => !expectedAccount || configCheck?.expectedAccountMatches === true || configCheck?.verifiedByPrice === true;
   const questions = loadQuestions();
   let logoJpeg = null;
   try { logoJpeg = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'cpd-assets', 'athlyrax-logo.jpg')); } catch {}
@@ -184,7 +196,8 @@ export function registerCpdModule02(app, deps) {
   const lessonSize = (n) => { try { const st = fs.statSync(lessonPath(n)); return st.isFile() && st.size > 1024 ? st.size : 0; } catch { return 0; } };
   const videosReady = () => LESSONS.every((l) => lessonSize(l.n) > 0);
   const setup = () => ({ videos: videosReady(), signingKey: secret.length >= 32, price: Boolean(priceId), stripe: Boolean(stripe) && accountGuardOk(), salesSwitch: salesFlag, recoveryEmail: Boolean(sendMail) });
-  const salesOpen = () => Object.values(setup()).slice(0, 5).every(Boolean);
+  // Purchase confirmation must be deliverable to the buyer on a durable medium.
+  const salesOpen = () => Object.values(setup()).every(Boolean);
   const ipOf = (req) => String(req.ip || req.socket?.remoteAddress || '');
 
   // ---------- Stripe verification ----------
@@ -307,7 +320,7 @@ export function registerCpdModule02(app, deps) {
       stripeConfig: { keySource, mode: stripeMode, serverStartedAt,
         priceInKeyAccount: check?.price ? check.price.found === true : null,
         priceValidForSale: check?.price?.found ? check.price.validForSale : null,
-        expectedAccountMatches: check ? check.expectedAccountMatches : null },
+        expectedAccountMatches: check ? check.expectedAccountMatches : null, verifiedByPrice: check?.verifiedByPrice === true },
       lessons: LESSONS.map((l) => ({ n: l.n, title: l.title, duration: l.duration })),
       paidAccess: Boolean(ent), accessRevoked: revoked,
       learner: ent ? { name: ent.name, email: ent.email.replace(/^(.).*(@.*)$/, '$1***$2') } : null,
@@ -317,15 +330,19 @@ export function registerCpdModule02(app, deps) {
   });
 
   app.post(base + '/checkout', async (req, res) => {
-    if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
-    if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
+    // Warm the account guard before checking salesOpen: otherwise the first
+    // customer checkout after a process restart can be incorrectly denied.
     if (expectedAccount) {
       let check = null; try { check = await stripeConfigCheck(true); } catch {}
-      if (check?.expectedAccountMatches !== true) return fail(res, 503, 'Course Stripe key belongs to a different Stripe account than CPD_STRIPE_EXPECTED_ACCOUNT.');
+      if (check?.expectedAccountMatches === false) return fail(res, 503, 'Course Stripe key belongs to a different Stripe account than CPD_STRIPE_EXPECTED_ACCOUNT.');
+      if (check?.expectedAccountMatches !== true && check?.verifiedByPrice !== true) return fail(res, 503, 'Course Stripe key cannot verify the configured live course price or expected account.');
     }
+    if (!salesOpen()) return fail(res, 503, 'Course purchase is not yet open.');
+    if (stripeMode === 'test' && !isSoftwareOwner(req)) return fail(res, 503, 'Course purchase is in owner testing and not yet open.');
     if (!checkoutLimit(ipOf(req))) return fail(res, 429, 'Too many attempts. Please try again later.');
     const email = String(req.body?.email || '').trim().toLowerCase(), name = cleanName(req.body?.fullName);
     if (!emailValid(email) || name.length < 2 || name.length > 110) return fail(res, 400, 'Enter your full name (as it should appear on the certificate) and a valid email address.');
+    if (req.body?.digitalContentConsent !== true || req.body?.cancellationAcknowledged !== true) return fail(res, 400, 'Express consent to immediate digital access and acknowledgement of losing the 14-day cancellation right are required.');
     try {
       const price = await stripe.prices.retrieve(priceId);
       if (!price.active || price.type !== 'one_time' || String(price.currency).toLowerCase() !== 'gbp' || price.unit_amount !== PRICE_PENCE) return fail(res, 503, 'Course price is not configured for sale.');
@@ -334,8 +351,8 @@ export function registerCpdModule02(app, deps) {
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: origin + '/education/module-02.html?session_id={CHECKOUT_SESSION_ID}',
         cancel_url: origin + '/education/module-02.html?checkout=cancelled',
-        metadata: { course: CPD_MODULE02_COURSE, learner_name: name },
-        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE }, description: 'AthlyraX Education - CPD 01 Module 02' },
+        metadata: { course: CPD_MODULE02_COURSE, learner_name: name, digital_access_consent: 'yes', cancellation_acknowledged: 'yes', consent_recorded_at: new Date().toISOString(), consent_version: '2026-11-06' },
+        payment_intent_data: { metadata: { course: CPD_MODULE02_COURSE, digital_access_consent: 'yes', cancellation_acknowledged: 'yes', consent_version: '2026-11-06' }, description: 'AthlyraX Education - CPD 01 Module 02' },
         allow_promotion_codes: false,
       });
       noStore(res).json({ url: cs.url });
@@ -517,7 +534,40 @@ export function registerCpdModule02(app, deps) {
   // ---------- Stripe webhook hooks (called from the existing signed /billing/webhook) ----------
   async function onCheckoutCompleted(session) {
     if (session?.metadata?.course !== CPD_MODULE02_COURSE || !sessionIdValid(String(session.id || ''))) return false;
-    try { if (stripe) await verifyPurchase(session.id); } catch {}
+    try {
+      if (stripe) {
+        const { ent, problem } = await verifyPurchase(session.id);
+        // Email a durable confirmation of the buyer's explicit consent and
+        // acknowledgement. Stripe metadata retains the timestamped evidence.
+        if (!problem && ent?.status === 'active' && ent.email && sendMail
+          && session.metadata?.digital_access_consent === 'yes'
+          && session.metadata?.cancellation_acknowledged === 'yes'
+          && !store.read('purchase-confirmations', session.id)) {
+          try {
+            await sendMail({
+              to: ent.email,
+              subject: 'AthlyraX Education — Module 2 purchase confirmation',
+              text: [
+                'Your purchase of CPD 01 Module 02: Our Body, Our Engine is confirmed.',
+                'Price paid: £4.99 (one-time digital course purchase).',
+                '',
+                'Before purchase, you expressly consented to immediate digital access',
+                'and acknowledged that once access begins you lose the statutory',
+                '14-day right to cancel. This does not affect your statutory rights',
+                'if digital content is faulty or not as described.',
+                '',
+                'Open your course: ' + origin + '/education/module-02.html',
+                'Your purchase is associated with this email address. You can',
+                'restore access from the course page if you change devices.',
+                '',
+                'AthlyraX Education',
+              ].join('\n'),
+            });
+            store.write('purchase-confirmations', session.id, { sentAt: new Date().toISOString(), consentVersion: '2026-11-06' });
+          } catch { /* keep the learner's paid entitlement and retry on a repeated signed event */ }
+        }
+      }
+    } catch {}
     return true;
   }
   // The event only says which payment to look at; the refund/dispute itself is confirmed with Stripe.
@@ -563,6 +613,7 @@ export function registerCpdModule02(app, deps) {
       stripeKeySource: keySource,
       expectedAccount: expectedAccount || null,
       expectedAccountMatches: expectedAccount && stripeAccount?.id ? stripeAccount.id === expectedAccount : null,
+      verifiedByPrice: configCheck?.verifiedByPrice === true,
       serverStartedAt,
       priceId, priceCheck,
     });
