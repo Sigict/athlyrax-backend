@@ -637,3 +637,18 @@ test('security: deleting a linked login does not revive its used invitation link
     assert.equal((await signup(base, fresh.payload.athleteToken, 'amelia.right')).response.status, 201);
   } finally { await server.stop(); }
 });
+
+test('status for a swimmer outside the club says "not available" without revealing anything; changes are still refused', async () => {
+  const server = await startServer({}, seedInvites);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const status = await request(base, '/coach/swimmers/not-in-club/athlete-invites', coach);
+    assert.equal(status.response.status, 200);
+    assert.equal(status.payload.available, false);
+    assert.deepEqual(status.payload.invites, []);
+    assert.equal((await request(base, '/coach/swimmers/amelia/athlete-invites', coach)).payload.available, true);
+    assert.equal((await post(base, '/coach/swimmers/not-in-club/athlete-invites', {}, coach)).response.status, 404);
+    assert.equal((tenantDb(server).athleteAccountInvites || []).length, 0);
+  } finally { await server.stop(); }
+});

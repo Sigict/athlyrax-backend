@@ -3962,15 +3962,19 @@ function clubDisplayName(tenantKey) {
 
 // Coach: invitation status for one swimmer (no secrets).
 app.get('/coach/swimmers/:swimmerId/athlete-invites', requireStrictAuth, requireAthleteInviteManager, async (req, res) => {
+	// Read-only status: an account without a club (the primary software owner) or a swimmer that is not
+	// in the coach's club gets a plain "not available" answer, so the coaching UI can say so; nothing is
+	// revealed and the create/revoke/correct routes still refuse these cases.
+	const unavailable = (reason) => res.status(200).json({ ok: true, available: false, reason, swimmerId: String(req.params.swimmerId || ''), linkedUsername: '', invites: [] });
 	const t = athleteTenantPaths(athleteInviteActorTenant(req));
-	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
+	if (!t) { unavailable('Athlete App invitations are managed from a club coaching account.'); return; }
 	await reconcileAthleteLinks(t, req);
 	const db = readJsonFile(t.paths.dbPath) || {};
 	const row = (Array.isArray(db.swimmers) ? db.swimmers : []).find((s) => String(s?.id || '') === String(req.params.swimmerId || ''));
-	if (!row) { res.status(404).json({ error: 'Swimmer not found in this club.' }); return; }
+	if (!row) { unavailable('This swimmer is not in your club, so no Athlete App invitation can be sent from here.'); return; }
 	const invites = (Array.isArray(db[ATHLETE_INVITE_COLLECTION]) ? db[ATHLETE_INVITE_COLLECTION] : []).filter((inv) => String(inv?.swimmerId) === String(row.id)).map((inv) => publicInvite(inv));
 	const linked = linkedAccountOf(row);
-	res.status(200).json({ ok: true, swimmerId: row.id, linkedUsername: linked.username, linkedAt: String(row.accountLinkedAt || ''), history: Array.isArray(row.accountLinkHistory) ? row.accountLinkHistory : [], invites });
+	res.status(200).json({ ok: true, available: true, swimmerId: row.id, linkedUsername: linked.username, linkedAt: String(row.accountLinkedAt || ''), history: Array.isArray(row.accountLinkHistory) ? row.accountLinkHistory : [], invites });
 });
 
 // Coach: create an invitation for an existing swimmer. The links are returned once and never stored.
