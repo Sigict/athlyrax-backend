@@ -230,7 +230,12 @@ function dedupeSessions(rows = []) {
 
 export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {}) {
   const authIds = identityValues(authUser);
-  const athlete = asArray(db.swimmers).find((row) => rowMatchesIdentity(row, authIds));
+  // ATHLYRAX_ATHLETE_EXPLICIT_LINK_FIRST: an explicit account link (set by the club's invitation) always
+  // decides which swimmer this account is; invitation-managed accounts never fall back to loose matching
+  // (email, id, membership number), so a matching email cannot reveal another swimmer's record.
+  const username = text(authUser.username).toLowerCase();
+  const explicit = username ? asArray(db.swimmers).find((row) => text(row?.swimmerAccountUsername).toLowerCase() === username) : null;
+  const athlete = explicit || (authUser.athleteInviteManaged === true ? null : asArray(db.swimmers).find((row) => rowMatchesIdentity(row, authIds)));
   if (!athlete) return null;
 
   const athleteIds = athleteIdentityValues(athlete, authIds);
@@ -292,7 +297,10 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
         (scheduleId && parentScheduleId === scheduleId)
       );
     });
-    return safeSession(row, linkedSets);
+    const safe = safeSession(row, linkedSets);
+    // Club sessions read from this club's data belong to this club's context in the Athlete App.
+    if (safe.ownerType === 'club' && !safe.ownerClubId && contextConnection?.clubId) safe.ownerClubId = text(contextConnection.clubId);
+    return safe;
   }));
 
   return {

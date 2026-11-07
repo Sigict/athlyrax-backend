@@ -62,6 +62,9 @@ export function activeAthleteTenantConnections(authUser = {}, primaryTenantId = 
     byTenant.set(primary, normalizeAthleteTenantConnection({ tenantId: primary, status: 'active', source: 'primary-auth-tenant' }));
   }
   for (const row of registry) {
+    // ATHLYRAX_ATHLETE_LINK_REVOCATION: a club connection revoked by the club's link correction removes
+    // that club from the account's authorised clubs, also when it is the account's primary club.
+    if (row.status === 'revoked') { byTenant.delete(row.tenantId); continue; }
     if (row.status !== 'active' && row.status !== 'approved') continue;
     byTenant.set(row.tenantId, { ...(byTenant.get(row.tenantId) || {}), ...row, status: 'active' });
   }

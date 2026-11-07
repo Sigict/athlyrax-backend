@@ -133,6 +133,18 @@ test('a Planner session (schedule with squadIds + training session with sets) re
   assert.deepEqual(viaSchedule.map((x) => [x.id, x.date, x.sets.length]), [['ts-1', '2026-11-20', 1]]);
 });
 
+// ATHLYRAX_ATHLETE_EXPLICIT_LINK_FIRST
+test('an invitation-managed account sees only its explicitly linked swimmer, never a loose email match', () => {
+  const db = { swimmers: [
+    { id: 'victim', name: 'Victim', email: 'me@example.com', squadId: 'sq' },
+    { id: 'mine', name: 'Mine', swimmerAccountUsername: 'me.athlete', squadId: 'sq' },
+  ] };
+  assert.equal(buildAthleteHomeProjection(db, { username: 'me.athlete', email: 'me@example.com', athleteInviteManaged: true }).athlete.id, 'mine');
+  // Unlinked (after a correction): no record at all, not the email match.
+  db.swimmers[1].swimmerAccountUsername = '';
+  assert.equal(buildAthleteHomeProjection(db, { username: 'me.athlete', email: 'me@example.com', athleteInviteManaged: true }), null);
+});
+
 // Send-offs saved as plain seconds are shown as clock time.
 test('athlete sets show numeric send-offs as clock time', () => {
   const db = { swimmers: [{ id: 'a', swimmerAccountUsername: 'a.user', squadId: 'sq' }], trainingSessions: [{ id: 's', date: '2026-11-20', squadId: 'sq' }],
