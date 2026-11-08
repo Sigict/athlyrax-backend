@@ -273,3 +273,13 @@ test('Console race result: splits, stroke count, position stored; recorded value
   assert.deepEqual([res2.time, res2.splits[0], res2.strokeCount], ['1:02.30', '14.20', '64'], 'recorded race values are kept');
   assert.equal(applyCoachPoolsideCompetitionEvidence(db, { fixtureId: 'fx1', eventId: 'ev1', swimmerId: 'amy', splits: ['abc'] }).ok, true, 'invalid splits ignored, not stored');
 });
+
+test('Console race splits as per-length objects keep each length\'s stroke count', async () => {
+  const { applyCoachPoolsideCompetitionEvidence } = await import('../coach-poolside-mutations.mjs');
+  const db = { swimmers: [{ id: 'amy' }], fixtures: [{ id: 'fx1', startDate: '2026-11-10', events: [{ id: 'ev1', distance: 100, resultsBySwimmer: {} }] }] };
+  const splits = [{ time: '14.60', cumulativeTime: '14.60', strokeCount: '15' }, { time: '15.90', cumulativeTime: '30.50', strokeCount: '16' }, { time: '', cumulativeTime: '', strokeCount: '' }, { time: '', cumulativeTime: '1:03.40', strokeCount: '17' }];
+  const r = applyCoachPoolsideCompetitionEvidence(db, { fixtureId: 'fx1', eventId: 'ev1', swimmerId: 'amy', totalTime: '1:03.40', splits, splitLength: 25 });
+  const got = r.db.fixtures[0].events[0].resultsBySwimmer.amy.splits;
+  assert.deepEqual(got.map((x) => [x.time, x.strokeCount]), [['14.60', '15'], ['15.90', '16'], ['', ''], ['', '17']]);
+  assert.equal(applyCoachPoolsideCompetitionEvidence(db, { fixtureId: 'fx1', eventId: 'ev1', swimmerId: 'amy', splits: [{ time: 'x' }] }).db.fixtures[0].events[0].resultsBySwimmer.amy.splits, undefined, 'invalid split objects are not stored');
+});

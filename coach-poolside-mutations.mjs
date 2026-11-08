@@ -307,10 +307,20 @@ export function applyCoachPoolsideCompetitionEvidence(db = {}, input = {}) {
   // Race detail from the Console (coach source): cumulative splits, per-length times, stroke count,
   // position, heat and lane. Only measured values are stored; nothing is derived or invented.
   const timeOk = (v) => /^\d+(?::\d{1,2}){0,2}(?:\.\d+)?$/.test(text(v));
-  const splitsIn = list(input.splits).map(text);
   const segIn = list(input.segmentTimes).map(text);
   const raceDetail = {};
-  if (splitsIn.length && splitsIn.every((v) => v === '' || timeOk(v))) raceDetail.splits = splitsIn.slice(0, 60);
+  // Splits: one object per pool length {time: that length's time, cumulativeTime, strokeCount}
+  // (the Program Sheet's editable form), or legacy cumulative time strings.
+  const rawSplits = list(input.splits).slice(0, 60);
+  if (rawSplits.length && rawSplits.every((x) => x && typeof x === 'object')) {
+    const objs = rawSplits.map((x) => ({ time: text(x.time), cumulativeTime: text(x.cumulativeTime), strokeCount: text(x.strokeCount) }));
+    if (objs.every((o) => (o.time === '' || timeOk(o.time)) && (o.cumulativeTime === '' || timeOk(o.cumulativeTime)) && (o.strokeCount === '' || /^\d{1,3}$/.test(o.strokeCount)))) {
+      raceDetail.splits = objs.map((o) => ({ time: o.time, ...(o.cumulativeTime ? { cumulativeTime: o.cumulativeTime } : {}), strokeCount: o.strokeCount, strokeCountUnit: 'strokes', measurementSource: 'coach-pool-console' }));
+    }
+  } else {
+    const splitsIn = rawSplits.map(text);
+    if (splitsIn.length && splitsIn.every((v) => v === '' || timeOk(v))) raceDetail.splits = splitsIn;
+  }
   if (segIn.length && segIn.every((v) => v === '' || timeOk(v))) raceDetail.segmentTimes = segIn.slice(0, 60);
   if (/^\d{1,4}$/.test(text(input.strokeCount))) raceDetail.strokeCount = text(input.strokeCount);
   if (/^\d{1,3}$/.test(text(input.position))) raceDetail.rank = text(input.position);
@@ -341,7 +351,7 @@ export function applyCoachPoolsideCompetitionEvidence(db = {}, input = {}) {
   const fill = {};
   for (const [k, v] of Object.entries(raceDetail)) {
     const cur = previous[k];
-    const empty = cur === undefined || cur === null || cur === '' || (Array.isArray(cur) && !cur.some((x) => text(x)));
+    const empty = cur === undefined || cur === null || cur === '' || (Array.isArray(cur) && !cur.some((x) => (x && typeof x === 'object' ? text(x.time) || text(x.strokeCount) : text(x))));
     if (empty) fill[k] = v;
   }
   if (totalTime && !text(previous.time) && !text(previous.resultTime)) { fill.time = totalTime; fill.resultTime = totalTime; }
