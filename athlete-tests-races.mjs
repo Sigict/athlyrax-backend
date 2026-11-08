@@ -13,6 +13,7 @@ import { buildFixedTestTemplateRows, canonicalBuiltInTestTemplate } from './capa
 import { buildCanonicalSwimmerEvidence } from './capability-engine/src/utils/canonicalSwimmerEvidence.js';
 import { personalBestsByCourse, raceEventLabel } from './capability-engine/src/utils/coursePersonalBests.js';
 import { competitionCourse, timeSeconds } from './capability-engine/src/utils/repResultCells.js';
+import { clubFixturesForSwimmer } from './athlete-competitions.mjs';
 
 const text = (value, max = 160) => String(value ?? '').trim().slice(0, max);
 const asArray = (value) => (Array.isArray(value) ? value : []);
@@ -151,6 +152,7 @@ export function buildClubResults(db = {}, swimmerId = '', { tenantId = '', dataS
     label: 'Validated club records (read-only)',
     tests, races: competitions.map(safeRace).sort((a, b) => b.date.localeCompare(a.date)),
     personalBests: competitions.length ? pbSections(competitions) : [],
+    fixtures: allows('competition') ? clubFixturesForSwimmer(db, swimmerId) : [],
     scopes: { tests: allows('tests'), competition: allows('competition') },
   };
 }

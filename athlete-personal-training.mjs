@@ -14,10 +14,11 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { normalizeTest, InvalidTest } from './athlete-tests-races.mjs';
+import { normalizeFixture, normalizeReflection, InvalidCompetitionRecord } from './athlete-competitions.mjs';
 
-export const PERSONAL_TRAINING_KINDS = Object.freeze(['plan', 'day', 'test']);
+export const PERSONAL_TRAINING_KINDS = Object.freeze(['plan', 'day', 'test', 'fixture', 'reflection']);
 export const PERSONAL_TRAINING_LIMITS = Object.freeze({
-  plans: 3000, days: 5000, tests: 10000, changesPerSync: 200,
+  plans: 3000, days: 5000, tests: 10000, fixtures: 1000, reflections: 2000, changesPerSync: 200,
   sessionsPerDay: 12, setsPerSession: 60, setsPerPlan: 60,
   rounds: 20, reps: 100, distance: 3000, splitsPerRep: 120, text: 3000, shortText: 160,
 });
@@ -137,17 +138,19 @@ export function normalizeDay(raw = {}) {
   };
 }
 
-const normalizers = { plan: (raw) => normalizePlan(raw), day: (raw) => normalizeDay(raw), test: (raw, previous, now) => normalizeTest(raw, previous, { now }) };
-const collection = (kind) => ({ plan: 'plans', day: 'days', test: 'tests' }[kind]);
+const normalizers = { plan: (raw) => normalizePlan(raw), day: (raw) => normalizeDay(raw), test: (raw, previous, now) => normalizeTest(raw, previous, { now }), fixture: (raw) => normalizeFixture(raw), reflection: (raw) => normalizeReflection(raw) };
+const COLLECTIONS = { plan: 'plans', day: 'days', test: 'tests', fixture: 'fixtures', reflection: 'reflections' };
+const collection = (kind) => COLLECTIONS[kind];
 
 export function emptyPersonalTraining() {
-  return { version: 1, plans: {}, days: {}, tests: {}, updatedAt: '' };
+  return { version: 1, plans: {}, days: {}, tests: {}, fixtures: {}, reflections: {}, updatedAt: '' };
 }
 
 // Applies a batch of offline changes. Returns the next store (or null when nothing changed) and, per
 // change, applied / conflict / invalid. Never throws for a bad change: it is reported and skipped.
 export function applyPersonalTrainingChanges(store = emptyPersonalTraining(), changes = [], { now = new Date().toISOString(), actor = '' } = {}) {
-  const next = { ...emptyPersonalTraining(), ...store, plans: { ...(store.plans || {}) }, days: { ...(store.days || {}) }, tests: { ...(store.tests || {}) } };
+  const next = { ...emptyPersonalTraining(), ...store };
+  for (const name of Object.values(COLLECTIONS)) next[name] = { ...(store[name] || {}) };
   const results = [];
   let changed = false;
   for (const change of asArray(changes).slice(0, PERSONAL_TRAINING_LIMITS.changesPerSync)) {
@@ -162,7 +165,7 @@ export function applyPersonalTrainingChanges(store = emptyPersonalTraining(), ch
     if (!deleted) {
       try { data = normalizers[kind](change.data || {}, current && !current.deleted ? current.data : null, now); }
       catch (error) {
-        if (error instanceof InvalidRecord || error instanceof InvalidTest) { results.push({ kind, id, status: 'invalid', error: error.message }); continue; }
+        if (error instanceof InvalidRecord || error instanceof InvalidTest || error instanceof InvalidCompetitionRecord) { results.push({ kind, id, status: 'invalid', error: error.message }); continue; }
         throw error;
       }
     }
@@ -188,6 +191,8 @@ export function listPersonalTraining(store = emptyPersonalTraining()) {
     plans: Object.values(store.plans || {}),
     days: Object.values(store.days || {}),
     tests: Object.values(store.tests || {}),
+    fixtures: Object.values(store.fixtures || {}),
+    reflections: Object.values(store.reflections || {}),
     updatedAt: store.updatedAt || '',
   };
 }
