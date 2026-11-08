@@ -52,3 +52,19 @@ test('athlete projection exposes no invented capability when no saved server sna
     { integratedProfile: null, disciplines: [] },
   );
 });
+
+// ATHLYRAX_ATHLETE_CAPABILITY_SPEED_LEVEL
+test('athlete capability follows the ISP speed-level rule: no timed swim -> consistency areas Not Scored; a timed swim scales them', async () => {
+  const demo = await import('../scripts/demo-showcase-dataset.mjs');
+  const cap = await import('../athlete-club-capability.mjs');
+  const db = demo.buildDemoTenantSeed();
+  const s = db.swimmers[0];
+  const before = cap.buildClubCapabilityProfile(db, s, { tenantId: 'demo' });
+  const aerobic = (p) => p.axes.find((a) => a.id === 'aerobic_capacity');
+  assert.equal(aerobic(before).value, null);
+  assert.match(aerobic(before).reasons[0], /Needs a timed test or race/);
+  const d = before.calculationDate;
+  db.tests = [...(db.tests || []), { id: 't-max100', swimmerId: s.id, date: d, testDate: d, templateId: 'builtin-test-max', testItemKey: 'M100', testName: 'M100', category: 'Swimming', repResults: [{ overallTime: '1:02.50', overallStrokeCount: '58' }], resultTime: '1:02.50', distance: 100, stroke: 'free', capabilityScoringEligible: true, completed: true, status: 'completed' }];
+  const after = cap.buildClubCapabilityProfile(db, s, { tenantId: 'demo' });
+  assert.ok(aerobic(after).value > 0 && aerobic(after).value < 90, `aerobic is speed-scaled, not saturated: ${aerobic(after).value}`);
+});
