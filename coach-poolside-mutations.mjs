@@ -304,6 +304,18 @@ export function applyCoachPoolsideCompetitionEvidence(db = {}, input = {}) {
     ? evidenceBySource[sourceKind]
     : {};
   const totalTime = text(input.totalTime || input.resultTime);
+  // Race detail from the Console (coach source): cumulative splits, per-length times, stroke count,
+  // position, heat and lane. Only measured values are stored; nothing is derived or invented.
+  const timeOk = (v) => /^\d+(?::\d{1,2}){0,2}(?:\.\d+)?$/.test(text(v));
+  const splitsIn = list(input.splits).map(text);
+  const segIn = list(input.segmentTimes).map(text);
+  const raceDetail = {};
+  if (splitsIn.length && splitsIn.every((v) => v === '' || timeOk(v))) raceDetail.splits = splitsIn.slice(0, 60);
+  if (segIn.length && segIn.every((v) => v === '' || timeOk(v))) raceDetail.segmentTimes = segIn.slice(0, 60);
+  if (/^\d{1,4}$/.test(text(input.strokeCount))) raceDetail.strokeCount = text(input.strokeCount);
+  if (/^\d{1,3}$/.test(text(input.position))) raceDetail.rank = text(input.position);
+  for (const k of ['heat', 'lane']) if (text(input[k])) raceDetail[k] = text(input[k]).slice(0, 10);
+  if (Number(input.splitLength) > 0) raceDetail.splitLength = Number(input.splitLength);
   const entryTime = text(input.entryTime) || text(previous.entryTime);
   const coachNotes = text(input.coachNotes || input.notes);
   const videos = normalizeCompetitionVideoEvidence(input.videoAnalyses || input.videos, source, now, actor);
@@ -313,6 +325,7 @@ export function applyCoachPoolsideCompetitionEvidence(db = {}, input = {}) {
     ...(totalTime ? { totalTime } : {}),
     ...(entryTime ? { entryTime } : {}),
     ...(coachNotes ? { coachNotes } : {}),
+    ...raceDetail,
     ...(videos.length ? { videoAnalyses: [...list(previousSourceEvidence.videoAnalyses), ...videos] } : {}),
     source,
     updatedAt: now,
@@ -324,8 +337,17 @@ export function applyCoachPoolsideCompetitionEvidence(db = {}, input = {}) {
   const mergedCoachNotes = text(evidenceBySource.coach?.coachNotes || previous.coachNotes);
   const mergedVideos = list(evidenceBySource.coach?.videoAnalyses);
 
+  // Race detail fills only fields not already recorded on the club result (never overwrites).
+  const fill = {};
+  for (const [k, v] of Object.entries(raceDetail)) {
+    const cur = previous[k];
+    const empty = cur === undefined || cur === null || cur === '' || (Array.isArray(cur) && !cur.some((x) => text(x)));
+    if (empty) fill[k] = v;
+  }
+  if (totalTime && !text(previous.time) && !text(previous.resultTime)) { fill.time = totalTime; fill.resultTime = totalTime; }
   const nextResult = {
     ...previous,
+    ...fill,
     ...(entryTime ? { entryTime } : {}),
     totalTime: officialTime || coachTime || totalTime || text(previous.totalTime),
     officialTime,

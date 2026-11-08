@@ -255,3 +255,21 @@ test('lane plan requires an explicit list; [] clears it', async () => {
   assert.equal(cleared.ok, true);
   assert.deepEqual(cleared.db.trainingSessions[0].poolsideLanePlan.lanes, []);
 });
+
+// ATHLYRAX_CONSOLE_COMPETITION_LINK
+test('Console race result: splits, stroke count, position stored; recorded values never overwritten', async () => {
+  const { applyCoachPoolsideCompetitionEvidence } = await import('../coach-poolside-mutations.mjs');
+  const { buildCoachPoolsideProjection } = await import('../coach-poolside-projection.mjs');
+  const db = { swimmers: [{ id: 'amy' }], fixtures: [{ id: 'fx1', name: 'County Champs', startDate: '2026-11-10', events: [{ id: 'ev1', event: '12', distance: 100, stroke: 'free', attendeeIds: ['amy'], resultsBySwimmer: {} }] }] };
+  const proj = buildCoachPoolsideProjection(db, { date: '2026-11-08' });
+  assert.deepEqual(proj.competitions.map((f) => [f.id, f.events.map((e) => [e.id, e.number, e.distance, e.swimmerIds])]), [['fx1', [['ev1', '12', 100, ['amy']]]]]);
+  const r = applyCoachPoolsideCompetitionEvidence(db, { fixtureId: 'fx1', eventId: 'ev1', swimmerId: 'amy', totalTime: '1:02.30', splits: ['14.20', '29.90', '45.80', '1:02.30'], segmentTimes: ['14.20', '15.70', '15.90', '16.50'], strokeCount: '64', position: '3', heat: '2', lane: '4', splitLength: 25, updatedBy: 'coachA' });
+  assert.equal(r.ok, true, r.error);
+  const res = r.db.fixtures[0].events[0].resultsBySwimmer.amy;
+  assert.deepEqual([res.time, res.resultTime, res.splits.length, res.segmentTimes[1], res.strokeCount, res.rank, res.heat, res.lane, res.splitLength], ['1:02.30', '1:02.30', 4, '15.70', '64', '3', '2', '4', 25]);
+  assert.equal(res.evidenceBySource.coach.strokeCount, '64');
+  const again = applyCoachPoolsideCompetitionEvidence(r.db, { fixtureId: 'fx1', eventId: 'ev1', swimmerId: 'amy', totalTime: '1:05.00', splits: ['15.00', '31.00', '48.00', '1:05.00'], strokeCount: '70', updatedBy: 'coachA' });
+  const res2 = again.db.fixtures[0].events[0].resultsBySwimmer.amy;
+  assert.deepEqual([res2.time, res2.splits[0], res2.strokeCount], ['1:02.30', '14.20', '64'], 'recorded race values are kept');
+  assert.equal(applyCoachPoolsideCompetitionEvidence(db, { fixtureId: 'fx1', eventId: 'ev1', swimmerId: 'amy', splits: ['abc'] }).ok, true, 'invalid splits ignored, not stored');
+});
