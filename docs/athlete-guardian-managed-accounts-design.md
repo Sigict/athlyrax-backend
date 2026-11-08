@@ -1,6 +1,6 @@
 # Guardian-managed Athlete App accounts (no athlete email) — security design for approval
 
-Status: IMPLEMENTED in the guardian-managed-accounts PR (stacked on the invitation automation PR). Defaults chosen: the guardian sets the initial password; recovery codes go to the guardian. Both can be changed before release.
+Status: IMPLEMENTED (PR #157). Owner approved the defaults on 2026-11-08: the verified guardian sets the initial password, receives password-reset codes and can revoke access; the athlete keeps separate credentials.
 "Consent given: athlete email needed" until the coach adds one.
 
 ## Problem
