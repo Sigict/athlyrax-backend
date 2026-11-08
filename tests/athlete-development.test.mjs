@@ -26,10 +26,12 @@ test('diary syncs in the personal store; older stores still load', () => {
 
 import { normalizeWeekPlan, normalizeGoal } from '../athlete-development.mjs';
 
-test('weekly planner rows (Master v31): Monday week, four phases, cycle note, target fixture', () => {
+test('weekly planner rows: Monday week, the five canonical phases, cycle note, target fixture', () => {
   assert.deepEqual(normalizeWeekPlan({ week: '2026-11-09', phase: 'Aerobic', cycle: 'Block A', targetFixtureId: 'fx-1' }).phase, 'Aerobic');
   assert.throws(() => normalizeWeekPlan({ week: '2026-11-10', phase: 'Aerobic' }), /Monday/);
-  assert.throws(() => normalizeWeekPlan({ week: '2026-11-09', phase: 'Recovery' }), /Intro, Aerobic, Specific or Taper/);
+  assert.throws(() => normalizeWeekPlan({ week: '2026-11-09', phase: 'Recovery' }), /Intro, Aerobic, Specific, Race or Taper/);
+  assert.equal(normalizeWeekPlan({ week: '2026-11-09', phase: 'Race' }).phase, 'Race', 'the fifth canonical phase');
+  for (const p of ['Intro', 'Aerobic', 'Specific', 'Taper']) assert.equal(normalizeWeekPlan({ week: '2026-11-09', phase: p }).phase, p, 'existing saved phases stay valid');
   assert.equal(normalizeWeekPlan({ week: '2026-11-09' }).phase, '');
 });
 

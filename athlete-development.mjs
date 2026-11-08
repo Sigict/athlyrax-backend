@@ -23,11 +23,12 @@ export function normalizeDiary(raw = {}) {
 
 // Weekly planner row (Master v31 normalizeWeeklyPlanner): the athlete's own phase, cycle note and target
 // fixture for one week. The record id is the week's Monday; it never overwrites a club-owned plan.
-export const WEEK_PHASES = ['Intro', 'Aerobic', 'Specific', 'Taper'];
+// The five canonical AthlyraX phases (Coaching Software planner: Intro, Aerobic, Specific, Race, Taper).
+export const WEEK_PHASES = ['Intro', 'Aerobic', 'Specific', 'Race', 'Taper'];
 export function normalizeWeekPlan(raw = {}) {
   if (!isDate(raw.week) || new Date(`${raw.week}T12:00:00Z`).getUTCDay() !== 1) fail('A week starts on a Monday (yyyy-mm-dd).');
   const phase = text(raw.phase, 20);
-  if (phase && !WEEK_PHASES.includes(phase)) fail('Phase must be Intro, Aerobic, Specific or Taper.');
+  if (phase && !WEEK_PHASES.includes(phase)) fail('Phase must be Intro, Aerobic, Specific, Race or Taper.');
   return { week: raw.week, phase, cycle: text(raw.cycle, 80), targetFixtureId: text(raw.targetFixtureId, 120), source: 'athlete-entered' };
 }
 
