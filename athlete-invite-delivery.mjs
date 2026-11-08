@@ -146,7 +146,7 @@ export function buildInviteEmail({ kind, clubName, coachName, swimmerName, link,
     `Secure link (works once): ${url}`,
     until ? `The link expires on ${until}.` : '',
     '',
-    `Questions? Reply to this email to contact ${club}${replyTo ? '' : ' (or ask your coach)'}.`,
+    replyTo ? `Questions? Reply to this email to contact ${club}.` : `Questions? Contact ${club} or your coach directly.`,
     'If you did not expect this email, you can ignore it; nothing happens unless the link is used.',
     '', 'AthlyraX, sent on behalf of ' + club + '. This is a one-off service email, not a marketing subscription.',
   ].filter((l, i, a) => !(l === '' && a[i - 1] === ''));
@@ -155,7 +155,7 @@ export function buildInviteEmail({ kind, clubName, coachName, swimmerName, link,
     + purpose.map((p) => `<p>${esc(p)}</p>`).join('')
     + `<p><a href="${esc(url)}" style="display:inline-block;background:#0284c7;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none">${isGuardian ? 'Review and authorise' : 'Accept invitation'}</a></p>`
     + `<p style="font-size:13px;color:#475569">The link works once${until ? ` and expires on ${esc(until)}` : ''}. If the button does not work, copy this address into your browser:<br><span style="word-break:break-all">${esc(url)}</span></p>`
-    + `<p style="font-size:13px;color:#475569">Questions? Reply to this email to contact ${esc(club)}. If you did not expect this email, ignore it; nothing happens unless the link is used.</p>`
+    + `<p style="font-size:13px;color:#475569">${replyTo ? `Questions? Reply to this email to contact ${esc(club)}.` : `Questions? Contact ${esc(club)} or your coach directly.`} If you did not expect this email, ignore it; nothing happens unless the link is used.</p>`
     + `<p style="font-size:12px;color:#64748b">AthlyraX, sent on behalf of ${esc(club)}. This is a one-off service email, not a marketing subscription.</p></body></html>`;
   return { subject, text: lines.join('\n'), html };
 }
