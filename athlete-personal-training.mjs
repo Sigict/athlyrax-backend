@@ -15,11 +15,11 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { normalizeTest, InvalidTest } from './athlete-tests-races.mjs';
 import { normalizeFixture, normalizeReflection, InvalidCompetitionRecord } from './athlete-competitions.mjs';
-import { normalizeDiary, InvalidDevelopmentRecord } from './athlete-development.mjs';
+import { normalizeDiary, normalizeGoal, normalizeWeekPlan, InvalidDevelopmentRecord } from './athlete-development.mjs';
 
-export const PERSONAL_TRAINING_KINDS = Object.freeze(['plan', 'day', 'test', 'fixture', 'reflection', 'diary']);
+export const PERSONAL_TRAINING_KINDS = Object.freeze(['plan', 'day', 'test', 'fixture', 'reflection', 'diary', 'goal', 'week']);
 export const PERSONAL_TRAINING_LIMITS = Object.freeze({
-  plans: 3000, days: 5000, tests: 10000, fixtures: 1000, reflections: 2000, diary: 10000, changesPerSync: 200,
+  plans: 3000, days: 5000, tests: 10000, fixtures: 1000, reflections: 2000, diary: 10000, goals: 150, weeks: 600, changesPerSync: 200,
   sessionsPerDay: 12, setsPerSession: 60, setsPerPlan: 60,
   rounds: 20, reps: 100, distance: 3000, splitsPerRep: 120, text: 3000, shortText: 160,
 });
@@ -139,12 +139,12 @@ export function normalizeDay(raw = {}) {
   };
 }
 
-const normalizers = { plan: (raw) => normalizePlan(raw), day: (raw) => normalizeDay(raw), test: (raw, previous, now) => normalizeTest(raw, previous, { now }), fixture: (raw) => normalizeFixture(raw), reflection: (raw) => normalizeReflection(raw), diary: (raw) => normalizeDiary(raw) };
-const COLLECTIONS = { plan: 'plans', day: 'days', test: 'tests', fixture: 'fixtures', reflection: 'reflections', diary: 'diary' };
+const normalizers = { plan: (raw) => normalizePlan(raw), day: (raw) => normalizeDay(raw), test: (raw, previous, now) => normalizeTest(raw, previous, { now }), fixture: (raw) => normalizeFixture(raw), reflection: (raw) => normalizeReflection(raw), diary: (raw) => normalizeDiary(raw), goal: (raw) => normalizeGoal(raw), week: (raw) => normalizeWeekPlan(raw) };
+const COLLECTIONS = { plan: 'plans', day: 'days', test: 'tests', fixture: 'fixtures', reflection: 'reflections', diary: 'diary', goal: 'goals', week: 'weeks' };
 const collection = (kind) => COLLECTIONS[kind];
 
 export function emptyPersonalTraining() {
-  return { version: 1, plans: {}, days: {}, tests: {}, fixtures: {}, reflections: {}, diary: {}, updatedAt: '' };
+  return { version: 1, plans: {}, days: {}, tests: {}, fixtures: {}, reflections: {}, diary: {}, goals: {}, weeks: {}, updatedAt: '' };
 }
 
 // Applies a batch of offline changes. Returns the next store (or null when nothing changed) and, per
@@ -195,6 +195,8 @@ export function listPersonalTraining(store = emptyPersonalTraining()) {
     fixtures: Object.values(store.fixtures || {}),
     reflections: Object.values(store.reflections || {}),
     diary: Object.values(store.diary || {}),
+    goals: Object.values(store.goals || {}),
+    weeks: Object.values(store.weeks || {}),
     updatedAt: store.updatedAt || '',
   };
 }

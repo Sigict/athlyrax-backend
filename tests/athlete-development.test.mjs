@@ -23,3 +23,22 @@ test('diary syncs in the personal store; older stores still load', () => {
   r = applyPersonalTrainingChanges({ version: 1, plans: {}, days: {}, tests: {} }, [{ kind: 'diary', id: 'dy-2', baseRev: 0, data: { date: '2026-11-07', note: 'x' } }]);
   assert.equal(r.results[0].status, 'applied');
 });
+
+import { normalizeWeekPlan, normalizeGoal } from '../athlete-development.mjs';
+
+test('weekly planner rows (Master v31): Monday week, four phases, cycle note, target fixture', () => {
+  assert.deepEqual(normalizeWeekPlan({ week: '2026-11-09', phase: 'Aerobic', cycle: 'Block A', targetFixtureId: 'fx-1' }).phase, 'Aerobic');
+  assert.throws(() => normalizeWeekPlan({ week: '2026-11-10', phase: 'Aerobic' }), /Monday/);
+  assert.throws(() => normalizeWeekPlan({ week: '2026-11-09', phase: 'Recovery' }), /Intro, Aerobic, Specific or Taper/);
+  assert.equal(normalizeWeekPlan({ week: '2026-11-09' }).phase, '');
+});
+
+test('goals (Master v31): text required, horizon and category from the Master lists, done is a self-report', () => {
+  const g = normalizeGoal({ text: 'Hold pace on 8x100', horizon: 'Medium-term', category: 'Durability', measure: '8x100 spread', done: true });
+  assert.deepEqual([g.horizon, g.category, g.done], ['Medium-term', 'Durability', true]);
+  assert.equal(normalizeGoal({ text: 'x', horizon: 'Forever', category: 'Magic' }).category, 'Other');
+  assert.throws(() => normalizeGoal({ text: '' }), /goal/);
+  let r = applyPersonalTrainingChanges(emptyPersonalTraining(), [{ kind: 'goal', id: 'goal-0001', baseRev: 0, data: { text: 'Sub 1:02' } }, { kind: 'week', id: '2026-11-09', baseRev: 0, data: { week: '2026-11-09', phase: 'Specific' } }]);
+  assert.deepEqual(r.results.map((x) => x.status), ['applied', 'applied']);
+  assert.deepEqual([listPersonalTraining(r.store).goals.length, listPersonalTraining(r.store).weeks.length], [1, 1]);
+});

@@ -20,3 +20,26 @@ export function normalizeDiary(raw = {}) {
   const visibility = raw.visibility === 'share_with_coach' ? 'share_with_coach' : 'private';
   return { date: raw.date, type, feel, note, visibility, source: 'athlete-entered' };
 }
+
+// Weekly planner row (Master v31 normalizeWeeklyPlanner): the athlete's own phase, cycle note and target
+// fixture for one week. The record id is the week's Monday; it never overwrites a club-owned plan.
+export const WEEK_PHASES = ['Intro', 'Aerobic', 'Specific', 'Taper'];
+export function normalizeWeekPlan(raw = {}) {
+  if (!isDate(raw.week) || new Date(`${raw.week}T12:00:00Z`).getUTCDay() !== 1) fail('A week starts on a Monday (yyyy-mm-dd).');
+  const phase = text(raw.phase, 20);
+  if (phase && !WEEK_PHASES.includes(phase)) fail('Phase must be Intro, Aerobic, Specific or Taper.');
+  return { week: raw.week, phase, cycle: text(raw.cycle, 80), targetFixtureId: text(raw.targetFixtureId, 120), source: 'athlete-entered' };
+}
+
+// Personal goal (Master v31 normalizeAthleteGoals). Completing a goal is a self-report, never an assessment.
+export const GOAL_HORIZONS = ['Short-term', 'Medium-term', 'Long-term'];
+export const GOAL_CATEGORIES = ['Technical Control', 'Efficiency', 'Robustness of Efficiency', 'Aerobic Capacity', 'Anaerobic Capacity', 'Power & Speed Expression', 'Adaptability', 'Durability', 'Competition / target race', 'Consistency / attendance', 'Other'];
+export function normalizeGoal(raw = {}) {
+  const goalText = text(raw.text, 180);
+  if (!goalText) fail('Enter a goal before saving.');
+  const date = text(raw.date, 10);
+  if (date && !isDate(date)) fail('Target date must be a valid date.');
+  const horizon = GOAL_HORIZONS.includes(raw.horizon) ? raw.horizon : 'Short-term';
+  const category = GOAL_CATEGORIES.includes(raw.category) ? raw.category : 'Other';
+  return { text: goalText, date, horizon, category, measure: text(raw.measure, 160), outcome: text(raw.outcome, 100), done: raw.done === true, source: 'athlete-entered' };
+}
