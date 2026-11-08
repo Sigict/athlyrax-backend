@@ -30,6 +30,7 @@ const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex'
 const secret = () => crypto.randomBytes(32).toString('base64url');
 // Guardian codes are short (6 digits), so their digest is keyed with a server secret (HMAC): a copy of
 // the database alone does not allow the codes to be recovered by trying all one million values.
+export const guardianCodeDigest = (codeKey, inviteId, code) => codeDigest(codeKey, inviteId, code);
 const codeDigest = (codeKey, inviteId, code) => {
   if (!codeKey || String(codeKey).length < 16) throw new Error('Guardian code key is not configured.');
   return crypto.createHmac('sha256', codeKey).update(`${text(inviteId)}:${text(code)}`).digest('hex');

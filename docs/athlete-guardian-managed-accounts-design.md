@@ -1,6 +1,6 @@
 # Guardian-managed Athlete App accounts (no athlete email) — security design for approval
 
-Status: PROPOSAL. Not implemented. Today an under-18 athlete without an email address stays at
+Status: IMPLEMENTED in the guardian-managed-accounts PR (stacked on the invitation automation PR). Defaults chosen: the guardian sets the initial password; recovery codes go to the guardian. Both can be changed before release.
 "Consent given: athlete email needed" until the coach adds one.
 
 ## Problem

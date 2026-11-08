@@ -332,3 +332,75 @@ test('bulk squad invitations: review, save with permission, send, guardian first
     await server.stop();
   }
 });
+
+// ATHLYRAX_GUARDIAN_MANAGED_ACCOUNTS_V1
+test('guardian-managed login for an athlete without email: verified consent, separate credentials, guardian recovery and revocation', async () => {
+  const server = await startServer({ AUTH_LOGIN_RATE_MAX_ATTEMPTS: '200', AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS: '400' }, seedSquad);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const bulk = await post(base, '/coach/athlete-invites/bulk', { requestId: 'req-managed1', items: [
+      { swimmerId: 'kid2', guardianEmail: 'lou.parent@example.com' },
+      { swimmerId: 'kid1', athleteEmail: 'kit@example.com', guardianEmail: 'kit.parent@example.com' },
+    ] }, coach);
+    assert.equal(bulk.response.status, 200, JSON.stringify(bulk.payload));
+    const gLink = (addr) => linkIn(mails(server).find((x) => x.to === addr));
+    const louTok = gLink('lou.parent@example.com'); const kitTok = gLink('kit.parent@example.com');
+    const make = (token, u = 'lou.small', extra = {}, auth = {}) => post(base, '/athlete-invites/guardian-managed-account', { token, username: u, password: 'Athlete!Pass1234', fullName: 'Lou Small', ...extra }, auth);
+    assert.equal((await make(louTok)).response.status, 403, 'no login before verified consent');
+    const consentWith = async (token, addr, name) => {
+      assert.equal((await post(base, '/athlete-invites/guardian-code', { token })).response.status, 200);
+      const code = await waitFor(() => (mails(server).filter((x) => x.to === addr).map((x) => (x.text.match(/verification code is: (\d{6})/) || [])[1]).filter(Boolean))[0]);
+      assert.equal((await post(base, '/athlete-invites/guardian-consent', { token, name, relationship: 'Parent', consent: true, consentVersion: 'athlete-app-guardian-consent-v2', code })).response.status, 200);
+    };
+    await consentWith(louTok, 'lou.parent@example.com', 'Sam Small');
+    await consentWith(kitTok, 'kit.parent@example.com', 'Pat Young');
+    assert.equal((await make(kitTok, 'kit.managed')).response.status, 409, 'athlete with own email accepts their own invitation');
+    const athleteTok = linkIn(mails(server).find((x) => x.to === 'kit@example.com'));
+    assert.equal((await make(athleteTok)).response.status, 404, 'an athlete link cannot create a managed login');
+    assert.equal((await make(louTok, 'lou.small', {}, coach)).response.status, 403, 'not while signed in to another account');
+    assert.equal((await make(louTok, 'lou.small', { password: 'short' })).response.status, 400);
+    const created = await make(louTok);
+    assert.equal(created.response.status, 201, JSON.stringify(created.payload));
+    assert.equal((await make(louTok, 'lou.other')).response.status, 409, 'single use');
+    let db = tenantDb(server);
+    const row = db.swimmers.find((r) => r.id === 'kid2');
+    assert.deepEqual([row.swimmerAccountUsername, row.swimmerAccountEmail], ['lou.small', '']);
+    assert.equal(db.swimmers.length, 7, 'no swimmer created');
+    const users = JSON.parse(fs.readFileSync(server.paths.authUsersPath, 'utf8'));
+    const u = users.find((x) => x.username === 'lou.small');
+    assert.equal(u.email, ''); assert.equal(u.managedBy.guardianEmail, 'lou.parent@example.com'); assert.equal(u.managedBy.consentAt.length > 0, true);
+    assert.ok(!JSON.stringify(u).includes('Athlete!Pass1234'), 'password stored only as a hash');
+    // Separate credentials: the athlete signs in with their own username and sees only their record.
+    const lou = await login(base, 'lou.small', 'Athlete!Pass1234');
+    const home = await request(base, '/swimmer/athlete-home', lou);
+    assert.equal(home.response.status, 200, JSON.stringify(home.payload));
+    assert.equal(home.payload.athlete.id, 'kid2');
+    assert.equal(tenantDb(server).swimmers.length, 7, 'signing in created no swimmer');
+    assert.ok(mails(server).some((x) => x.to === 'lou.parent@example.com' && /login created/.test(x.subject)));
+    // Recovery: the reset code goes to the guardian, never to logs.
+    assert.equal((await post(base, '/auth/password-reset/request', { identifier: 'lou.small' })).response.status, 200);
+    const reset = await waitFor(() => (mails(server).filter((x) => x.to === 'lou.parent@example.com').map((x) => (x.text.match(/reset code is: (\w+)/) || [])[1]).filter(Boolean))[0]);
+    assert.ok(!server.output().includes(reset), 'reset code not logged');
+    assert.equal((await post(base, '/auth/password-reset/confirm', { username: 'lou.small', code: reset, password: 'NewAthlete!Pass1234' })).response.status, 200);
+    const lou2 = await login(base, 'lou.small', 'NewAthlete!Pass1234');
+    // Guardian revocation: a fresh code is required; then access ends and the link is removed.
+    assert.equal((await post(base, '/athlete-invites/guardian-revoke', { token: louTok, code: '000000' })).response.status, 403, 'code first');
+    const mc = await post(base, '/athlete-invites/guardian-manage-code', { token: louTok });
+    assert.equal(mc.response.status, 200, JSON.stringify(mc.payload));
+    const mcode = await waitFor(() => (mails(server).filter((x) => x.to === 'lou.parent@example.com').map((x) => (x.text.match(/manage the Athlete App login "lou.small".* is: (\d{6})/) || [])[1]).filter(Boolean))[0]);
+    assert.equal((await post(base, '/athlete-invites/guardian-revoke', { token: louTok, code: mcode === '000000' ? '111111' : '000000' })).response.status, 403, 'wrong code');
+    const rv = await post(base, '/athlete-invites/guardian-revoke', { token: louTok, code: mcode });
+    assert.equal(rv.response.status, 200, JSON.stringify(rv.payload));
+    assert.equal(rv.payload.linkRemoved, true);
+    assert.equal((await request(base, '/swimmer/athlete-home', lou2)).response.status, 401, 'session ended');
+    db = tenantDb(server);
+    const after = db.swimmers.find((r) => r.id === 'kid2');
+    assert.equal(after.swimmerAccountUsername, undefined);
+    assert.deepEqual(after.accountLinkHistory.map((h) => h.action), ['linked', 'unlinked']);
+    assert.equal((await post(base, '/athlete-invites/guardian-revoke', { token: louTok, code: mcode })).response.status, 409, 'already removed');
+    assert.ok(!/verification code is|reset code is|is: \d{6}/.test(server.output()), 'no codes in logs');
+  } finally {
+    await server.stop();
+  }
+});

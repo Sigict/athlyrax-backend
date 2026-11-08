@@ -16,6 +16,7 @@ import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraini
 import { buildClubResults, buildSelfReportedProgress, testProtocols } from './athlete-tests-races.mjs';
 import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
 import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
+import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
 import { savedContacts, applyContactChoice, clubOverview, COACH_STATE_LABELS, buildInviteEmail, markAutoDelivery, rotateInviteToken, resendAllowed, recordDelivery, updateDelivery, newDeliveryId, applyDeliveryEvent, planBulkItem, dedupeBulkItems, BULK_MAX_ITEMS } from './athlete-invite-delivery.mjs';
 import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES, DuplicateSwimmerIdError, duplicateSwimmerIds, uniqueSwimmerRow } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
@@ -1001,6 +1002,18 @@ function getAuthResetMailTransport() {
 async function deliverPasswordResetCode({ user, resetCode }) {
 	const username = String(user?.username || '').trim();
 	const email = String(user?.email || '').trim();
+	// Guardian-managed athlete logins have no email: the code goes to the verified parent/guardian.
+	if (isGuardianManaged(user)) {
+		await sendAthleteGuardianEmail(String(user.managedBy.guardianEmail), 'AthlyraX: password reset code for an Athlete App login', [
+			`A password reset was requested for the AthlyraX Athlete App login "${username}" that you manage.`,
+			'',
+			`The reset code is: ${resetCode}`,
+			`It expires in ${AUTH_PASSWORD_RESET_TTL_MINUTES} minutes. Give it to the athlete only if they asked for it.`,
+			'',
+			'If nobody asked for this, ignore this email.',
+		]);
+		return { mode: 'guardian' };
+	}
 	const deliveryMode = AUTH_PASSWORD_RESET_DELIVERY === 'smtp' ? 'smtp' : 'console';
 
 	if (deliveryMode === 'smtp') {
@@ -4039,7 +4052,7 @@ app.post('/coach/swimmers/:swimmerId/athlete-link/correct', requireStrictAuth, r
 		const rows = (Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).filter((c) => normalizeTenantId(c?.tenantId) !== t.key);
 		user.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, status: 'revoked', source: 'link-correction', revokedAt: at, revokedBy: String(req.auth?.username || '') }];
 		user.athleteInviteManaged = true;
-		user.tokenValidAfter = getNowEpochSeconds() + 1;
+		user.tokenValidAfter = Math.max(getNowEpochSeconds() + 1, getTokenValidAfter(user) + 2); // also ends sessions issued just after a reset
 		try {
 			if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_LINK_CORRECTION_AUTH_PERSIST')) throw new Error('test: account save failed');
 			persistAuthUsers();
@@ -4463,6 +4476,101 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 		}
 	}
 	res.status(200).json({ ok: true, already: Boolean(out.already), ...(athleteInvitation ? { athleteInvitation, athleteSentTo } : {}) });
+});
+
+// ATHLYRAX_GUARDIAN_MANAGED_ACCOUNTS_V1: a verified parent/guardian sets up a login (no email) for an
+// under-18 athlete; recovery codes go to the guardian; the guardian can revoke access. See
+// athlete-guardian-managed.mjs and docs/athlete-guardian-managed-accounts-design.md.
+app.post('/athlete-invites/guardian-managed-account', requireLoginRateLimit, async (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
+	const t = parsed && parsed.kind === 'guardian' ? athleteTenantPaths(parsed.tenantKey) : null;
+	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
+	if (req.auth) { res.status(403).json({ error: 'Sign out first: the athlete\'s login is created separately from any account you use.' }); return; }
+	const username = String(req.body?.username || '').trim().toLowerCase();
+	const password = String(req.body?.password || '');
+	const fullName = String(req.body?.fullName || '').trim();
+	if (!AUTH_USERNAME_PATTERN.test(username)) { res.status(400).json({ error: 'Username must be 3-32 letters, numbers, dot, underscore or dash.' }); return; }
+	if (password.length < 10) { res.status(400).json({ error: 'Password must be at least 10 characters.' }); return; }
+	if (!fullName) { res.status(400).json({ error: 'Enter the athlete\'s full name.' }); return; }
+	if (authUsers.some((u) => String(u?.username || '').toLowerCase() === username)) { res.status(409).json({ error: 'That username is taken.' }); return; }
+	if (!guardianDeliveryMode()) { res.status(503).json({ error: 'Email is not available, so a login without an email address cannot be set up safely right now.' }); return; }
+	await reconcileAthleteLinks(t, req);
+	const pre = checkManagedAcceptance(readJsonFile(t.paths.dbPath) || {}, parsed, { username });
+	if (!pre.ok) { res.status(pre.status || 400).json({ error: pre.error }); return; }
+	if (pre.already) { res.status(200).json({ ok: true, already: true }); return; }
+	const newUser = managedUserRecord({ username, passwordHash: hashPassword(password), fullName, invite: pre.invite, tenantKey: t.key, clubName: clubDisplayName(t.key), billing: getDefaultBillingState() });
+	newUser.athleteTenantConnections = [{ tenantId: t.key, clubId: t.key, clubName: clubDisplayName(t.key) || 'Club', status: 'active', source: 'guardian-managed', connectedAt: new Date().toISOString() }];
+	if (authUsers.some((u) => String(u?.username || '').toLowerCase() === username)) { res.status(409).json({ error: 'That username was just taken. Choose another.' }); return; }
+	authUsers.push(newUser);
+	const drop = () => { const i = authUsers.indexOf(newUser); if (i >= 0) authUsers.splice(i, 1); };
+	let out = null;
+	try {
+		out = await mutateAthleteTenantDb(t.paths, (db) => {
+			const c = checkManagedAcceptance(db, parsed, { username });
+			if (!c.ok || c.already) return { ok: false, status: c.already ? 409 : c.status, error: c.already ? 'This invitation has already been used.' : c.error };
+			return { ok: true, invite: c.invite, db: applyAcceptance(db, c.invite, { username, email: '' }) };
+		});
+	} catch { out = null; }
+	if (!out?.ok) { drop(); res.status(out?.status || 503).json({ error: out?.error || 'The login could not be created safely.' }); return; }
+	try {
+		if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_AUTH_PERSIST')) throw new Error('test: account save failed');
+		persistAuthUsers();
+	} catch {
+		drop();
+		try { await mutateAthleteTenantDb(t.paths, (db) => revertAcceptance(db, out.invite, username, { reason: 'login account could not be saved' })); } catch {}
+		res.status(503).json({ error: 'The login could not be saved, so nothing was linked. Please try again.' });
+		return;
+	}
+	appendAuthAuditEvent({ action: 'athlete_guardian_managed_account_created', req, status: 'success', target: out.invite.swimmerId, details: { tenantId: t.key, inviteId: out.invite.id, username } });
+	sendAthleteGuardianEmail(out.invite.guardianEmail, 'AthlyraX: Athlete App login created', [
+		`You set up the AthlyraX Athlete App login "${username}" for ${fullName} at ${clubDisplayName(t.key) || 'the club'}.`,
+		'Password reset codes for this login will be sent to this email address.',
+		'You can remove the login\'s access at any time from the parent/guardian link the club sent you.',
+		'If you did not do this, contact the club straight away.',
+	]).catch(() => {});
+	res.status(201).json({ ok: true, username });
+});
+
+app.post('/athlete-invites/guardian-manage-code', requireLoginRateLimit, async (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
+	const t = parsed && parsed.kind === 'guardian' ? athleteTenantPaths(parsed.tenantKey) : null;
+	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
+	if (!guardianDeliveryMode()) { res.status(503).json({ error: 'Email verification is not available right now.' }); return; }
+	const out = await mutateAthleteTenantDb(t.paths, (db) => issueManageCode(db, parsed, { codeKey: ATHLETE_GUARDIAN_CODE_KEY })).catch(() => null);
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'A code could not be issued safely.' }); return; }
+	try {
+		await sendAthleteGuardianEmail(out.email, 'AthlyraX: code to manage Athlete App access', [
+			`Your code to manage the Athlete App login "${out.username}" at ${clubDisplayName(t.key) || 'the club'} is: ${out.code}`,
+			`It expires in ${GUARDIAN_CODE_TTL_MINUTES} minutes. If you did not ask for it, ignore this email.`,
+		]);
+	} catch { res.status(503).json({ error: 'The code email could not be sent. Try again in a minute.' }); return; }
+	appendAuthAuditEvent({ action: 'athlete_guardian_manage_code_sent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key } });
+	res.status(200).json({ ok: true, sentTo: maskEmail(out.email), username: out.username });
+});
+
+app.post('/athlete-invites/guardian-revoke', requireLoginRateLimit, async (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
+	const t = parsed && parsed.kind === 'guardian' ? athleteTenantPaths(parsed.tenantKey) : null;
+	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
+	const v = await mutateAthleteTenantDb(t.paths, (db) => verifyManageCode(db, parsed, String(req.body?.code || ''), { codeKey: ATHLETE_GUARDIAN_CODE_KEY })).catch(() => null);
+	if (!v?.ok) { res.status(v?.status || 503).json({ error: v?.error || 'Access could not be removed safely.' }); return; }
+	// Same order as the head coach's correction: revoke the login durably, then remove the link.
+	const user = findAthleteAccount(v.username);
+	if (user) {
+		const snapshot = { tokenValidAfter: user.tokenValidAfter, athleteTenantConnections: user.athleteTenantConnections };
+		const rows = (Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).filter((c) => normalizeTenantId(c?.tenantId) !== t.key);
+		user.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, status: 'revoked', source: 'guardian-revocation', revokedAt: new Date().toISOString(), revokedBy: 'parent/guardian' }];
+		user.tokenValidAfter = Math.max(getNowEpochSeconds() + 1, getTokenValidAfter(user) + 2); // also ends sessions issued just after a reset
+		try { persistAuthUsers(); } catch {
+			Object.assign(user, snapshot);
+			res.status(503).json({ error: 'Access could not be removed safely. Please try again.' });
+			return;
+		}
+	}
+	let out = null;
+	try { out = await mutateAthleteTenantDb(t.paths, (db) => unlinkAthleteAccount(db, v.invite.swimmerId, { actor: 'parent/guardian', reason: 'Revoked by parent/guardian' })); } catch { out = null; }
+	appendAuthAuditEvent({ action: 'athlete_guardian_revoked', req, status: out?.ok ? 'success' : 'error', target: v.invite.swimmerId, details: { tenantId: t.key, username: v.username, linkRemoved: Boolean(out?.ok) } });
+	res.status(200).json({ ok: true, username: v.username, linkRemoved: Boolean(out?.ok) });
 });
 
 // Athlete accepts: either while signed in to an existing swimmer account, or by creating one here.
