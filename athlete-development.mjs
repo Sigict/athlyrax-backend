@@ -44,3 +44,36 @@ export function normalizeGoal(raw = {}) {
   const category = GOAL_CATEGORIES.includes(raw.category) ? raw.category : 'Other';
   return { text: goalText, date, horizon, category, measure: text(raw.measure, 160), outcome: text(raw.outcome, 100), done: raw.done === true, source: 'athlete-entered' };
 }
+
+// Imported-record provenance: where a record came from (Athlete Master v31 backup or an AthlyraX backup),
+// its original id and source label. Kept on the record; never changes how the record is validated.
+export function normalizeOrigin(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const from = text(raw.from, 40);
+  if (!['athlete-master-v31', 'athlyrax-athlete-app-backup'].includes(from)) return null;
+  return { from, originalId: text(raw.originalId, 120), originalType: text(raw.originalType, 60), sourceLabel: text(raw.sourceLabel, 160), importedAt: text(raw.importedAt, 30) };
+}
+
+// Read-only legacy archive (owner decision 8 Nov 2026): historical Athlete Master records that do not
+// match an active AthlyraX record type (for example Max 75 or Single effort tests) are kept with their
+// original values. They are never an active test type and never used in any capability calculation.
+export function normalizeLegacy(raw = {}) {
+  const origin = normalizeOrigin(raw.origin);
+  if (!origin) fail('Legacy records must come from an imported backup.');
+  const original = raw.original && typeof raw.original === 'object' ? raw.original : null;
+  if (!original) fail('Legacy records keep the original record.');
+  const json = JSON.stringify(original);
+  if (json.length > 20000) fail('Legacy record is too large.');
+  return { originalType: text(raw.originalType, 60) || 'record', date: isDate(raw.date) ? raw.date : '', summary: text(raw.summary, 300), reason: text(raw.reason, 300), original: JSON.parse(json), origin, readOnly: true, usedInCapability: false, verification: 'athlete-entered-unverified' };
+}
+
+// The athlete's own profile details (Athlete Master v31 My Profile). Club identity (name, date of birth,
+// membership number) stays with the club and is shown read-only; these are the athlete's own entries.
+export const PROFILE_SEX = ['', 'Female', 'Male', 'Other'];
+export function normalizeProfile(raw = {}) {
+  const sex = text(raw.sex, 10);
+  if (!PROFILE_SEX.includes(sex)) fail('Unknown sex / gender marker.');
+  const dob = text(raw.dob, 10);
+  if (dob && !isDate(dob)) fail('Date of birth must be a valid date.');
+  return { preferredName: text(raw.preferredName, 120), dob, sex, mainEvent: text(raw.mainEvent, 80), clubText: text(raw.clubText, 120), note: text(raw.note, 1000), source: 'athlete-entered' };
+}

@@ -15,11 +15,11 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { normalizeTest, InvalidTest } from './athlete-tests-races.mjs';
 import { normalizeFixture, normalizeReflection, InvalidCompetitionRecord } from './athlete-competitions.mjs';
-import { normalizeDiary, normalizeGoal, normalizeWeekPlan, InvalidDevelopmentRecord } from './athlete-development.mjs';
+import { normalizeDiary, normalizeGoal, normalizeWeekPlan, normalizeLegacy, normalizeOrigin, normalizeProfile, InvalidDevelopmentRecord } from './athlete-development.mjs';
 
-export const PERSONAL_TRAINING_KINDS = Object.freeze(['plan', 'day', 'test', 'fixture', 'reflection', 'diary', 'goal', 'week']);
+export const PERSONAL_TRAINING_KINDS = Object.freeze(['plan', 'day', 'test', 'fixture', 'reflection', 'diary', 'goal', 'week', 'legacy', 'profile']);
 export const PERSONAL_TRAINING_LIMITS = Object.freeze({
-  plans: 3000, days: 5000, tests: 10000, fixtures: 1000, reflections: 2000, diary: 10000, goals: 150, weeks: 600, changesPerSync: 200,
+  plans: 3000, days: 5000, tests: 10000, fixtures: 1000, reflections: 2000, diary: 10000, goals: 150, weeks: 600, legacy: 5000, profile: 1, changesPerSync: 200,
   sessionsPerDay: 12, setsPerSession: 60, setsPerPlan: 60,
   rounds: 20, reps: 100, distance: 3000, splitsPerRep: 120, text: 3000, shortText: 160,
 });
@@ -139,12 +139,12 @@ export function normalizeDay(raw = {}) {
   };
 }
 
-const normalizers = { plan: (raw) => normalizePlan(raw), day: (raw) => normalizeDay(raw), test: (raw, previous, now) => normalizeTest(raw, previous, { now }), fixture: (raw) => normalizeFixture(raw), reflection: (raw) => normalizeReflection(raw), diary: (raw) => normalizeDiary(raw), goal: (raw) => normalizeGoal(raw), week: (raw) => normalizeWeekPlan(raw) };
-const COLLECTIONS = { plan: 'plans', day: 'days', test: 'tests', fixture: 'fixtures', reflection: 'reflections', diary: 'diary', goal: 'goals', week: 'weeks' };
+const normalizers = { plan: (raw) => normalizePlan(raw), day: (raw) => normalizeDay(raw), test: (raw, previous, now) => normalizeTest(raw, previous, { now }), fixture: (raw) => normalizeFixture(raw), reflection: (raw) => normalizeReflection(raw), diary: (raw) => normalizeDiary(raw), goal: (raw) => normalizeGoal(raw), week: (raw) => normalizeWeekPlan(raw), legacy: (raw) => normalizeLegacy(raw), profile: (raw) => normalizeProfile(raw) };
+const COLLECTIONS = { plan: 'plans', day: 'days', test: 'tests', fixture: 'fixtures', reflection: 'reflections', diary: 'diary', goal: 'goals', week: 'weeks', legacy: 'legacy', profile: 'profile' };
 const collection = (kind) => COLLECTIONS[kind];
 
 export function emptyPersonalTraining() {
-  return { version: 1, plans: {}, days: {}, tests: {}, fixtures: {}, reflections: {}, diary: {}, goals: {}, weeks: {}, updatedAt: '' };
+  return { version: 1, plans: {}, days: {}, tests: {}, fixtures: {}, reflections: {}, diary: {}, goals: {}, weeks: {}, legacy: {}, profile: {}, updatedAt: '' };
 }
 
 // Applies a batch of offline changes. Returns the next store (or null when nothing changed) and, per
@@ -164,14 +164,19 @@ export function applyPersonalTrainingChanges(store = emptyPersonalTraining(), ch
     const deleted = change.deleted === true;
     let data = null;
     if (!deleted) {
-      try { data = normalizers[kind](change.data || {}, current && !current.deleted ? current.data : null, now); }
+      try {
+        data = normalizers[kind](change.data || {}, current && !current.deleted ? current.data : null, now);
+        const origin = kind === 'legacy' ? null : normalizeOrigin(change.data?.origin);
+        if (origin) data.origin = origin;
+        else if (kind !== 'legacy' && current?.data?.origin) data.origin = current.data.origin;
+      }
       catch (error) {
         if (error instanceof InvalidRecord || error instanceof InvalidTest || error instanceof InvalidCompetitionRecord || error instanceof InvalidDevelopmentRecord) { results.push({ kind, id, status: 'invalid', error: error.message }); continue; }
         throw error;
       }
     }
     // Server-owned fields (the amendment trail) do not count when deciding whether a change repeats.
-    const comparable = (d) => (d && typeof d === 'object' ? { ...d, amendments: undefined } : d);
+    const comparable = (d) => (d && typeof d === 'object' ? { ...d, amendments: undefined, origin: undefined } : d);
     const same = current && current.deleted === deleted && JSON.stringify(comparable(current.data)) === JSON.stringify(comparable(kind === 'test' && data ? normalizers.test(change.data || {}, null, now) : data));
     if (same) { results.push({ kind, id, status: 'applied', rev: current.rev, unchanged: true }); continue; }
     if ((current ? current.rev : 0) !== baseRev) { results.push({ kind, id, status: 'conflict', server: current }); continue; }
@@ -197,6 +202,8 @@ export function listPersonalTraining(store = emptyPersonalTraining()) {
     diary: Object.values(store.diary || {}),
     goals: Object.values(store.goals || {}),
     weeks: Object.values(store.weeks || {}),
+    legacy: Object.values(store.legacy || {}),
+    profile: Object.values(store.profile || {}),
     updatedAt: store.updatedAt || '',
   };
 }

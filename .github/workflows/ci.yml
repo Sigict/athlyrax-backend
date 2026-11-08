@@ -79,5 +79,8 @@ jobs:
       - name: Athlete App S3/S4 (development diary, goals, weekly planner)
         run: node --test tests/athlete-development.test.mjs
 
+      - name: Athlete App S5a (Master v31 import, legacy archive, profile)
+        run: node --test tests/athlete-import.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
