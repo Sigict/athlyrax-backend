@@ -131,7 +131,43 @@ function canonicalSessionId(session = {}) {
   return text(session.id || session.sessionId || session.trainingSessionId || session.scheduleId || session.occurrenceId);
 }
 
-function safeSession(session = {}, linkedSets = []) {
+// ATHLYRAX_ATHLETE_OWN_CLUB_RESULTS: the athlete sees the club's recorded results for THEIR OWN swimmer
+// record only (times, splits, stroke counts per repetition) and their own lane and start offset.
+// Other swimmers' results and coach-only fields are never included. Read-only.
+const RESULT_TEXT = ['overallTime', 'time', 'overallStrokeCount', 'strokeCount', 'strokeCycles', 'underwater', 'underwaterDistance', 'breakout', 'rpe', 'heartRate'];
+function ownRepResult(rep = {}, index = 0) {
+  if (!rep || typeof rep !== 'object') return null;
+  const out = { rep: Number.isInteger(Number(rep.rep)) && Number(rep.rep) > 0 ? Number(rep.rep) : index + 1 };
+  for (const k of RESULT_TEXT) if (text(rep[k])) out[k] = text(rep[k]);
+  const splits = asArray(rep.splits).map((sp) => ({ time: text(sp?.time), strokeCount: text(sp?.strokeCount), distance: sp?.distance ?? null })).filter((sp) => sp.time || sp.strokeCount);
+  if (splits.length) out.splits = splits;
+  return Object.keys(out).length > 1 ? out : null;
+}
+export function ownSetResult(set = {}, swimmerId = '') {
+  const id = text(swimmerId);
+  const all = set?.resultsBySwimmer && typeof set.resultsBySwimmer === 'object' ? set.resultsBySwimmer : null;
+  const mine = id && all && Object.prototype.hasOwnProperty.call(all, id) ? all[id] : null;
+  if (!mine || typeof mine !== 'object') return null;
+  const reps = asArray(mine.reps).map(ownRepResult).filter(Boolean);
+  const summary = {};
+  for (const k of ['overallTime', 'overallStrokeCount']) if (text(mine[k])) summary[k] = text(mine[k]);
+  if (!reps.length && !Object.keys(summary).length) return null;
+  return { ...summary, reps, source: text(mine.source), updatedAt: text(mine.updatedAt), label: 'Recorded by the club (read-only)' };
+}
+export function ownLane(session = {}, swimmerId = '') {
+  const id = text(swimmerId);
+  const lanes = asArray(session?.poolsideLanePlan?.lanes);
+  for (const lane of lanes) {
+    const position = asArray(lane?.swimmerIds).map(text).indexOf(id);
+    if (id && position >= 0) {
+      const stagger = Number.isFinite(Number(lane.staggerSeconds)) ? Number(lane.staggerSeconds) : null;
+      return { lane: text(lane.lane), position: position + 1, swimmersInLane: asArray(lane.swimmerIds).length, sendoffSeconds: lane.sendoffSeconds ?? null, staggerSeconds: stagger, startOffsetSeconds: stagger === null ? null : stagger * position };
+    }
+  }
+  return null;
+}
+
+function safeSession(session = {}, linkedSets = [], ownSwimmerId = '') {
   const sessionId = canonicalSessionId(session);
   const nestedSets = asArray(session.sets || session.sessionSets);
   const sets = nestedSets.length ? nestedSets : linkedSets;
@@ -156,7 +192,8 @@ function safeSession(session = {}, linkedSets = []) {
     secondaryFocus: text(session.secondaryFocus),
     volume: session.totalVolume ?? session.volume ?? null,
     volumeUnit: text(session.volumeUnit || session.unit || 'm'),
-    sets: sets.map(safeSet).filter(Boolean),
+    sets: sets.map((set) => { const safe = safeSet(set); if (!safe) return null; const mine = ownSwimmerId ? ownSetResult(set, ownSwimmerId) : null; return mine ? { ...safe, myResult: mine } : safe; }).filter(Boolean),
+    myLane: ownSwimmerId ? ownLane(session, ownSwimmerId) : null,
     wearableSync: session.wearableSync && typeof session.wearableSync === 'object' ? session.wearableSync : {},
     executionSummary: session.executionSummary && typeof session.executionSummary === 'object' ? session.executionSummary : null,
   };
@@ -316,7 +353,7 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
         (scheduleId && parentScheduleId === scheduleId)
       );
     });
-    const safe = safeSession(row, linkedSets);
+    const safe = safeSession(row, linkedSets, text(athlete.id));
     // Club sessions read from this club's data belong to this club's context in the Athlete App.
     if (safe.ownerType === 'club' && !safe.ownerClubId && contextConnection?.clubId) safe.ownerClubId = text(contextConnection.clubId);
     return safe;
