@@ -255,4 +255,3 @@ test('lane plan requires an explicit list; [] clears it', async () => {
   assert.equal(cleared.ok, true);
   assert.deepEqual(cleared.db.trainingSessions[0].poolsideLanePlan.lanes, []);
 });
-
