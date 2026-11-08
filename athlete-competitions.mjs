@@ -1,10 +1,11 @@
 // The athlete's own fixtures and competition reflections (Athlete Master v31 Fixtures page).
 // Personal planning only: kept in the athlete's own store, never written to a club, never a result.
 // Entry and target times are plans, not verified performances. Field set and limits follow Master v31.
+import { timeSeconds } from './capability-engine/src/utils/repResultCells.js';
+
 const text = (value, max = 160) => String(value ?? '').trim().slice(0, max);
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const isDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`));
-const clockSeconds = (value) => { const m = /^(?:(\d{1,2}):)?(\d{1,2}(?:\.\d{1,2})?)$/.exec(String(value || '').trim()); return m ? Number(m[1] || 0) * 60 + Number(m[2]) : NaN; };
 export const FIXTURE_STATUSES = ['Planning', 'Intending to enter', 'Entry submitted', 'Confirmed', 'Withdrawn', 'Completed'];
 const COURSES = ['', 'SCM', 'LCM', 'SCY'];
 const STROKES = ['free', 'back', 'breast', 'fly', 'im'];
@@ -37,7 +38,7 @@ export function normalizeFixture(raw = {}) {
       if (!DISTANCES.includes(distance)) fail(`${where}: distance must be 25–1500.`);
       const stroke = text(e?.stroke, 10).toLowerCase();
       if (!STROKES.includes(stroke)) fail(`${where}: choose a stroke.`);
-      for (const key of ['entryTime', 'targetTime']) if (text(e?.[key], 12) && !(clockSeconds(e[key]) > 0)) fail(`${where}: times are positive m:ss.xx or seconds.`);
+      for (const key of ['entryTime', 'targetTime']) if (text(e?.[key], 12) && !(timeSeconds(e[key]) > 0)) fail(`${where}: times are positive m:ss.xx or seconds.`);
       return { id: text(e?.id, 96) || `event-${i + 1}`, distance, stroke, round: text(e?.round, 40), entryTime: text(e?.entryTime, 12), targetTime: text(e?.targetTime, 12), note: text(e?.note, 500) };
     }),
     source: 'athlete-entered', verification: 'athlete-entered-unverified',
