@@ -73,6 +73,9 @@ jobs:
       - name: Athlete App phase 3A (tests and races, read-only club results)
         run: node --test tests/athlete-tests-races.test.mjs
 
+      - name: Testing workflow (poolside test-set results become linked test records)
+        run: node --test tests/poolside-test-set-link.test.mjs
+
       - name: Athlete App S2 (fixtures, competition reflections, club fixtures read-only)
         run: node --test tests/athlete-competitions.test.mjs
 
