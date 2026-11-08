@@ -1,0 +1,2480 @@
+{
+ "generatedFrom": {
+  "backend": "athlyrax-backend (index.js and *.mjs modules)",
+  "website": "athlyrax-v6-private (src, public)"
+ },
+ "note": "Generated from code by scripts/generate-owner-system-map.mjs. Storage is JSON per club; relationships marked \"inferred\" are naming conventions, not database constraints.",
+ "storage": [
+  {
+   "name": "tenants/<club>/db.json",
+   "description": "All club records (swimmers, squads, sessions, sets, results, tests, competitions, invitations ...). Written through serialised atomic writes with snapshots."
+  },
+  {
+   "name": "auth-users.json",
+   "description": "Login accounts: role, club (tenantId), password hash, billing state, athlete club connections. Never sent to browsers."
+  },
+  {
+   "name": "CPD store (Education)",
+   "description": "Course purchases, entitlements, progress, completions and certificates (cpd-module02.mjs)."
+  },
+  {
+   "name": "Athlete personal store",
+   "description": "Athlete-owned records (plans, days, tests, fixtures, diary, goals, profile, legacy) in the athlete's own space (athlete-personal-training.mjs)."
+  }
+ ],
+ "collections": [
+  {
+   "name": "athleteAccountInvites",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-account-invites.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "athlete-account-invites.mjs",
+    "index.js"
+   ],
+   "websiteFiles": []
+  },
+  {
+   "name": "attendance",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "coach-poolside-mutations.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/attendanceCanonicalCleanup.js",
+    "src/utils/capabilityGraphEvidenceContext.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/demoAttendanceProfiles.js",
+    "src/utils/demoRacePaceResults.js",
+    "src/utils/ispCanonicalSummary.js",
+    "src/utils/plannerSessionRoster.js",
+    "src/utils/planningExactSessionContext.js",
+    "src/utils/reportCanonicalScope.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/swimmerTrainingDeliveryRatios.js",
+    "src/utils/swimmersIspController.js",
+    "src/utils/swimmersIspEvidence.js",
+    "src/utils/swimmersSectionStateData.js",
+    "src/utils/systemAttendancePersistence.js",
+    "src/utils/trainingCycleReportFromEvidence.js",
+    "src/utils/trainingEvidenceReconciliation.js",
+    "src/utils/trainingStatsSectionData.js",
+    "src/utils/validationEvidenceWindowData.js",
+    "src/utils/validationThreeLayerReportData.js"
+   ]
+  },
+  {
+   "name": "auditLog",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/storage/DocumentsSection.jsx"
+   ]
+  },
+  {
+   "name": "changeLog",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx"
+   ]
+  },
+  {
+   "name": "coaches",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/operations/SnapshotBulkUploadSection.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/CompetitionCoverageRuntimeController.jsx",
+    "src/components/planning/PlannerDayPopupCoachUi.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/components/system/ImportsSection.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerSessionPrint.js",
+    "src/utils/planningExactSessionContext.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/timetableMutations.js",
+    "src/utils/trainingCycleReportFromEvidence.js",
+    "public/stopwatch/index.html"
+   ]
+  },
+  {
+   "name": "competitions",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/analysis/TrainingStatsWeekBreakdownCard.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/shared/AccountTrainingEvidenceModelPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/utils/ispCanonicalRadars.js",
+    "src/utils/ispCanonicalSummary.js",
+    "src/utils/plannerReportCompetition.js",
+    "src/utils/trainingStatsSectionData.js",
+    "src/utils/validationThreeLayerReportData.js",
+    "src/utils/validationWeeklyBreakdownData.js",
+    "src/utils/weeklyPopup.js",
+    "public/athlete-app/app.js",
+    "public/athlete-app/shell.js"
+   ]
+  },
+  {
+   "name": "conflictResolutions",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ]
+  },
+  {
+   "name": "documents",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/storage/DocumentsSection.jsx",
+    "src/utils/dashboardReadableData.js"
+   ]
+  },
+  {
+   "name": "fixtures",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-competitions.mjs",
+    "coach-poolside-mutations.mjs",
+    "targeted-fixture-save.mjs"
+   ],
+   "writtenIn": [
+    "coach-poolside-mutations.mjs",
+    "targeted-fixture-save.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/fixtures/CompetitionEntryTimeRuntimeController.jsx",
+    "src/components/fixtures/FixturesSection.jsx",
+    "src/components/operations/AthleteAgreementsSection.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/SnapshotBulkUploadSection.jsx",
+    "src/components/planning/CompetitionCoverageRuntimeController.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/section/renderAdvancedSections.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalSwimmerEvidence.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/competitionDocumentImport.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/demoClubLevelTimes.js",
+    "src/utils/demoRaceSplitEvidence.js",
+    "src/utils/fixtureEditorPersistence.js",
+    "src/utils/fixtureResultRoundTrip.js",
+    "src/utils/longitudinalCompetitionHistory.js",
+    "src/utils/plannerCompetitionRefresh.js",
+    "src/utils/plannerReportCompetition.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/scheduledSessionsPrint.js"
+   ]
+  },
+  {
+   "name": "groups",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/components/validation/PersonalBestsPanel.jsx",
+    "src/utils/repResultCells.js",
+    "src/utils/testGroupCsv.js",
+    "public/athlete-app/competitions-model.js",
+    "public/athlete-app/fixtures-ui.js",
+    "public/stopwatch/club-link.js",
+    "public/stopwatch/index.html",
+    "public/video/index.html"
+   ]
+  },
+  {
+   "name": "mesoCycles",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ]
+  },
+  {
+   "name": "microCycles",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ]
+  },
+  {
+   "name": "notifications",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ]
+  },
+  {
+   "name": "schedule",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-home-projection.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs"
+   ],
+   "writtenIn": [
+    "coach-poolside-mutations.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/planning/TrainingPlannerSection.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/planning-core/generationCore.js",
+    "src/planning-core/importCore.js",
+    "src/planning-core/planningCore.js",
+    "src/utils/canonicalScheduleRows.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/cycleTrainingStart.js",
+    "src/utils/dbRevisionFetchGuard.js",
+    "src/utils/groupTestResultsMutation.js",
+    "src/utils/ispPlannerSource.js",
+    "src/utils/plannerAppMutations.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/plannerSessionRoster.js",
+    "src/utils/planningExactSessionContext.js",
+    "src/utils/scheduleAuthoritativeDelete.js",
+    "src/utils/scheduleMutations.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/sessionFileImport.js",
+    "src/utils/timetableMutations.js",
+    "public/athlete-app/existing-data-bridge.js"
+   ]
+  },
+  {
+   "name": "seasonPlans",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSection.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/scheduleGeneration.js"
+   ]
+  },
+  {
+   "name": "seasons",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ]
+  },
+  {
+   "name": "sessionTypes",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/scheduleGeneration.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/trainingCycleReportFromEvidence.js"
+   ]
+  },
+  {
+   "name": "squads",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/analysis/TrainingStatsTargetsCard.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/operations/AllGroupTestResultsModal.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/operations/SnapshotBulkUploadSection.jsx",
+    "src/components/operations/TestsSection.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablePrintRuntimeController.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/components/system/ImportsSection.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/fixtures.js",
+    "src/utils/groupTestResultsMutation.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/plannerSessionPrint.js"
+   ]
+  },
+  {
+   "name": "swimmers",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-account-invites.mjs",
+    "athlete-home-projection.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "coaching-billing.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "athlete-account-invites.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AllGroupTestResultsModal.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/operations/SnapshotBulkUploadSection.jsx",
+    "src/components/operations/TestsSection.jsx",
+    "src/components/planning/PlannerDayPopup.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/section/renderAdvancedSections.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/components/section/renderValidationAdvancedSections.jsx",
+    "src/components/swimmers/BulkAthleteInvitePanel.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/athlyraxCapabilityEngine.js",
+    "src/utils/canonicalGroupIspRadars.js",
+    "src/utils/canonicalSwimmerEvidence.js",
+    "src/utils/capabilityEvidenceReading.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/competitionDocumentImport.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/demoClubLevelTimes.js",
+    "src/utils/demoRacePaceResults.js",
+    "src/utils/demoStrokeCountUpgrade.js"
+   ]
+  },
+  {
+   "name": "templateSets",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/planning/TemplatesSection.jsx"
+   ]
+  },
+  {
+   "name": "templateTests",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/operations/TestsSection.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/utils/groupTestResultsMutation.js"
+   ]
+  },
+  {
+   "name": "tests",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AllGroupTestResultsModal.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/operations/TestsSection.jsx",
+    "src/components/planning/PlannerDayPopup.jsx",
+    "src/components/planning/PlannerSessionResultsPopup.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/shared/AccountTrainingEvidenceModelPanel.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/pages/FreeSnapshotPage.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalGroupIspRadars.js",
+    "src/utils/canonicalRadarAxisTable.js",
+    "src/utils/canonicalSwimmerEvidence.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/demoClubLevelTimes.js",
+    "src/utils/demoStrokeCountUpgrade.js",
+    "src/utils/demoTestBatterySets.js",
+    "src/utils/demoTestSplitEvidence.js",
+    "src/utils/groupTestResultsMutation.js",
+    "src/utils/groupTestResultsRoundTrip.js",
+    "src/utils/ispCanonicalRadars.js"
+   ]
+  },
+  {
+   "name": "timetables",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/timetableMutations.js"
+   ]
+  },
+  {
+   "name": "timetableSlots",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/scheduleDedupe.js",
+    "src/utils/scheduleGeneration.js",
+    "src/utils/timetableMutations.js"
+   ]
+  },
+  {
+   "name": "trainingPlannerWeeks",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSection.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/swimmersIspEvidence.js",
+    "src/utils/trainingCycleReportFromEvidence.js",
+    "src/utils/trainingPlannerSectionStateData.js",
+    "src/utils/trainingStatsSectionData.js",
+    "src/utils/validationTargetCycleData.js",
+    "src/utils/validationWeeklyBreakdownData.js"
+   ]
+  },
+  {
+   "name": "trainingSessions",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "coach-poolside-mutations.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/planning-core/generationCore.js",
+    "src/planning-core/importCore.js",
+    "src/planning-core/planningCore.js",
+    "src/utils/athlyraxCapabilityEngine.js",
+    "src/utils/canonicalTrainingSessionLinks.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/cycleTrainingStart.js",
+    "src/utils/ispPlannerSource.js",
+    "src/utils/plannerAppMutations.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportCanonicalScope.js",
+    "src/utils/scheduleMutations.js",
+    "src/utils/scheduledSessionDetailsMutation.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/sessionFileImport.js",
+    "src/utils/systemAttendancePersistence.js",
+    "src/utils/validationThreeLayerReportData.js",
+    "public/swimmer-signin.html"
+   ]
+  },
+  {
+   "name": "trainingSessionSets",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "coach-poolside-mutations.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/planning/PlannerDayPopupCoachUi.jsx",
+    "src/components/planning/PlannerSessionResultsPopup.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/system/OverviewSection.jsx",
+    "src/planning-core/importCore.js",
+    "src/planning-core/planningCore.js",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/demoClubLevelTimes.js",
+    "src/utils/demoEnergyMix.js",
+    "src/utils/demoRacePaceResults.js",
+    "src/utils/demoSetSendOffs.js",
+    "src/utils/demoStrokeCountUpgrade.js",
+    "src/utils/demoTestBatterySets.js",
+    "src/utils/groupTestResultsMutation.js",
+    "src/utils/ispPlannerSource.js",
+    "src/utils/plannerAppMutations.js",
+    "src/utils/plannerCanonicalDayVolumes.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportCanonicalScope.js"
+   ]
+  },
+  {
+   "name": "trainingSetBlocks",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "index.js"
+   ],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerAppMutations.js",
+    "src/utils/trainingSessionSetCanonicalCleanup.js"
+   ]
+  },
+  {
+   "name": "venues",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/fixtures/FixturesSection.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/PlannerDayPopup.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/trainingCycleReportFromEvidence.js",
+    "src/utils/venueRegistry.js"
+   ]
+  }
+ ],
+ "relationships": [
+  {
+   "field": "swimmerId",
+   "references": "swimmers",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-account-invites.mjs",
+    "athlete-club-capability.mjs",
+    "athlete-competitions.mjs",
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-tests-races.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "group-test-results.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "squadId",
+   "references": "squads",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-club-capability.mjs",
+    "athlete-home-projection.mjs",
+    "athlete-tenant-registry.mjs",
+    "coach-poolside-projection.mjs",
+    "group-test-results.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "currentSquadId",
+   "references": "squads",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-club-capability.mjs",
+    "athlete-home-projection.mjs",
+    "group-test-results.mjs"
+   ]
+  },
+  {
+   "field": "scheduleId",
+   "references": "schedule",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-home-projection.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "group-test-results.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "trainingSessionId",
+   "references": "trainingSessions",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "sessionId",
+   "references": "trainingSessions",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "cpd-module02.mjs",
+    "index.js",
+    "results-inbox.mjs",
+    "terra-wearable-provider.mjs"
+   ]
+  },
+  {
+   "field": "setId",
+   "references": "trainingSessionSets",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-home-projection.mjs",
+    "athlete-tenant-registry.mjs",
+    "athlete-wearable-sync.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js",
+    "results-inbox.mjs"
+   ]
+  },
+  {
+   "field": "fixtureId",
+   "references": "fixtures",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-competitions.mjs",
+    "athlete-tests-races.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "index.js",
+    "targeted-fixture-save.mjs"
+   ]
+  },
+  {
+   "field": "inviteId",
+   "references": "athleteAccountInvites",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-account-invites.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "coachId",
+   "references": "coaches",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "coach-observations.mjs",
+    "coach-poolside-projection.mjs"
+   ]
+  },
+  {
+   "field": "tenantId",
+   "references": "tenant (club)",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-club-capability.mjs",
+    "athlete-home-projection.mjs",
+    "athlete-session-write.mjs",
+    "athlete-tenant-registry.mjs",
+    "athlete-tests-races.mjs",
+    "index.js",
+    "operational-pilot-endpoints.mjs",
+    "results-inbox.mjs",
+    "terra-wearable-provider.mjs"
+   ]
+  },
+  {
+   "field": "swimmerAccountUsername",
+   "references": "auth-users.json username",
+   "kind": "enforced in code (unique link, checked on invitation acceptance and every athlete request)",
+   "files": [
+    "athlete-account-invites.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "tenantId",
+   "references": "club storage folder tenants/<club>",
+   "kind": "enforced in code (every request is scoped to the signed-in account's club)",
+   "files": [
+    "index.js"
+   ]
+  }
+ ],
+ "routes": [
+  {
+   "method": "POST",
+   "path": "/athlete-invites/accept",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4521,
+   "area": "Athlete App invitations",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/athlete-invites/guardian-code",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4476,
+   "area": "Athlete App invitations",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/athlete-invites/guardian-consent",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4502,
+   "area": "Athlete App invitations",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/athlete-invites/preview",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4465,
+   "area": "Athlete App invitations",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/audit/events",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 5737,
+   "area": "Accounts & login",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/config",
+   "guards": [],
+   "file": "index.js",
+   "line": 4630,
+   "area": "Accounts & login",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/guard",
+   "guards": [],
+   "file": "index.js",
+   "line": 5284,
+   "area": "Accounts & login",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Athlete App",
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/head-coach/handover",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6185,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRateLimit)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/auth/invites",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5884,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/auth/invites",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5767,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/login",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4930,
+   "area": "Accounts & login",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)",
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/logout",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5699,
+   "area": "Accounts & login",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App",
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/me",
+   "guards": [],
+   "file": "index.js",
+   "line": 5256,
+   "area": "Accounts & login",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Coaching Software",
+    "Public website",
+    "Stopwatch"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/onboarding/complete",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5636,
+   "area": "Accounts & login",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/password-reset/confirm",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5114,
+   "area": "Accounts & login",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/password-reset/request",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5051,
+   "area": "Accounts & login",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/popup-exchange",
+   "guards": [],
+   "file": "index.js",
+   "line": 5211,
+   "area": "Accounts & login",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/popup-ticket",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5190,
+   "area": "Accounts & login",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/auth/presence/ping",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5751,
+   "area": "Accounts & login",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/presence/summary",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 5761,
+   "area": "Accounts & login",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/register",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4644,
+   "area": "Accounts & login",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/users",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5935,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/users",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5946,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "DELETE",
+   "path": "/auth/users/:username",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6297,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/auth/users/:username/approval",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6249,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/auth/users/:username/password",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6053,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/auth/users/:username/role",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6102,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/billing/catalog",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 5365,
+   "area": "Billing (Stripe)",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/billing/catalog",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 5377,
+   "area": "Billing (Stripe)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/billing/checkout-session",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5489,
+   "area": "Billing (Stripe)",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/billing/config",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5348,
+   "area": "Billing (Stripe)",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/billing/portal-session",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5602,
+   "area": "Billing (Stripe)",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/billing/subscription",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5472,
+   "area": "Billing (Stripe)",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/billing/webhook",
+   "guards": [],
+   "file": "index.js",
+   "line": 333,
+   "area": "Billing (Stripe)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/athlete-invites/:inviteId/revoke",
+   "guards": [
+    "requireStrictAuth",
+    "requireAthleteInviteManager"
+   ],
+   "file": "index.js",
+   "line": 4328,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireAthleteInviteManager)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/coach/athlete-session-proposals",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "index.js",
+   "line": 8383,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/coach/athlete-session-proposals/:sessionId/review",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "index.js",
+   "line": 8397,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/observations",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 4174,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/coach/poolside",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 8522,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coach Pool Console / Assistant",
+    "Coaching Software",
+    "Stopwatch"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/competitions/:fixtureId/events/:eventId/evidence",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8607,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/attendance",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8567,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/lanes",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 4193,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/sets/:setId",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8597,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/sets/:setId/executions",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8587,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/sets/:setId/results",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8576,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/swimmers/:swimmerId/observations",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 4182,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/coach/swimmer-links",
+   "guards": [
+    "requireStrictAuth",
+    "requireCoachLinkManagerRole"
+   ],
+   "file": "index.js",
+   "line": 7825,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireCoachLinkManagerRole)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/coach/swimmer-links/:requestId/accept",
+   "guards": [
+    "requireStrictAuth",
+    "requireCoachLinkDecisionRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 7850,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/swimmer-links/:requestId/reject",
+   "guards": [
+    "requireStrictAuth",
+    "requireCoachLinkDecisionRole"
+   ],
+   "file": "index.js",
+   "line": 8001,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/coach/swimmers/:swimmerId/athlete-invites",
+   "guards": [
+    "requireStrictAuth",
+    "requireAthleteInviteManager"
+   ],
+   "file": "index.js",
+   "line": 4288,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireAthleteInviteManager)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/swimmers/:swimmerId/athlete-invites",
+   "guards": [
+    "requireStrictAuth",
+    "requireAthleteInviteManager",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4305,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireAthleteInviteManager, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/swimmers/:swimmerId/athlete-link/correct",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4339,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/tests/group-results",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8808,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/content/capability/score",
+   "guards": [
+    "requireAuth"
+   ],
+   "file": "index.js",
+   "line": 6493,
+   "area": "content",
+   "permission": "requireAuth",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/content/placeholders",
+   "guards": [],
+   "file": "index.js",
+   "line": 6400,
+   "area": "content",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/admin/revoke",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module02.mjs",
+   "line": 686,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/admin/sales",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module02.mjs",
+   "line": 624,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/cpd/module-02/admin/video/:lesson",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module02.mjs",
+   "line": 664,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/admin/videos",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module02.mjs",
+   "line": 583,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/assessment",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 484,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/certificate",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 514,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/checkout",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 332,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/claim",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 381,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/lesson-complete",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 470,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/logout",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 302,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/questions",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 459,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/recover",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 397,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/redeem",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 418,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/status",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 308,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/verify/:id",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 524,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/video/:lesson",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 433,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/db",
+   "guards": [
+    "requireAuth"
+   ],
+   "file": "index.js",
+   "line": 8839,
+   "area": "Club data (whole-club load/save)",
+   "permission": "requireAuth",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/db",
+   "guards": [
+    "requireAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 9389,
+   "area": "Club data (whole-club load/save)",
+   "permission": "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/db/ownership-backfill",
+   "guards": [
+    "requireAuth",
+    "requireAdminRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 9002,
+   "area": "Club data (whole-club load/save)",
+   "permission": "Signed in + role check (requireAuth, requireAdminRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/db/ownership-summary",
+   "guards": [
+    "requireAuth"
+   ],
+   "file": "index.js",
+   "line": 8972,
+   "area": "Club data (whole-club load/save)",
+   "permission": "requireAuth",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/db/schedule-delete",
+   "guards": [
+    "requireAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 9075,
+   "area": "Club data (whole-club load/save)",
+   "permission": "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/entitlements/stopwatch",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5596,
+   "area": "entitlements",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Stopwatch"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/feedback",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 8670,
+   "area": "feedback",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/feedback",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 8687,
+   "area": "feedback",
+   "permission": "Signed in + role check (requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "PATCH",
+   "path": "/feedback/:id/decision",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 8730,
+   "area": "feedback",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/fixtures/:fixtureReference",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8778,
+   "area": "fixtures",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/pilot/me",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "operational-pilot-endpoints.mjs",
+   "line": 53,
+   "area": "pilot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/pilot/owner",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "operational-pilot-endpoints.mjs",
+   "line": 54,
+   "area": "pilot",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/pilot/respond",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "operational-pilot-endpoints.mjs",
+   "line": 55,
+   "area": "pilot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/results-inbox",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "results-inbox.mjs",
+   "line": 132,
+   "area": "results-inbox",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/results-inbox",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "results-inbox.mjs",
+   "line": 102,
+   "area": "results-inbox",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/results-inbox/:id",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "results-inbox.mjs",
+   "line": 143,
+   "area": "results-inbox",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/results-inbox/:id/status",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "results-inbox.mjs",
+   "line": 158,
+   "area": "results-inbox",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6761,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account/auth",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6508,
+   "area": "snapshot",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/snapshot/account/history",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6814,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/snapshot/account/history/:submissionId",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6837,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account/password-reset/confirm",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6661,
+   "area": "snapshot",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account/password-reset/request",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6612,
+   "area": "snapshot",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/snapshot/account/settings",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6872,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account/settings",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6880,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/instant",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6749,
+   "area": "snapshot",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/swimmer/athlete-home",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8236,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/athlete-sessions",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8303,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/athlete-sessions/:sessionId/wearable-sync",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8458,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/capability/apply-event",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7350,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/capability/compute",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7319,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/coach/disconnect",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8057,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/coach/request",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7703,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/swimmer/personal-training",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 4396,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/personal-training/sync",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 4402,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/profile/sync",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7463,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/profile/targets",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7381,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/swimmer/progress",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 4436,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/swimmer/test-catalogue",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 4432,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/wearable-connections/terra/widget",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8436,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/webhooks/terra",
+   "guards": [],
+   "file": "index.js",
+   "line": 441,
+   "area": "External webhooks",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/website-analytics/collect",
+   "guards": [],
+   "file": "website-analytics.mjs",
+   "line": 94,
+   "area": "Website analytics",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/website-analytics/owner-summary",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "website-analytics.mjs",
+   "line": 118,
+   "area": "Website analytics",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  }
+ ],
+ "integrations": [
+  {
+   "name": "Stripe (payments, subscriptions, CPD purchases)",
+   "env": [
+    "CPD_STRIPE_EXPECTED_ACCOUNT",
+    "CPD_STRIPE_SECRET_KEY",
+    "STRIPE_PRICE_ANNUAL",
+    "STRIPE_PRICE_MONTHLY",
+    "STRIPE_PRICE_TIER_1",
+    "STRIPE_PRICE_TIER_2",
+    "STRIPE_PRICE_TIER_3",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET"
+   ]
+  },
+  {
+   "name": "Email (SMTP / Brevo transactional)",
+   "env": [
+    "ATHLYRAX_DEV_EMAIL_OUTBOX",
+    "AUTH_SMTP_FROM",
+    "AUTH_SMTP_HOST",
+    "AUTH_SMTP_PASS",
+    "AUTH_SMTP_PORT",
+    "AUTH_SMTP_SECURE",
+    "AUTH_SMTP_USER",
+    "BILLING_EMAIL_NOTIFICATIONS_ENABLED",
+    "FEEDBACK_NOTIFICATION_EMAIL"
+   ]
+  },
+  {
+   "name": "Wearables (Terra)",
+   "env": [
+    "TERRA_API_KEY",
+    "TERRA_AUTH_FAILURE_URL",
+    "TERRA_AUTH_SUCCESS_URL",
+    "TERRA_DEV_ID",
+    "TERRA_SIGNING_SECRET"
+   ]
+  },
+  {
+   "name": "Storage and backups (Render disk)",
+   "env": [
+    "ATHLYRAX_SAFETY_BACKUP_ROOT",
+    "ATHLYRAX_STORAGE_ROOT",
+    "AUTH_AUDIT_BACKUP_INTERVAL_MS",
+    "AUTH_AUDIT_MAX_BACKUP_FILES",
+    "AUTH_USERS_BACKUP_PATH",
+    "BILLING_CATALOG_MAX_BACKUP_FILES",
+    "SWIMMER_SYNC_MAX_SNAPSHOTS"
+   ]
+  },
+  {
+   "name": "Authentication",
+   "env": [
+    "AUTH_ADMIN_RATE_MAX_ATTEMPTS",
+    "AUTH_ADMIN_RATE_WINDOW_MS",
+    "AUTH_ALLOW_BEARER_COMPAT",
+    "AUTH_ALLOW_COACH_INVITES",
+    "AUTH_ALLOW_COACH_SIGNUP",
+    "AUTH_AUDIT_BACKUP_INTERVAL_MS",
+    "AUTH_AUDIT_FETCH_MAX_ROWS",
+    "AUTH_AUDIT_MAX_ARCHIVE_FILES",
+    "AUTH_AUDIT_MAX_BACKUP_FILES",
+    "AUTH_AUDIT_MAX_BYTES",
+    "AUTH_AUTO_HEAL_SWIMMER_BINDINGS",
+    "AUTH_CSRF_COOKIE_NAME",
+    "AUTH_ENABLE_DEMO_SEED_USERS",
+    "AUTH_ENFORCE_CANONICAL_STORE",
+    "AUTH_INVITE_TTL_HOURS",
+    "AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS",
+    "AUTH_LOGIN_RATE_MAX_ATTEMPTS",
+    "AUTH_LOGIN_RATE_WINDOW_MS",
+    "AUTH_PASSWORD_RESET_DELIVERY",
+    "AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE",
+    "AUTH_PASSWORD_RESET_TTL_MINUTES",
+    "AUTH_PRESENCE_WINDOW_MS",
+    "AUTH_PREVENT_USER_SHRINK",
+    "AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME",
+    "AUTH_REQUIRED",
+    "AUTH_SECRET",
+    "AUTH_SESSION_COOKIE_NAME",
+    "AUTH_TOKEN_TTL_SECONDS",
+    "AUTH_USERS_BACKUP_PATH",
+    "AUTH_USERS_JSON",
+    "AUTH_USERS_PATH"
+   ]
+  }
+ ],
+ "roles": [
+  "software-owner (primary owner)",
+  "head-coach",
+  "coach",
+  "assistant-coach",
+  "viewer",
+  "swimmer (athlete)"
+ ]
+}
