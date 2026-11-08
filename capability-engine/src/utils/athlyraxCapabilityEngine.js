@@ -423,6 +423,14 @@ export function eliteStrokeIndex({ distance, stroke, sex }) {
 // 0.4 % of performance (the smallest worthwhile change in competitive swimming
 // performance, Pyne et al. 2004) moves the score 10 points; bounded 0–100.
 export const ADAPTABILITY_SMALLEST_WORTHWHILE_CHANGE_PCT = 0.4;
+export const EFFICIENCY_MIN_INDEPENDENT_SWIMS = 2;
+export function efficiencyEvidenceReasons(status) {
+  if (!status) return [];
+  const out = [];
+  if (status.validSwims < status.minimum) out.push(`Efficiency needs at least ${status.minimum} valid stroke-counted swims (tests, races or training sets); ${status.validSwims} recorded.`);
+  if (status.flagged?.length) out.push(`${status.flagged.length} stroke measurement${status.flagged.length === 1 ? '' : 's'} above the elite reference ${status.flagged.length === 1 ? 'needs' : 'need'} coach verification before counting (check the stroke count, distance and pool course).`);
+  return out;
+}
 export const adaptabilityScoreFromImprovement = (improvementPct) => (Number.isFinite(improvementPct)
   ? clamp(50 + 10 * (improvementPct / ADAPTABILITY_SMALLEST_WORTHWHILE_CHANGE_PCT)) : null);
 
@@ -435,14 +443,33 @@ function buildEfficiencyAdaptabilityRecords({ canonicalTests, completedCompetiti
   const indicators = buildEfficiencyAdaptabilityIndicators({ tests: canonicalTests, competitions: completedCompetitions, sets, deliveryBySchedule, pushOffMetresPerWall });
   const sourceOf = { test: 'testing', competition: 'competition', training: 'training' };
   const sex = swimmer?.gender || swimmer?.sex;
+  // Efficiency evidence rule (owner decision 08-11-2026, options A + B):
+  // B. A stroke measurement above the elite reference Stroke Index is flagged for
+  //    coach verification and does not count until verified (strokeMeasurementVerified
+  //    on the test, race result or training result). Implausible counts are flagged,
+  //    never silently capped; a verified one counts (shown within the radar's 0-100
+  //    scale, RADAR_SCORE_CAP, as for every axis). Nothing is deleted or changed.
+  // A. Efficiency is scored only from at least EFFICIENCY_MIN_INDEPENDENT_SWIMS valid
+  //    swims (separate tests, races or training sets); otherwise Not Scored.
+  const valid = []; const flagged = [];
   for (const row of indicators.efficiency.measurements) {
     if (row.unit === 'yd') continue; // the elite reference is in metres
     const elite = eliteStrokeIndex({ distance: row.distance, stroke: row.stroke, sex });
     if (!(elite > 0)) continue;
-    addMetric(records, { axis: 'efficiency', metric: 'speed_per_stroke', score: clamp((row.si / elite) * 100),
-      source: sourceOf[row.source], date: row.date, evidenceId: row.id, signal: 1, rawValue: row.si,
-      method: 'stroke-index-vs-elite-reference' });
+    const ratio = row.si / elite;
+    if (ratio > 1 && row.verified !== true) { flagged.push({ id: row.id, source: row.source, date: row.date, label: row.label, ratioPct: Math.round(ratio * 1000) / 10 }); continue; }
+    valid.push({ row, score: ratio * 100 });
   }
+  const independentSwims = new Set(valid.map(({ row }) => `${row.source}|${row.id}`)).size;
+  if (independentSwims >= EFFICIENCY_MIN_INDEPENDENT_SWIMS) {
+    for (const { row, score } of valid) {
+      addMetric(records, { axis: 'efficiency', metric: 'speed_per_stroke', score,
+        source: sourceOf[row.source], date: row.date, evidenceId: row.id, signal: 1, rawValue: row.si,
+        method: 'stroke-index-vs-elite-reference' });
+    }
+  }
+  const evidence = { validSwims: independentSwims, flagged, minimum: EFFICIENCY_MIN_INDEPENDENT_SWIMS,
+    implausibleExcluded: Object.values(indicators.efficiency.excludedImplausible || {}).reduce((sum, n) => sum + (Number(n) || 0), 0) };
   for (const row of indicators.adaptability.retests) {
     addMetric(records, { axis: 'adaptability', metric: 'learning_rate', score: adaptabilityScoreFromImprovement(-row.timeChangePct),
       source: 'testing', date: row.latest.date, evidenceId: row.latest.id, signal: 1, rawValue: row.timeChangePct,
@@ -454,7 +481,7 @@ function buildEfficiencyAdaptabilityRecords({ canonicalTests, completedCompetiti
       source: 'training', date: row.to.date, evidenceId: row.to.id, signal: 1, rawValue: row.paceChangePct,
       method: 'tighter-send-off-pace-response-vs-smallest-worthwhile-change' });
   }
-  return records;
+  return { records, efficiencyEvidence: evidence };
 }
 
 function collectTestRepRows(test, raw) {
@@ -1732,14 +1759,18 @@ export function buildAthlyraxCapabilitySnapshot({
   const completedCompetitions = asArray(evidence?.completedCompetitions);
   const swimmer = asArray(db?.swimmers).find((row) => String(row?.id || '').trim() === selectedSwimmerId) || null;
   const selectedSingleSwimmer = selectedSwimmerId && selectedSwimmerId !== 'all' && selectedSwimmerId !== '__all__';
+  const efficiencyAdaptability = selectedSingleSwimmer
+    ? buildEfficiencyAdaptabilityRecords({ canonicalTests, completedCompetitions, canonicalSets, swimmerId: selectedSwimmerId, swimmer,
+      pushOffMetresPerWall: resolvePushOffAllowance(db),
+      absentScheduleIds: new Set([...buildSwimmerScheduleDeliveryRatios(db, selectedSwimmerId).entries()]
+        .filter(([, attendance]) => attendance?.attended === false).map(([scheduleId]) => scheduleId)) })
+    : { records: [], efficiencyEvidence: null };
+  const efficiencyReasons = efficiencyEvidenceReasons(efficiencyAdaptability.efficiencyEvidence);
   const unweightedRecords = selectedSingleSwimmer
     ? [
       ...buildTestMetricRecords({ canonicalTests, setById, swimmer }),
       ...buildCompetitionMetricRecords({ completedCompetitions, swimmer }),
-      ...buildEfficiencyAdaptabilityRecords({ canonicalTests, completedCompetitions, canonicalSets, swimmerId: selectedSwimmerId, swimmer,
-        pushOffMetresPerWall: resolvePushOffAllowance(db),
-        absentScheduleIds: new Set([...buildSwimmerScheduleDeliveryRatios(db, selectedSwimmerId).entries()]
-          .filter(([, attendance]) => attendance?.attended === false).map(([scheduleId]) => scheduleId)) }),
+      ...efficiencyAdaptability.records,
       ...buildTrainingMeasurementRecords({
         canonicalSets, swimmerId: selectedSwimmerId,
         absentScheduleIds: new Set([...buildSwimmerScheduleDeliveryRatios(db, selectedSwimmerId).entries()]
@@ -1777,9 +1808,12 @@ export function buildAthlyraxCapabilitySnapshot({
   const axes = selectedSingleSwimmer
     ? ATHLYRAX_AXIS_DEFINITIONS.map((axis) => {
       const scored = scoreAxis(axis, records, calculationKey, phaseContext);
-      return !Number.isFinite(scored.score) && awaitingSpeedAxes.has(axis.key)
+      const withSpeed = !Number.isFinite(scored.score) && awaitingSpeedAxes.has(axis.key)
         ? { ...scored, reasons: [SPEED_LEVEL_NEEDED_REASON, ...asArray(scored.reasons)] }
         : scored;
+      return axis.key === 'efficiency' && efficiencyReasons.length
+        ? { ...withSpeed, reasons: [...efficiencyReasons, ...asArray(withSpeed.reasons)], efficiencyEvidence: efficiencyAdaptability.efficiencyEvidence }
+        : withSpeed;
     })
     : ATHLYRAX_AXIS_DEFINITIONS.map((axis) => buildNotScoredAxis(axis, 'Select one swimmer to calculate an individual capability profile.'));
   const validAxes = axes.filter((axis) => Number.isFinite(axis.score));

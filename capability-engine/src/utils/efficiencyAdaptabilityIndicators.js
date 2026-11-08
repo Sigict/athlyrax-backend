@@ -113,7 +113,7 @@ function testEfficiencyRows(tests) {
     if (!measured || !(distance > 0)) return null;
     const label = text(test?.testName || test?.testType) || `${distance} m ${stroke}`;
     return { source: 'test', id: text(test?.id), date: day(test?.date), label, key: `test|${label}|${distance}|${stroke.toLowerCase()}`,
-      distance, stroke, unit: unitOf(test), ...measured };
+      distance, stroke, unit: unitOf(test), ...measured, verified: (test?.strokeMeasurementVerified ?? test?.raw?.strokeMeasurementVerified) === true };
   }).filter(Boolean);
 }
 
@@ -142,7 +142,8 @@ function competitionEfficiencyRows(competitions) {
     if (!measured || !(distance > 0)) return null;
     const unit = isYardCourseKey(course) ? 'yd' : 'm';
     return { source: 'competition', id: text(race?.id), date: day(race?.date), label: `${distance} ${unit} ${stroke}${course ? ` (${course === '25y' ? 'SCY' : course === '25' ? 'SC' : 'LC'})` : ''}`,
-      key: `competition|${distance}|${stroke.toLowerCase()}|${course}`, distance, stroke, unit, ...measured, repetitions: 1 };
+      key: `competition|${distance}|${stroke.toLowerCase()}|${course}`, distance, stroke, unit, ...measured, repetitions: 1,
+      verified: (result?.strokeMeasurementVerified ?? race?.raw?.strokeMeasurementVerified) === true };
   }).filter(Boolean);
 }
 
@@ -164,7 +165,7 @@ function trainingEfficiencyRows(sets) {
       strokeCount: repStrokes(rep), strokeCycles: repCycles(rep), distance, stroke, unit: unitOf(set), poolLength: poolLengthOf(set), underwaterDistance: recordedUnderwaterMetres(rep, distance, poolLengthOf(set)) })));
     if (!measured || !(distance > 0)) return null;
     return { source: 'training', id: text(set?.id), date: day(set?.scheduleDate || set?.date), label: setLabel(set), key: `training|${setSignature(set)}`,
-      distance, stroke, unit: unitOf(set), ...measured };
+      distance, stroke, unit: unitOf(set), ...measured, verified: set?.__ispSwimmerResult?.strokeMeasurementVerified === true };
   }).filter(Boolean);
 }
 
@@ -258,7 +259,7 @@ export function buildEfficiencyAdaptabilityIndicators({ tests = [], competitions
       pushOffMetresPerWall,
       pushOffEstimatedCount: efficiencyMeasurements.filter((row) => row.pushOffEstimated).length,
       score: null,
-      scoreNote: 'Efficiency score (Capability, Competition, Integrated) = Stroke Index ÷ elite Stroke Index × 100; elite speed from the world-class reference, elite stroke rate from a provisional table pending owner confirmation. Below: each swimmer\'s own values and change.',
+      scoreNote: 'Efficiency score (Capability, Competition, Integrated) = Stroke Index ÷ elite Stroke Index × 100; elite speed from the world-class reference, elite stroke rate from a provisional table pending owner confirmation. Scored only from at least 2 stroke-counted swims; a measurement above the elite reference counts only after coach verification. Below: each swimmer\'s own values and change.',
     },
     adaptability: {
       retests,
