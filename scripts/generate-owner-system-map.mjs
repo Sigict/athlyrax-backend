@@ -136,6 +136,102 @@ for (const c of callers) {
 }
 for (const r of routes) r.calledBy = [...(appsByRoute.get(`${r.method} ${r.path}`) || [])].sort();
 
+// ---- record fields as the code writes them (synthetic records built in memory by code) ----
+const fieldsOf = (rows) => {
+  const top = new Set(); const nested = {};
+  for (const r of (Array.isArray(rows) ? rows : []).slice(0, 400)) {
+    if (!r || typeof r !== 'object') continue;
+    for (const [k, v] of Object.entries(r)) {
+      top.add(k);
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        nested[k] = nested[k] || new Set();
+        const vals = Object.values(v); const inner = vals[0];
+        if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+          for (const iv of vals.slice(0, 5)) for (const [x, xv] of Object.entries(iv || {})) { nested[k].add(`<id>.${x}`); if (Array.isArray(xv) && xv[0] && typeof xv[0] === 'object') Object.keys(xv[0]).forEach((y) => nested[k].add(`<id>.${x}[].${y}`)); }
+        } else Object.keys(v).forEach((x) => nested[k].add(x));
+      }
+      if (Array.isArray(v) && v[0] && typeof v[0] === 'object') { nested[k] = nested[k] || new Set(); Object.keys(v[0]).forEach((x) => nested[k].add(`[].${x}`)); }
+    }
+  }
+  return { fields: [...top].sort(), nested: Object.fromEntries(Object.entries(nested).map(([k, v]) => [k, [...v].sort().slice(0, 30)])) };
+};
+const fieldSources = {};
+try {
+  const demo = await import(path.join(ROOT, 'scripts', 'demo-showcase-dataset.mjs'));
+  const seed = demo.buildDemoTenantSeed();
+  for (const [k, rows] of Object.entries(seed)) if (Array.isArray(rows)) fieldSources[k] = { ...fieldsOf(rows), source: 'scripts/demo-showcase-dataset.mjs (records built by code)' };
+} catch (e) { console.error('demo seed fields unavailable:', e.message); }
+try {
+  const inv = await import(path.join(ROOT, 'athlete-account-invites.mjs'));
+  const c = inv.createAthleteInvite({ swimmers: [{ id: 's1', firstName: 'A', dob: '2014-01-01' }] }, { swimmerId: 's1', tenantKey: 't', actor: 'c', targetEmail: 'a@example.com', guardianEmail: 'g@example.com' });
+  const extra = ['guardianCode', 'guardianConsent', 'delivery', 'deliveries', 'bulkRequestId', 'guardianManageCode'].filter((f) => allSrc.includes(f));
+  fieldSources.athleteAccountInvites = { fields: [...new Set([...Object.keys(c.invite), ...extra])].sort(), nested: {}, source: 'athlete-account-invites.mjs createAthleteInvite (+ fields added by later steps)' };
+} catch (e) { console.error('invite fields unavailable:', e.message); }
+for (const c of collectionList) { const f = fieldSources[c.name]; c.fields = f ? f.fields : []; c.nestedFields = f ? f.nested : {}; c.fieldsSource = f ? f.source : 'no record builder found in code; fields are written by the Coaching Software forms'; }
+// Login account fields: keys of the account objects the server creates.
+const userFields = new Set();
+for (const m of allSrc.matchAll(/newUser = \{([\s\S]{0,900}?)\};/g)) for (const k of m[1].matchAll(/(?:^|[,{\s])([a-zA-Z]+)(?=[:,\s])/g)) if (!/^(new|Date|toISOString|hashPassword|getDefaultBillingState|clubDisplayName|t|key|true|false)$/.test(k[1])) userFields.add(k[1]);
+['managedBy', 'athleteTenantConnections', 'athleteInviteManaged', 'tokenValidAfter'].forEach((f) => allSrc.includes(f) && userFields.add(f));
+
+// ---- identifiable forms and their fields (from form state and input elements in the app code) ----
+const forms = [];
+if (websiteDir && fs.existsSync(websiteDir)) {
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.name === 'node_modules' || e.name.startsWith('.') ? [] : e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+  const wfiles = ['src', 'public'].flatMap((d) => (fs.existsSync(path.join(websiteDir, d)) ? walk(path.join(websiteDir, d)) : [])).filter((f) => /\.(jsx?|mjs|html)$/.test(f) && !/seed-data|db\.json|\.test\.|\/vendor\/|\.min\./.test(f));
+  const appOfFile = (r) => (r.startsWith('src/') ? 'Coaching Software' : r.startsWith('public/athlete-app/') ? 'Athlete App' : r.startsWith('public/coach-app/') ? 'Coach Pool Console / Assistant' : r.startsWith('public/stopwatch/') ? 'Stopwatch' : r.startsWith('public/video') ? 'Video Analysis' : /^public\/(education|cpd)/.test(r) ? 'Education' : r === 'public/athlete-invite.html' ? 'Athlete App invitations (public page)' : 'Public website');
+  const human = (n) => n.replace(/(Draft|Form|FormState)$/, '').replace(/^set/, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
+  const byKey = new Map();
+  const add = (name, file, field, kind) => {
+    if (!field || field.length < 2 || /^(length|map|filter|trim|toString|current|open|busy|message)$/.test(field)) return;
+    const key = `${human(name)}|${file}`;
+    if (!byKey.has(key)) byKey.set(key, { name: human(name), file, app: appOfFile(file), fields: new Set(), source: kind });
+    byKey.get(key).fields.add(field);
+  };
+  for (const f of wfiles) {
+    const r = rel(f, websiteDir); const t = read(f);
+    for (const m of t.matchAll(/\b([a-z][a-zA-Z]+(?:Draft|Form))\??\.([a-zA-Z]+)\b/g)) add(m[1], r, m[2], 'form state');
+    for (const m of t.matchAll(/\bset([A-Z][a-zA-Z]+(?:Draft|Form|Editor))\(\(?\w*\)? => \(\{ \.\.\.\(?\w+(?: \|\| \{\})?\)?, ([a-zA-Z]+):/g)) add(m[1], r, m[2], 'form state');
+    if (/\.html$|public\/(athlete-app|coach-app|stopwatch|video)/.test(r)) {
+      for (const m of t.matchAll(/<(?:input|select|textarea)\b[^>]*?\bid=["'`]([A-Za-z][\w-]{1,40})["'`]/g)) add(path.basename(r).replace(/\.\w+$/, '') + ' inputs', r, m[1], 'input elements');
+    }
+  }
+  for (const v of byKey.values()) if (v.fields.size >= 2) forms.push({ ...v, fields: [...v.fields].sort().slice(0, 60) });
+  forms.sort((a, b) => a.app.localeCompare(b.app) || a.name.localeCompare(b.name));
+  // A form "writes to" a collection when it shares several field names with that collection's records (inferred).
+  for (const fm of forms) {
+    fm.likelyTables = collectionList.filter((c) => (c.fields || []).length).map((c) => ({ name: c.name, shared: fm.fields.filter((x) => c.fields.includes(x) && !/^(id|date|notes|createdAt|updatedAt|title|name)$/.test(x)) })).filter((x) => x.shared.length >= 3).sort((a, b) => b.shared.length - a.shared.length).slice(0, 3);
+  }
+}
+
+// ---- canonical capability engine (website) ----
+const engine = { axes: ['Technical Control', 'Efficiency', 'Robustness of Efficiency', 'Aerobic Capacity', 'Anaerobic Capacity', 'Power & Speed Expression', 'Adaptability', 'Durability'], profiles: [
+  { name: 'Training', from: 'Attended sessions with recorded results (sets, reps, times, splits, stroke counts, send-offs)', collections: ['attendance', 'trainingSessions', 'trainingSessionSets'] },
+  { name: 'Testing', from: 'Standard tests (Max 1×25–400, Repeatability 8×25/50/100, 5×400)', collections: ['tests'] },
+  { name: 'Competition', from: 'Race results with splits, stroke counts and pool course', collections: ['fixtures', 'competitions'] },
+  { name: 'Integrated', from: 'Combination of the three profiles with evidence sufficiency and confidence; feeds the ISP report', collections: ['swimmerAnalyses'] },
+], files: [] };
+if (websiteDir) {
+  const ud = path.join(websiteDir, 'src', 'utils');
+  if (fs.existsSync(ud)) engine.files = fs.readdirSync(ud).filter((f) => /athlyraxCapabilityEngine|capability|canonical.*Radar|isp|axisModel|evidence/i.test(f)).map((f) => `src/utils/${f}`).sort();
+}
+engine.note = 'One canonical engine (src/utils/athlyraxCapabilityEngine.js and its canonical helpers). The backend copy used by the Athlete App is verified byte-identical by tests. Self-reported athlete results are kept separate and do not change club capability scores.';
+
+// ---- modules: the owner's conceptual map joined to the code ----
+const modulesPath = path.join(ROOT, 'owner', 'system-map.modules.json');
+const modules = fs.existsSync(modulesPath) ? JSON.parse(read(modulesPath)) : [];
+for (const m of modules) {
+  const v = m.verified || {};
+  const res = (v.routes || []).map((r) => new RegExp(r));
+  const rs = routes.filter((r) => res.some((re) => re.test(r.path)));
+  m.code = {
+    collections: (v.collections || []).filter((c) => collectionNames.has(c) || fieldSources[c]),
+    reads: rs.filter((r) => r.method === 'GET').map((r) => `${r.method} ${r.path}`),
+    writes: rs.filter((r) => r.method !== 'GET').map((r) => `${r.method} ${r.path}`),
+    permissions: [...new Set(rs.map((r) => r.permission))],
+    apps: v.apps || [], store: v.store || [], integrations: v.integrations || [], engine: Boolean(v.engine), note: v.note || '',
+  };
+}
+
 const data = {
   generatedFrom: { backend: 'athlyrax-backend (index.js and *.mjs modules)', website: websiteDir ? 'athlyrax-v6-private (src, public)' : 'not scanned' },
   note: 'Generated from code by scripts/generate-owner-system-map.mjs. Storage is JSON per club; relationships marked "inferred" are naming conventions, not database constraints.',
@@ -149,6 +245,10 @@ const data = {
   relationships,
   routes: routes.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method)),
   integrations,
+  modules,
+  forms,
+  engine,
+  accountFields: [...userFields].sort(),
   roles: ['software-owner (primary owner)', 'head-coach', 'coach', 'assistant-coach', 'viewer', 'swimmer (athlete)'],
 };
 const json = `${JSON.stringify(data, null, 1)}\n`;

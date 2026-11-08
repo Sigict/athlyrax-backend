@@ -3905,6 +3905,8 @@ for (const [route, [file, type]] of Object.entries(OWNER_MAP_FILES)) {
 		res.setHeader('Cache-Control', 'no-store');
 		res.setHeader('X-Robots-Tag', 'noindex, nofollow');
 		res.setHeader('Content-Type', type);
+		// The supplied original map is a single self-contained file with inline script: allow only that, nothing external.
+		if (file === 'AthlyraX_Owner_System_Map.html') res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
 		res.status(200).send(fs.readFileSync(full));
 	});
 }

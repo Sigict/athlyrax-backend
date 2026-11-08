@@ -1,82 +1,130 @@
 (function () {
   'use strict';
-  var D = null; var view = 'apps'; var sel = '';
+  var D = null; var view = 'modules'; var sel = ''; var tab = 'overview'; var q = '';
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
-  function apps() {
-    var map = {};
-    D.routes.forEach(function (r) { (r.calledBy || []).forEach(function (a) { (map[a] = map[a] || []).push(r); }); });
-    D.collections.forEach(function (c) { (c.websiteFiles || []).forEach(function (f) { var a = appOf(f); map[a] = map[a] || []; }); });
-    return map;
+  var B = { confirmed: '<span class="badge confirmed">confirmed in code</span>', inferred: '<span class="badge inferred">inferred</span>', conceptual: '<span class="badge conceptual">conceptual</span>' };
+  var GROUPS = ['Coaching', 'Poolside', 'Evidence', 'Assessment', 'Athlete', 'Identity', 'Products', 'Commercial', 'Integrations'];
+  var mod = function (id) { return D.modules.filter(function (m) { return m.id === id; })[0]; };
+  var tbl = function (n) { return D.collections.filter(function (c) { return c.name === n; })[0]; };
+  var link = function (type, key, label) { return '<button class="clickable" data-go="' + type + '" data-k="' + esc(key) + '">' + esc(label || key) + '</button>'; };
+  var fields = function (list) { return '<div class="fieldlist">' + (list || []).map(function (f) { return '<code>' + esc(f) + '</code>'; }).join('') + '</div>'; };
+  function hay(x) { return JSON.stringify(x).toLowerCase(); }
+  function formsForModule(m) {
+    var cols = (m.code && m.code.collections) || []; var apps = (m.code && m.code.apps) || [];
+    return D.forms.filter(function (f) { return f.likelyTables.some(function (t) { return cols.indexOf(t.name) >= 0; }) || (apps.indexOf(f.app) >= 0 && !f.likelyTables.length && cols.length === 0); });
   }
-  function appOf(f) {
-    if (f.indexOf('src/') === 0) return 'Coaching Software'; if (f.indexOf('public/athlete-app/') === 0) return 'Athlete App';
-    if (f.indexOf('public/coach-app/') === 0) return 'Coach Pool Console / Assistant'; if (f.indexOf('public/stopwatch/') === 0) return 'Stopwatch';
-    if (f.indexOf('public/video') === 0) return 'Video Analysis'; if (/^public\/(education|cpd)/.test(f)) return 'Education'; return 'Public website';
-  }
-  function items() {
-    var q = $('q').value.trim().toLowerCase(); var out = [];
-    if (view === 'apps') out = Object.keys(apps()).sort();
-    if (view === 'collections') out = D.collections.map(function (c) { return c.name; });
-    if (view === 'routes') out = D.routes.map(function (r) { return r.method + ' ' + r.path; });
-    if (view === 'relationships') out = D.relationships.map(function (r) { return r.field + ' → ' + r.references; });
-    if (view === 'integrations') out = D.integrations.map(function (i) { return i.name; });
-    if (view === 'storage') out = D.storage.map(function (s) { return s.name; });
-    return out.filter(function (x) { return !q || x.toLowerCase().indexOf(q) >= 0; });
-  }
-  function renderList() {
-    $('items').innerHTML = items().map(function (x) { return '<div class="item' + (x === sel ? ' sel' : '') + '" role="button" tabindex="0" data-k="' + esc(x) + '">' + esc(x) + '</div>'; }).join('') || '<p class="muted">Nothing matches.</p>';
-  }
-  function routeLine(r) { return '<li><a class="link" data-go="routes" data-k="' + esc(r.method + ' ' + r.path) + '"><code>' + esc(r.method + ' ' + r.path) + '</code></a> <span class="tag">' + esc(r.permission) + '</span></li>'; }
-  function collLink(n) { return '<a class="link" data-go="collections" data-k="' + esc(n) + '">' + esc(n) + '</a>'; }
-  function detail(k) {
-    var h = '';
-    if (view === 'apps') {
-      var rs = apps()[k] || [];
-      var cs = D.collections.filter(function (c) { return (c.websiteFiles || []).some(function (f) { return appOf(f) === k; }); });
-      h = '<h2>' + esc(k) + '</h2><h3>Server routes it calls (' + rs.length + ')</h3><ul>' + rs.map(routeLine).join('') + '</ul>'
-        + '<h3>Club data it reads or edits (' + cs.length + ')</h3><p>' + (cs.map(function (c) { return collLink(c.name); }).join(', ') || '<span class="muted">none detected</span>') + '</p>'
-        + '<p class="muted">Detected from the app\'s source files. Club records edited in the Coaching Software are saved through <code>/db</code> (whole-club save with server-side protections).</p>';
+  function modulesForTable(n) { return D.modules.filter(function (m) { return m.code && m.code.collections.indexOf(n) >= 0; }); }
+
+  function list() {
+    var out = '';
+    if (view === 'modules') {
+      $('listTitle').textContent = 'Modules and data flow'; $('listHint').textContent = 'Choose a module to see its forms, tables, data flow, permissions and connections.';
+      out = GROUPS.map(function (g) {
+        var items = D.modules.filter(function (m) { return m.group === g && (!q || hay(m).indexOf(q) >= 0); });
+        return items.length ? '<div class="grouphead">' + esc(g) + '</div><div class="flowgrid">' + items.map(function (m) { return '<button class="node ' + (sel === m.id ? 'sel' : '') + '" data-go="module" data-k="' + m.id + '"><strong>' + esc(m.title) + '</strong><em>' + esc(m.status) + '</em></button>'; }).join('') + '</div>' : '';
+      }).join('');
     }
-    if (view === 'collections') {
-      var c = D.collections.filter(function (x) { return x.name === k; })[0];
-      var rels = D.relationships.filter(function (r) { return r.references === k; });
-      h = '<h2>' + esc(k) + '</h2><p class="muted">Stored as a list of records in each club\'s <code>tenants/&lt;club&gt;/db.json</code>.</p>'
-        + '<h3>Referenced by</h3><ul>' + (rels.map(function (r) { return '<li><code>' + esc(r.field) + '</code> <span class="tag ' + (/enforced/.test(r.kind) ? 'ok' : 'warn') + '">' + esc(r.kind) + '</span></li>'; }).join('') || '<li class="muted">no *Id field reference detected</li>') + '</ul>'
-        + '<h3>Server code using it</h3><ul>' + (c.usedIn.map(function (f) { return '<li><code>' + esc(f) + '</code>' + (c.writtenIn.indexOf(f) >= 0 ? ' <span class="tag">writes</span>' : '') + '</li>'; }).join('') || '<li class="muted">handled generically by the whole-club load/save</li>') + '</ul>'
-        + '<h3>App screens using it</h3><ul>' + ((c.websiteFiles || []).map(function (f) { return '<li><code>' + esc(f) + '</code> <span class="tag">' + esc(appOf(f)) + '</span></li>'; }).join('') || '<li class="muted">none detected</li>') + '</ul>';
+    if (view === 'tables') {
+      $('listTitle').textContent = 'Data tables'; $('listHint').textContent = 'Each club stores these collections in its own data file. Click a table for its fields and connections.';
+      out = '<div class="flowgrid">' + D.collections.filter(function (c) { return !q || hay(c).indexOf(q) >= 0; }).map(function (c) { return '<button class="node ' + (sel === c.name ? 'sel' : '') + '" data-go="table" data-k="' + esc(c.name) + '"><strong>' + esc(c.name) + '</strong><em>' + (c.fields.length ? c.fields.length + ' fields' : 'fields set by forms') + '</em></button>'; }).join('') + '</div>';
     }
+    if (view === 'forms') {
+      $('listTitle').textContent = 'Forms found in code'; $('listHint').textContent = 'Forms detected from their form state or input elements. Click one for its fields and the tables it likely writes to.';
+      out = '<div class="flowgrid">' + D.forms.map(function (f, i) { return [f, i]; }).filter(function (x) { return !q || hay(x[0]).indexOf(q) >= 0; }).map(function (x) { var f = x[0]; return '<button class="node ' + (sel === String(x[1]) ? 'sel' : '') + '" data-go="form" data-k="' + x[1] + '"><strong>' + esc(f.name) + '</strong><em>' + esc(f.app) + ' · ' + f.fields.length + ' fields</em></button>'; }).join('') + '</div>';
+    }
+    if (view === 'engine') { $('listTitle').textContent = 'Canonical capability engine'; $('listHint').textContent = ''; out = engineHtml(); }
     if (view === 'routes') {
-      var r = D.routes.filter(function (x) { return x.method + ' ' + x.path === k; })[0];
-      h = '<h2><code>' + esc(k) + '</code></h2><p>Area: ' + esc(r.area) + '</p><p>Permission: <strong>' + esc(r.permission) + '</strong></p>'
-        + '<p>Guards: ' + (r.guards.map(function (g) { return '<code>' + esc(g) + '</code>'; }).join(', ') || '<span class="muted">none</span>') + '</p>'
-        + '<p>Defined in <code>' + esc(r.file) + ':' + r.line + '</code></p><h3>Called by</h3><p>' + (r.calledBy.map(esc).join(', ') || '<span class="muted">no caller detected in the website (may be called by other apps or tests)</span>') + '</p>';
+      $('listTitle').textContent = 'Server routes and permissions'; $('listHint').textContent = 'GET reads data; POST/PUT/DELETE writes. Permission is enforced on the server.';
+      out = D.routes.filter(function (r) { return !q || hay(r).indexOf(q) >= 0; }).map(function (r) { return '<div class="item">' + link('route', r.method + ' ' + r.path, r.method + ' ' + r.path) + '<span>' + esc(r.permission) + '</span></div>'; }).join('');
     }
-    if (view === 'relationships') {
-      var rel = D.relationships.filter(function (x) { return x.field + ' → ' + x.references === k; })[0];
-      h = '<h2>' + esc(k) + '</h2><p class="' + (/enforced/.test(rel.kind) ? 'ok' : 'warn') + '">' + esc(rel.kind) + '</p><h3>Files</h3><ul>' + rel.files.map(function (f) { return '<li><code>' + esc(f) + '</code></li>'; }).join('') + '</ul>'
-        + (D.collections.some(function (c) { return c.name === rel.references; }) ? '<p>Target: ' + collLink(rel.references) + '</p>' : '');
-    }
-    if (view === 'integrations') {
-      var i = D.integrations.filter(function (x) { return x.name === k; })[0];
-      h = '<h2>' + esc(k) + '</h2><h3>Configuration names (values are never shown)</h3><ul>' + i.env.map(function (e) { return '<li><code>' + esc(e) + '</code></li>'; }).join('') + '</ul>';
-    }
-    if (view === 'storage') { var s = D.storage.filter(function (x) { return x.name === k; })[0]; h = '<h2><code>' + esc(k) + '</code></h2><p>' + esc(s.description) + '</p>'; }
-    $('detail').innerHTML = h;
+    if (view === 'external') { $('listTitle').textContent = 'External services'; $('listHint').textContent = 'Setting names only; values are never shown.'; out = D.integrations.map(function (i) { return '<div class="item"><b>' + esc(i.name) + '</b>' + fields(i.env) + '</div>'; }).join(''); }
+    $('flow').innerHTML = out || '<p>Nothing matches.</p>';
+    nav();
   }
-  function go(v, k) {
-    view = v; sel = k || '';
-    Array.prototype.forEach.call(document.querySelectorAll('nav button'), function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-view') === v)); });
-    $('q').value = ''; renderList(); if (sel) detail(sel); else $('detail').innerHTML = '<p class="muted">Select an item to see what it does and how it connects.</p>';
+  function engineHtml() {
+    var e = D.engine;
+    return '<p>' + esc(e.note) + '</p><h3>Eight capabilities</h3><ol>' + e.axes.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('') + '</ol>'
+      + '<h3>Four capability profiles</h3>' + e.profiles.map(function (p) { return '<div class="item"><b>' + esc(p.name) + '</b><span>' + esc(p.from) + '</span><span>Data: ' + p.collections.map(function (c) { return tbl(c) ? link('table', c) : esc(c); }).join(', ') + '</span></div>'; }).join('')
+      + '<p class="path"><strong>Session planning</strong><span class="arrow">→</span><strong>Attendance and recorded results</strong><span class="arrow">→</span><strong>Training profile</strong><span class="arrow">→</span><strong>Integrated profile</strong><span class="arrow">→</span><strong>ISP report</strong></p>'
+      + '<h3>Engine source files ' + B.confirmed + '</h3>' + fields(e.files);
   }
+  function nav() {
+    $('navigation').innerHTML = GROUPS.map(function (g) {
+      var items = D.modules.filter(function (m) { return m.group === g && (!q || hay(m).indexOf(q) >= 0); });
+      return items.length ? '<div class="nav-title">' + esc(g) + '</div><div class="nav">' + items.map(function (m) { return '<button class="' + (view === 'modules' && sel === m.id ? 'on' : '') + '" data-go="module" data-k="' + m.id + '"><span class="dot ' + esc(m.group) + '"></span>' + esc(m.title) + '</button>'; }).join('') + '</div>' : '';
+    }).join('');
+  }
+  function moduleDetail(m) {
+    var c = m.code || {}; var linkIds = []; D.modules.forEach(function (o) { if (o.id !== m.id && ((m.links || []).indexOf(o.id) >= 0 || (o.links || []).indexOf(m.id) >= 0)) linkIds.push(o.id); });
+    var tabs = ['overview', 'forms', 'data', 'flow', 'access', 'connections'];
+    var h = '<div class="small">' + esc(m.group) + ' / ' + esc(m.status) + ' · ' + esc(m.source) + '</div><h2 style="margin-top:5px">' + esc(m.title) + '</h2><p>' + esc(m.desc) + '</p>'
+      + '<div class="tabs">' + tabs.map(function (t) { return '<button data-tab="' + t + '" class="' + (tab === t ? 'on' : '') + '">' + t.charAt(0).toUpperCase() + t.slice(1) + '</button>'; }).join('') + '</div>';
+    if (tab === 'overview') h += '<p>Applications: ' + (c.apps || []).map(esc).join(', ') + '</p>' + (c.note ? '<p class="small">' + esc(c.note) + '</p>' : '') + (c.engine ? '<p>Uses the ' + '<button class="clickable" data-view="engine">canonical capability engine</button>.</p>' : '') + '<p>Storage: ' + ((c.store || []).concat(c.collections.length ? ['club data file'] : [])).map(esc).join(', ') + '</p>';
+    if (tab === 'forms') {
+      h += '<h3>Forms (owner map) ' + B.conceptual + '</h3>' + (m.forms || []).map(function (f) { return '<div class="item"><b>' + esc(f.name) + '</b><span>' + esc(f.fields) + '</span><span class="small">' + esc(f.note) + '</span></div>'; }).join('');
+      var fs = formsForModule(m);
+      h += '<h3>Forms found in code ' + B.confirmed + '</h3>' + (fs.map(function (f) { return '<div class="item">' + link('form', String(D.forms.indexOf(f)), f.name + ' (' + f.app + ')') + '<span>' + f.fields.length + ' fields · ' + esc(f.file) + '</span></div>'; }).join('') || '<p class="small">No separate form state detected; edits are made in the module\'s screens and saved with the whole club.</p>');
+    }
+    if (tab === 'data') {
+      h += '<h3>Tables in code ' + B.confirmed + '</h3>' + (c.collections.map(function (n) { var t = tbl(n); return '<div class="item">' + link('table', n) + '<span>' + (t && t.fields.length ? t.fields.length + ' fields' : '') + '</span></div>'; }).join('') || '<p class="small">No club collection.</p>')
+        + '<h3>Data groups (owner map) ' + B.conceptual + '</h3>' + fields(m.tables);
+    }
+    if (tab === 'flow') {
+      h += '<h3>Reads (server → app) ' + B.confirmed + '</h3>' + (c.reads.map(function (r) { return '<div class="flowline">' + esc(c.apps[0] || 'App') + '<span class="arrow">←</span>' + link('route', r) + '</div>'; }).join('') || '<p class="small">None.</p>')
+        + '<h3>Writes (app → server) ' + B.confirmed + '</h3>' + (c.writes.map(function (r) { return '<div class="flowline">' + esc(c.apps[0] || 'App') + '<span class="arrow">→</span>' + link('route', r) + '</div>'; }).join('') || '<p class="small">None of its own.</p>')
+        + (c.collections.length ? '<p class="small">Coaching Software screens also save these tables through the whole-club save (<code>PUT /db</code>), which keeps server-owned fields.</p>' : '');
+    }
+    if (tab === 'access') h += '<h3>Permissions ' + B.confirmed + '</h3><ul>' + (c.permissions.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') || '<li>No server routes.</li>') + '</ul>' + ((c.integrations || []).length ? '<h3>External services</h3><p>' + c.integrations.map(esc).join(', ') + '</p>' : '');
+    if (tab === 'connections') h += '<h3>Functional connections ' + B.conceptual + '</h3><div class="rail">' + linkIds.map(function (id) { return '<button class="link" data-go="module" data-k="' + id + '">' + esc(mod(id).title) + '</button>'; }).join('') + '</div>'
+      + '<h3>Data relationships</h3>' + (D.relationships.filter(function (r) { return c.collections.indexOf(r.references) >= 0; }).map(function (r) { return '<div class="flowline"><code>' + esc(r.field) + '</code><span class="arrow">→</span>' + link('table', r.references) + (/enforced/.test(r.kind) ? B.confirmed : B.inferred) + '</div>'; }).join('') || '<p class="small">None detected.</p>');
+    return h;
+  }
+  function tableDetail(t) {
+    var rels = D.relationships.filter(function (r) { return r.references === t.name; });
+    var fs = D.forms.filter(function (f) { return f.likelyTables.some(function (x) { return x.name === t.name; }); });
+    return '<div class="small">Club collection · tenants/&lt;club&gt;/db.json</div><h2 style="margin-top:5px">' + esc(t.name) + '</h2>'
+      + '<h3>Fields ' + (t.fields.length ? B.confirmed : '') + '</h3>' + (t.fields.length ? fields(t.fields) : '<p class="small">' + esc(t.fieldsSource) + '</p>')
+      + Object.keys(t.nestedFields || {}).map(function (k) { return '<p class="small">Inside <code>' + esc(k) + '</code>:</p>' + fields(t.nestedFields[k]); }).join('')
+      + (t.fields.length ? '<p class="small">Field source: ' + esc(t.fieldsSource) + '</p>' : '')
+      + '<h3>Referenced by</h3>' + (rels.map(function (r) { return '<div class="flowline"><code>' + esc(r.field) + '</code> ' + (/enforced/.test(r.kind) ? B.confirmed : B.inferred) + ' <span class="small">' + esc(r.kind) + '</span></div>'; }).join('') || '<p class="small">No *Id reference detected.</p>')
+      + '<h3>Modules</h3><p>' + (modulesForTable(t.name).map(function (m) { return link('module', m.id, m.title); }).join(', ') || '—') + '</p>'
+      + '<h3>Forms that likely write it ' + B.inferred + '</h3>' + (fs.map(function (f) { var s = f.likelyTables.filter(function (x) { return x.name === t.name; })[0]; return '<div class="item">' + link('form', String(D.forms.indexOf(f)), f.name + ' (' + f.app + ')') + '<span>shared fields: ' + esc(s.shared.join(', ')) + '</span></div>'; }).join('') || '<p class="small">None detected.</p>')
+      + '<h3>Server code ' + B.confirmed + '</h3>' + fields((t.usedIn || []).map(function (f) { return f + ((t.writtenIn || []).indexOf(f) >= 0 ? ' (writes)' : ''); }))
+      + '<h3>App screens ' + B.confirmed + '</h3>' + fields(t.websiteFiles || []);
+  }
+  function formDetail(f) {
+    return '<div class="small">' + esc(f.app) + ' · detected from ' + esc(f.source) + '</div><h2 style="margin-top:5px">' + esc(f.name) + '</h2><p><code>' + esc(f.file) + '</code></p>'
+      + '<h3>Fields ' + B.confirmed + '</h3>' + fields(f.fields)
+      + '<h3>Likely saved to ' + B.inferred + '</h3>' + (f.likelyTables.map(function (t) { return '<div class="flowline">' + esc(f.name) + '<span class="arrow">→</span>' + link('table', t.name) + ' <span class="small">shared fields: ' + esc(t.shared.join(', ')) + '</span></div>'; }).join('') || '<p class="small">No table shares enough fields (personal, temporary or settings form).</p>');
+  }
+  function routeDetail(k) {
+    var r = D.routes.filter(function (x) { return x.method + ' ' + x.path === k; })[0]; if (!r) return '';
+    var ms = D.modules.filter(function (m) { return m.code && (m.code.reads.indexOf(k) >= 0 || m.code.writes.indexOf(k) >= 0); });
+    return '<div class="small">' + esc(r.area) + '</div><h2 style="margin-top:5px"><code>' + esc(k) + '</code></h2><p>' + (r.method === 'GET' ? 'Reads data (server → app)' : 'Changes data (app → server)') + '</p>'
+      + '<p>Permission: <b>' + esc(r.permission) + '</b> ' + B.confirmed + '</p><p class="small">Defined in ' + esc(r.file) + ':' + r.line + '</p>'
+      + '<h3>Called by</h3><p>' + (r.calledBy.map(esc).join(', ') || '<span class="small">No caller found in the website code.</span>') + '</p><h3>Modules</h3><p>' + ms.map(function (m) { return link('module', m.id, m.title); }).join(', ') + '</p>';
+  }
+  function show(type, k) {
+    var h = '';
+    if (type === 'module') { view = 'modules'; sel = k; h = moduleDetail(mod(k)); }
+    if (type === 'table') { view = 'tables'; sel = k; h = tableDetail(tbl(k)); }
+    if (type === 'form') { view = 'forms'; sel = k; h = formDetail(D.forms[Number(k)]); }
+    if (type === 'route') { view = 'routes'; sel = k; h = routeDetail(k); }
+    setViewButtons(); list(); $('detail').innerHTML = h;
+  }
+  function setViewButtons() { Array.prototype.forEach.call(document.querySelectorAll('[data-view]'), function (b) { b.classList.toggle('active', b.getAttribute('data-view') === view); }); }
   document.addEventListener('click', function (e) {
-    var b = e.target.closest('nav button'); if (b) { go(b.getAttribute('data-view')); return; }
-    var a = e.target.closest('[data-go]'); if (a) { go(a.getAttribute('data-go'), a.getAttribute('data-k')); return; }
-    var it = e.target.closest('.item'); if (it) { sel = it.getAttribute('data-k'); renderList(); detail(sel); }
+    var t = e.target.closest('[data-tab]'); if (t) { tab = t.getAttribute('data-tab'); $('detail').innerHTML = moduleDetail(mod(sel)); return; }
+    var v = e.target.closest('[data-view]'); if (v) { view = v.getAttribute('data-view'); sel = ''; setViewButtons(); list(); $('detail').innerHTML = view === 'engine' ? '' : '<h2>Select an item</h2><p class="small">Choose an item on the left to see its details and connections.</p>'; if (view === 'engine') $('detail').innerHTML = '<h2>Four profiles, one engine</h2><p>Training, Testing and Competition evidence is assessed on the same eight capabilities and combined into the Integrated profile with evidence sufficiency and confidence.</p>'; return; }
+    var g = e.target.closest('[data-go]'); if (g) { if (g.getAttribute('data-go') === 'module') tab = 'overview'; show(g.getAttribute('data-go'), g.getAttribute('data-k')); }
   });
-  document.addEventListener('keydown', function (e) { var it = e.target.closest && e.target.closest('.item'); if (it && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); it.click(); } });
-  $('q').addEventListener('input', renderList);
+  $('search').addEventListener('input', function (e) { q = e.target.value.trim().toLowerCase(); list(); });
+  $('print').addEventListener('click', function () { window.print(); });
   fetch('system-map/data.json', { credentials: 'same-origin' }).then(function (r) { if (!r.ok) throw new Error('Owner access required.'); return r.json(); }).then(function (d) {
-    D = d; $('meta').textContent = d.note + ' ' + d.routes.length + ' routes, ' + d.collections.length + ' data collections.'; go('apps');
-  }).catch(function (e) { $('meta').textContent = e.message; });
+    D = d;
+    $('cModules').textContent = d.modules.length; $('cTables').textContent = d.collections.length; $('cForms').textContent = d.forms.length; $('cRoutes').textContent = d.routes.length;
+    $('scope').innerHTML = '<b>Scope:</b> ' + esc(d.note) + ' Badges show what is <span class="badge confirmed">confirmed in code</span>, <span class="badge inferred">inferred</span> from code, or <span class="badge conceptual">conceptual</span> from the owner map. Read-only; it does not connect to production data.';
+    show('module', 'swimmer');
+  }).catch(function (e) { $('scope').textContent = e.message; });
 })();

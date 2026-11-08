@@ -169,7 +169,12 @@ test('owner system map: only the primary software owner can open it; nothing is 
     const data = await (await fetch(`${base}/owner/system-map/data.json`, { headers: { Cookie: owner.cookie } })).json();
     assert.ok(data.routes.length > 50 && data.collections.some((c) => c.name === 'swimmers'));
     assert.ok(!/sk_live|sk_test|whsec_|password"\s*:\s*"[^"]/i.test(JSON.stringify(data)), 'no secrets in the map data');
-    assert.equal((await fetch(`${base}/owner/system-map/designed`, { headers: { Cookie: owner.cookie } })).status, 404, 'designed map not present until supplied');
+    const designed = await fetch(`${base}/owner/system-map/designed`, { headers: { Cookie: owner.cookie } });
+    assert.equal(designed.status, 200, 'the supplied original map is kept, owner-only');
+    assert.match(designed.headers.get('content-security-policy'), /default-src 'none'/);
+    assert.equal((await fetch(`${base}/owner/system-map/designed`)).status, 401);
+    assert.equal((await request(base, '/owner/system-map/designed', coach)).response.status, 403);
+    assert.ok(data.modules.length >= 21 && data.forms.length > 20 && data.collections.find((c) => c.name === 'trainingSessionSets').fields.includes('resultsBySwimmer'), 'modules, forms and fields present');
   } finally {
     await server.stop();
   }

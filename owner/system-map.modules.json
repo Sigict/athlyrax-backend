@@ -1,0 +1,956 @@
+[
+ {
+  "id": "club",
+  "title": "Clubs & squads",
+  "group": "Coaching",
+  "desc": "Club structure, membership, lane/squad assignment",
+  "forms": [
+   {
+    "name": "Club setup",
+    "fields": "Name; clubs; owner; settings",
+    "note": "Manage club information"
+   },
+   {
+    "name": "Squad management",
+    "fields": "Squad; coach assignment; member list",
+    "note": "Manage squads"
+   }
+  ],
+  "tables": [
+   "Clubs",
+   "Squads",
+   "Memberships"
+  ],
+  "links": [
+   "coach",
+   "swimmer",
+   "session"
+  ],
+  "status": "Established concept",
+  "verified": {
+   "collections": [
+    "squads",
+    "coaches",
+    "venues",
+    "groups",
+    "seasons"
+   ],
+   "routes": [
+    "^/auth/users",
+    "^/auth/invites",
+    "^/auth/head-coach/handover",
+    "^/coach/swimmer-links"
+   ],
+   "apps": [
+    "Coaching Software"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "coach",
+  "title": "Coaches & assistants",
+  "group": "Coaching",
+  "desc": "Accounts, permissions and session-specific leadership",
+  "forms": [
+   {
+    "name": "Coach permissions",
+    "fields": "Coach identity; account role; authorised club",
+    "note": "Club-level roles"
+   },
+   {
+    "name": "Session assistants",
+    "fields": "Session; lanes; temporary pass; leader",
+    "note": "Roles may differ by session"
+   }
+  ],
+  "tables": [
+   "Coach accounts",
+   "Session roles",
+   "Assistant pairing"
+  ],
+  "links": [
+   "club",
+   "session",
+   "console"
+  ],
+  "status": "Established concept",
+  "verified": {
+   "collections": [
+    "coaches"
+   ],
+   "routes": [
+    "^/auth/users",
+    "^/auth/invites",
+    "^/auth/presence",
+    "^/auth/head-coach"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Coach Pool Console / Assistant"
+   ],
+   "store": [
+    "auth-users.json"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "swimmer",
+  "title": "Swimmer records",
+  "group": "Coaching",
+  "desc": "Identity, contact information, status and longitudinal data",
+  "forms": [
+   {
+    "name": "Edit swimmer",
+    "fields": "Name; DOB; squad; Primary Contact Email; athlete email (requested)",
+    "note": "Contact fields require code verification"
+   },
+   {
+    "name": "Athlete App access",
+    "fields": "Athlete email; guardian email; invitation status",
+    "note": "Existing per-swimmer invitation UI"
+   }
+  ],
+  "tables": [
+   "Swimmers",
+   "Contacts",
+   "Athlete links"
+  ],
+  "links": [
+   "club",
+   "invite",
+   "test",
+   "competition",
+   "result",
+   "capability"
+  ],
+  "status": "Live / active",
+  "verified": {
+   "collections": [
+    "swimmers"
+   ],
+   "routes": [
+    "^/coach/swimmer-links",
+    "^/coach/swimmers/",
+    "^/db$"
+   ],
+   "apps": [
+    "Coaching Software"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "invite",
+  "title": "Athlete invitations",
+  "group": "Identity",
+  "desc": "Email invitations, guardian consent, account linking",
+  "forms": [
+   {
+    "name": "Create invitation",
+    "fields": "Athlete email; guardian email; one-time link",
+    "note": "Live individual invitations"
+   },
+   {
+    "name": "Guardian consent",
+    "fields": "Guardian email; code; consent",
+    "note": "Under-18 linked-account protection"
+   },
+   {
+    "name": "Bulk invitations",
+    "fields": "Swimmer selection; prefilled contact data; delivery status",
+    "note": "Requested, not yet verified live"
+   }
+  ],
+  "tables": [
+   "Invitations",
+   "Guardian consent",
+   "Account links",
+   "Email delivery log (planned)"
+  ],
+  "links": [
+   "swimmer",
+   "athlete",
+   "brevo"
+  ],
+  "status": "Partly live \u00b7 automation planned",
+  "verified": {
+   "collections": [
+    "athleteAccountInvites",
+    "swimmers"
+   ],
+   "routes": [
+    "^/athlete-invites",
+    "^/coach/athlete-invites",
+    "^/coach/swimmers/:swimmerId/athlete"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Athlete App invitations (public page)"
+   ],
+   "store": [
+    "auth-users.json"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "session",
+  "title": "Training planning",
+  "group": "Coaching",
+  "desc": "Sessions, sets, repetition targets and send-offs",
+  "forms": [
+   {
+    "name": "Session planner",
+    "fields": "Date; title; phase; sets; lanes",
+    "note": "Coach-owned plan"
+   },
+   {
+    "name": "Set editor",
+    "fields": "Rounds; reps; distance; stroke; send-off; rest",
+    "note": "Delivery instructions"
+   }
+  ],
+  "tables": [
+   "Sessions",
+   "Sets",
+   "Repetition definitions",
+   "Schedules"
+  ],
+  "links": [
+   "club",
+   "coach",
+   "attendance",
+   "console",
+   "athlete",
+   "result"
+  ],
+  "status": "Live / active",
+  "verified": {
+   "collections": [
+    "schedule",
+    "trainingSessions",
+    "trainingSessionSets",
+    "trainingSetBlocks",
+    "timetables",
+    "timetableSlots",
+    "sessionTypes",
+    "trainingPlannerWeeks",
+    "seasonPlans",
+    "mesoCycles",
+    "microCycles",
+    "templateSets"
+   ],
+   "routes": [
+    "^/db",
+    "^/db/schedule-delete"
+   ],
+   "apps": [
+    "Coaching Software"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "attendance",
+  "title": "Attendance",
+  "group": "Coaching",
+  "desc": "Who attended and which sets were delivered",
+  "forms": [
+   {
+    "name": "Attendance register",
+    "fields": "Session; swimmer; attended status",
+    "note": "Feeds evidence selection"
+   }
+  ],
+  "tables": [
+   "Attendance",
+   "Session participation"
+  ],
+  "links": [
+   "session",
+   "swimmer",
+   "result",
+   "capability"
+  ],
+  "status": "Live / active",
+  "verified": {
+   "collections": [
+    "attendance"
+   ],
+   "routes": [
+    "^/coach/poolside/sessions/:sessionId/attendance",
+    "^/db$"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Coach Pool Console / Assistant"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "console",
+  "title": "Coach Pool Console",
+  "group": "Poolside",
+  "desc": "Lane clocks, assistants, splits and stroke recording",
+  "forms": [
+   {
+    "name": "Pool Console",
+    "fields": "Lanes; swimmers; splits; strokes; send-offs",
+    "note": "28/28 reported acceptance in recent conversation"
+   },
+   {
+    "name": "Assistant panel",
+    "fields": "Session pass; assigned lanes; conflict decisions",
+    "note": "Session-specific controls"
+   }
+  ],
+  "tables": [
+   "Pool session state",
+   "Lane assignments",
+   "Recorded repetitions"
+  ],
+  "links": [
+   "session",
+   "coach",
+   "result",
+   "video"
+  ],
+  "status": "Live-tested subset",
+  "verified": {
+   "collections": [
+    "trainingSessions",
+    "trainingSessionSets",
+    "attendance"
+   ],
+   "routes": [
+    "^/coach/poolside",
+    "^/coach/observations",
+    "^/entitlements/stopwatch"
+   ],
+   "apps": [
+    "Coach Pool Console / Assistant",
+    "Stopwatch"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "result",
+  "title": "Training results",
+  "group": "Evidence",
+  "desc": "Actual repetitions, times, strokes, send-offs, splits and feedback",
+  "forms": [
+   {
+    "name": "Training Results",
+    "fields": "Repetition; time; split; stroke count; session",
+    "note": "Actual performance measurement"
+   },
+   {
+    "name": "Athlete personal training",
+    "fields": "Self-reported times; RPE; check-in",
+    "note": "Separate personal evidence"
+   }
+  ],
+  "tables": [
+   "Training results",
+   "Split measurements",
+   "Stroke counts",
+   "Training evidence"
+  ],
+  "links": [
+   "session",
+   "console",
+   "swimmer",
+   "capability",
+   "athlete"
+  ],
+  "status": "Live-tested subset",
+  "verified": {
+   "collections": [
+    "trainingSessionSets",
+    "coachObservations"
+   ],
+   "routes": [
+    "^/coach/poolside/sessions/:sessionId/sets",
+    "^/results-inbox",
+    "^/coach/athlete-session-proposals",
+    "^/swimmer/athlete-sessions"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Coach Pool Console / Assistant",
+    "Athlete App"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "test",
+  "title": "Testing",
+  "group": "Evidence",
+  "desc": "Max effort, repeatability and 5\u00d7400 data",
+  "forms": [
+   {
+    "name": "Max effort tests",
+    "fields": "25, 50, 100, 200, 400 m",
+    "note": "Current agreed catalogue"
+   },
+   {
+    "name": "Repeatability",
+    "fields": "8\u00d725; 8\u00d750; 8\u00d7100",
+    "note": "Current agreed catalogue"
+   },
+   {
+    "name": "Aerobic/Durability",
+    "fields": "5\u00d7400",
+    "note": "Available for coaches and athlete self-report"
+   }
+  ],
+  "tables": [
+   "Test definitions",
+   "Test results",
+   "Test splits"
+  ],
+  "links": [
+   "swimmer",
+   "athlete",
+   "capability"
+  ],
+  "status": "Live-tested",
+  "verified": {
+   "collections": [
+    "tests",
+    "templateTests"
+   ],
+   "routes": [
+    "^/coach/tests",
+    "^/swimmer/test-catalogue"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Athlete App"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "competition",
+  "title": "Competition",
+  "group": "Evidence",
+  "desc": "Fixtures, races, times, splits, course and race history",
+  "forms": [
+   {
+    "name": "Fixture editor",
+    "fields": "Meet; date; course; target event",
+    "note": "Competition planning"
+   },
+   {
+    "name": "Race result",
+    "fields": "Event; distance; stroke; time; splits; course",
+    "note": "Competition evidence"
+   }
+  ],
+  "tables": [
+   "Fixtures",
+   "Race entries",
+   "Competition results"
+  ],
+  "links": [
+   "swimmer",
+   "athlete",
+   "capability",
+   "video"
+  ],
+  "status": "Live-tested subset",
+  "verified": {
+   "collections": [
+    "fixtures",
+    "competitions"
+   ],
+   "routes": [
+    "^/fixtures/",
+    "^/coach/poolside/competitions"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Athlete App"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "capability",
+  "title": "Capability engine & ISP",
+  "group": "Assessment",
+  "desc": "Training / Testing / Competition / Integrated eight-axis assessment",
+  "forms": [
+   {
+    "name": "Evidence selection",
+    "fields": "Date range; source; attendance; tests; races",
+    "note": "Sufficiency and confidence"
+   },
+   {
+    "name": "ISP view",
+    "fields": "Eight axes; status; integrated report",
+    "note": "Not Scored when evidence insufficient"
+   }
+  ],
+  "tables": [
+   "Canonical evidence",
+   "Axis outputs",
+   "Score sufficiency",
+   "ISP snapshots"
+  ],
+  "links": [
+   "result",
+   "test",
+   "competition",
+   "athlete",
+   "coach"
+  ],
+  "status": "Live parity checked",
+  "verified": {
+   "collections": [
+    "swimmerAnalyses",
+    "tests",
+    "fixtures",
+    "trainingSessionSets",
+    "attendance"
+   ],
+   "routes": [
+    "^/content/capability",
+    "^/swimmer/capability",
+    "^/swimmer/progress"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Athlete App"
+   ],
+   "engine": true
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "athlete",
+  "title": "Athlete App",
+  "group": "Athlete",
+  "desc": "Personal planning, offline training, progress, and authorised club data",
+  "forms": [
+   {
+    "name": "My Training",
+    "fields": "Personal sessions; sets; stopwatch; actuals",
+    "note": "Offline-first personal store"
+   },
+   {
+    "name": "My Progress",
+    "fields": "Personal versus club results",
+    "note": "Source-labelled"
+   },
+   {
+    "name": "My Development",
+    "fields": "Diary; goals; calendar; volume",
+    "note": "Self-reported data"
+   },
+   {
+    "name": "Import backup",
+    "fields": "Preview; legacy archive; confirm",
+    "note": "S5 reported live-tested"
+   }
+  ],
+  "tables": [
+   "Personal sessions",
+   "Offline sync store",
+   "Personal tests",
+   "Diary",
+   "Goals"
+  ],
+  "links": [
+   "swimmer",
+   "invite",
+   "session",
+   "test",
+   "competition",
+   "capability"
+  ],
+  "status": "S1\u2013S5 live-tested",
+  "verified": {
+   "collections": [
+    "swimmers"
+   ],
+   "routes": [
+    "^/swimmer/"
+   ],
+   "apps": [
+    "Athlete App"
+   ],
+   "store": [
+    "Athlete personal store"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "video",
+  "title": "Video Analysis",
+  "group": "Products",
+  "desc": "Standalone or connected video analysis (audit pending)",
+  "forms": [
+   {
+    "name": "Video workspace",
+    "fields": "Upload; playback; events; annotations",
+    "note": "Must be audited against code"
+   }
+  ],
+  "tables": [
+   "Video assets (verify)",
+   "Annotations (verify)",
+   "Analysis measures (verify)"
+  ],
+  "links": [
+   "swimmer",
+   "console",
+   "competition",
+   "payments"
+  ],
+  "status": "Needs audit",
+  "verified": {
+   "collections": [],
+   "routes": [],
+   "apps": [
+    "Video Analysis"
+   ],
+   "note": "No server routes or club collections found for Video Analysis: it runs in the browser and exchanges results as a file import."
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "education",
+  "title": "Athlyra Education",
+  "group": "Products",
+  "desc": "CPD modules, assessments and certificates",
+  "forms": [
+   {
+    "name": "CPD module",
+    "fields": "Player; questions; course progress",
+    "note": "Separate Education product"
+   },
+   {
+    "name": "Certificate",
+    "fields": "Completion; certificate export",
+    "note": "Module outcome"
+   }
+  ],
+  "tables": [
+   "Module progress",
+   "Quiz results",
+   "Certificates"
+  ],
+  "links": [
+   "payments",
+   "brevo"
+  ],
+  "status": "Live / separate product",
+  "verified": {
+   "collections": [],
+   "routes": [
+    "^/cpd/"
+   ],
+   "apps": [
+    "Education",
+    "Education (CPD)"
+   ],
+   "store": [
+    "CPD store (Education)"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "payments",
+  "title": "Subscriptions & billing",
+  "group": "Commercial",
+  "desc": "Stripe coaching subscriptions, CPD and future video purchases",
+  "forms": [
+   {
+    "name": "Stripe checkout",
+    "fields": "Product; price; payment; consent",
+    "note": "Billing live/test mode depends on product"
+   }
+  ],
+  "tables": [
+   "Stripe products",
+   "Prices",
+   "Subscriptions",
+   "Webhook events"
+  ],
+  "links": [
+   "club",
+   "education",
+   "video"
+  ],
+  "status": "Configured by product",
+  "verified": {
+   "collections": [],
+   "routes": [
+    "^/billing/",
+    "^/cpd/module-02/checkout",
+    "^/entitlements/"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Education (CPD)"
+   ],
+   "integrations": [
+    "Stripe (payments, subscriptions, CPD purchases)"
+   ],
+   "store": [
+    "auth-users.json"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "brevo",
+  "title": "Email delivery",
+  "group": "Integrations",
+  "desc": "Education subscriptions; athlete transactional invitations under development",
+  "forms": [
+   {
+    "name": "Subscriber form",
+    "fields": "Email; confirmation",
+    "note": "Education subscriptions"
+   },
+   {
+    "name": "Invitation delivery",
+    "fields": "Sender; recipient; status",
+    "note": "Requested Brevo transactional integration"
+   }
+  ],
+  "tables": [
+   "Education mailing list",
+   "Transactional delivery (planned)"
+  ],
+  "links": [
+   "invite",
+   "education"
+  ],
+  "status": "Education existing \u00b7 invitations planned",
+  "verified": {
+   "collections": [
+    "athleteAccountInvites"
+   ],
+   "routes": [
+    "^/athlete-invites/guardian-code",
+    "^/webhooks/brevo",
+    "^/auth/password-reset"
+   ],
+   "apps": [
+    "Public website",
+    "Athlete App invitations (public page)"
+   ],
+   "integrations": [
+    "Email (SMTP / Brevo transactional)"
+   ]
+  },
+  "source": "owner map (conceptual)"
+ },
+ {
+  "id": "auth",
+  "title": "Accounts & login",
+  "group": "Identity",
+  "desc": "Sign-in, registration, roles, sessions, password reset, audit log",
+  "forms": [
+   {
+    "name": "Sign in",
+    "fields": "Username or email; password",
+    "note": "Cookie session with CSRF token"
+   },
+   {
+    "name": "Password reset",
+    "fields": "Username or email; code; new password",
+    "note": "Code by email (guardian email for guardian-managed logins)"
+   }
+  ],
+  "tables": [
+   "Login accounts",
+   "Audit log"
+  ],
+  "links": [
+   "coach",
+   "athlete",
+   "payments"
+  ],
+  "status": "Live",
+  "verified": {
+   "collections": [],
+   "routes": [
+    "^/auth/",
+    "^/snapshot/account"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Athlete App",
+    "Public website"
+   ],
+   "store": [
+    "auth-users.json"
+   ],
+   "integrations": [
+    "Authentication"
+   ]
+  },
+  "source": "added from code (not in the owner map)"
+ },
+ {
+  "id": "inbox",
+  "title": "Results inbox",
+  "group": "Evidence",
+  "desc": "Results sent to the club (files from Console, Video Analysis, athletes) waiting for coach review",
+  "forms": [
+   {
+    "name": "Results inbox",
+    "fields": "Submission; swimmer; status",
+    "note": "Coach accepts or rejects"
+   }
+  ],
+  "tables": [
+   "Results inbox submissions"
+  ],
+  "links": [
+   "result",
+   "console",
+   "video"
+  ],
+  "status": "Live",
+  "verified": {
+   "collections": [],
+   "routes": [
+    "^/results-inbox"
+   ],
+   "apps": [
+    "Coaching Software",
+    "Coach Pool Console / Assistant",
+    "Video Analysis"
+   ]
+  },
+  "source": "added from code (not in the owner map)"
+ },
+ {
+  "id": "snapshot",
+  "title": "Free Snapshot",
+  "group": "Products",
+  "desc": "Free eight-axis snapshot accounts and submissions",
+  "forms": [
+   {
+    "name": "Snapshot",
+    "fields": "Swimmer details; results",
+    "note": "Public free product"
+   }
+  ],
+  "tables": [
+   "Snapshot accounts and history"
+  ],
+  "links": [
+   "capability",
+   "auth"
+  ],
+  "status": "Live",
+  "verified": {
+   "collections": [],
+   "routes": [
+    "^/snapshot/"
+   ],
+   "apps": [
+    "Public website"
+   ]
+  },
+  "source": "added from code (not in the owner map)"
+ },
+ {
+  "id": "wearables",
+  "title": "Wearables",
+  "group": "Integrations",
+  "desc": "Terra connections and wearable session sync into the Athlete App",
+  "forms": [
+   {
+    "name": "Connect wearable",
+    "fields": "Provider widget",
+    "note": "Athlete-initiated"
+   }
+  ],
+  "tables": [
+   "Wearable connections",
+   "Wearable deliveries"
+  ],
+  "links": [
+   "athlete",
+   "result"
+  ],
+  "status": "Live (provider configuration dependent)",
+  "verified": {
+   "collections": [
+    "athleteWearableConnections",
+    "athleteWearableDeliveries"
+   ],
+   "routes": [
+    "^/swimmer/wearable",
+    "^/webhooks/terra",
+    "^/swimmer/athlete-sessions/:sessionId/wearable"
+   ],
+   "apps": [
+    "Athlete App"
+   ],
+   "integrations": [
+    "Wearables (Terra)"
+   ]
+  },
+  "source": "added from code (not in the owner map)"
+ },
+ {
+  "id": "owner",
+  "title": "Owner administration",
+  "group": "Commercial",
+  "desc": "Tier policy, platform insights, website analytics, feedback inbox, pilot, system map",
+  "forms": [
+   {
+    "name": "Tier & Platform Control",
+    "fields": "Tier visibility; billing overview; analytics",
+    "note": "Primary software owner only"
+   },
+   {
+    "name": "Feedback inbox",
+    "fields": "Message; status; decision",
+    "note": ""
+   }
+  ],
+  "tables": [
+   "Website analytics",
+   "Feedback",
+   "Pilot responses"
+  ],
+  "links": [
+   "payments",
+   "auth",
+   "coach"
+  ],
+  "status": "Live",
+  "verified": {
+   "collections": [],
+   "routes": [
+    "^/website-analytics/owner",
+    "^/feedback",
+    "^/pilot/",
+    "^/owner/",
+    "^/db/ownership",
+    "^/auth/audit"
+   ],
+   "apps": [
+    "Coaching Software"
+   ]
+  },
+  "source": "added from code (not in the owner map)"
+ }
+]
