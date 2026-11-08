@@ -129,8 +129,9 @@ const fmtDate = (iso) => { const d = new Date(iso); return Number.isFinite(d.get
 
 // kind: 'guardian' | 'athlete'. link is null for a preview (shown as a placeholder).
 export function buildInviteEmail({ kind, clubName, coachName, swimmerName, link, expiresAt, replyTo }) {
-  const club = text(clubName) || 'Your club'; const coach = text(coachName) || 'your coach';
-  const swimmer = text(swimmerName) || 'the athlete'; const first = swimmer.split(' ')[0];
+  const oneLine = (v) => text(v).replace(/[\r\n\t\u2028\u2029]+/g, ' ').slice(0, 120); // names come from club records: never allow header breaks
+  const club = oneLine(clubName) || 'Your club'; const coach = oneLine(coachName) || 'your coach';
+  const swimmer = oneLine(swimmerName) || 'the athlete'; const first = swimmer.split(' ')[0];
   const url = link || '[secure invitation link]'; const until = fmtDate(expiresAt);
   const isGuardian = kind === 'guardian';
   const subject = isGuardian

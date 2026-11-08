@@ -110,3 +110,8 @@ test('states and delivery events', () => {
   assert.equal(resendAllowed({ deliveries: [{ kind: 'athlete', status: 'failed', at: now.toISOString() }] }, 'athlete', now).ok, true);
   assert.equal(resendAllowed({ deliveries: [{ kind: 'athlete', status: 'sent', at: now.toISOString() }] }, 'athlete', now).status, 429);
 });
+
+test('email subject never contains line breaks from club data (header injection)', () => {
+  const m = buildInviteEmail({ kind: 'guardian', clubName: 'Club\r\nBcc: x@evil.test', coachName: 'C\nX', swimmerName: 'Kit\r\nYoung', link: 'https://athlyrax.com/x', expiresAt: '2026-11-15T12:00:00Z' });
+  assert.ok(!/[\r\n]/.test(m.subject), m.subject);
+});
