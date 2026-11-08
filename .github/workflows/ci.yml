@@ -76,7 +76,7 @@ jobs:
       - name: Athlete App S2 (fixtures, competition reflections, club fixtures read-only)
         run: node --test tests/athlete-competitions.test.mjs
 
-      - name: Athlete App S3 (development diary)
+      - name: Athlete App S3/S4 (development diary, goals, weekly planner)
         run: node --test tests/athlete-development.test.mjs
 
       - name: Full backend storage and security contract
