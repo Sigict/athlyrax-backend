@@ -1,3 +1,4 @@
+import { linkedTestsFromPoolsideSet } from './group-test-results.mjs';
 const list = (value) => Array.isArray(value) ? value : [];
 const text = (value) => String(value ?? '').trim();
 
@@ -237,7 +238,9 @@ export function applyCoachPoolsideCanonicalResult(db = {}, input = {}) {
     updatedBy: text(input.updatedBy),
   };
   if (!written) return { ok: true, db, result: currentResult, set: sets[index], written, kept, conflicts, unchanged: true };
-  return { ok: true, db: { ...db, trainingSessionSets: nextSets }, result: nextResult, set: nextSets[index], written, kept, conflicts };
+  // A planned TEST set: the recorded results also become the swimmer's linked test record (Testing evidence).
+  const linked = linkedTestsFromPoolsideSet({ ...db, trainingSessionSets: nextSets }, { setId });
+  return { ok: true, db: linked.db, result: nextResult, set: nextSets[index], written, kept, conflicts, testsCreated: linked.created };
 }
 
 

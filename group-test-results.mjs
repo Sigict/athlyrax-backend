@@ -261,3 +261,57 @@ export function applyScopedGroupTestSubmission(db,submission) {
     trainingSessionSets:nextSets,__meta:{...(source?.__meta||{}),updatedAt:now}},
     changedCount:changed.length,syncedCount:syncRows.length,scoringEligibleCount:changed.filter(row=>row.capabilityScoringEligible).length};
 }
+
+// ATHLYRAX_POOLSIDE_TEST_SET_LINK: results recorded poolside (Coach Pool Console, Assistants) for a planned
+// TEST set become the swimmer's linked test record, through the same group-test rules (template match,
+// scoring eligibility, linked set). Only swimmers without a test record for that set are added;
+// existing test records are never changed. Sets that are not test sets, or that match no single test
+// template, are left as they are.
+export function linkedTestsFromPoolsideSet(db, { setId } = {}) {
+  const source = db && typeof db === 'object' ? db : {};
+  const setRow = list(source.trainingSessionSets).find((row) => text(row?.id) === text(setId));
+  const isTest = setRow && (setRow.isTestSet === true || setRow.setType === 'test' || setRow.testFlag === true || low(setRow.testFlag) === 'on');
+  if (!isTest) return { db: source, created: 0, reason: 'not a test set' };
+  const schedule = list(source.schedule).find((row) => text(row?.id) === text(setRow.scheduleId || setRow.trainingScheduleId));
+  const session = list(source.trainingSessions).find((row) => text(row?.id) === text(setRow.trainingSessionId || setRow.sessionId));
+  const date = text(setRow.scheduleDate || setRow.date || schedule?.scheduleDate || schedule?.date || session?.date).slice(0, 10);
+  if (!isoDate(date)) return { db: source, created: 0, reason: 'no set date' };
+  const setReps = Math.max(1, Number(setRow.rounds || 1) * Number(setRow.reps || 1));
+  const setDistance = Number(setRow.distance || 0);
+  const templates = [...list(source.templateTests), ...builtInRows()];
+  const candidates = [];
+  for (const template of templates) {
+    if (low(text(template?.testCategory || template?.category || template?.testFamily)) !== 'swimming' && !/^builtin-test-(max|repeatability|aerobic-durability)/.test(text(template?.id))) continue;
+    const items = templateItems(template).filter((item) => item.reps === setReps && (!setDistance || item.distance === setDistance));
+    if (items.length === 1 && protocolMatches(setRow, template, items[0], text(template.id))) candidates.push({ template, item: items[0] });
+  }
+  if (candidates.length !== 1) return { db: source, created: 0, reason: 'no single matching test template' };
+  const { template, item } = candidates[0];
+  const setSquads = [...squadIds(setRow), ...squadIds(schedule), ...squadIds(session)];
+  const bySquad = new Map();
+  for (const [swimmerId, result] of Object.entries(setRow.resultsBySwimmer || {})) {
+    const reps = list(Array.isArray(result) ? result : result?.reps).map((rep) => ({
+      overallTime: text(rep?.overallTime || rep?.time), overallStrokeCount: text(rep?.overallStrokeCount || rep?.strokeCount),
+      strokeCycles: text(rep?.strokeCycles), underwaterDistance: text(rep?.underwaterDistance || rep?.underwater), splits: list(rep?.splits),
+    }));
+    if (!reps.some((rep) => rep.overallTime || rep.overallStrokeCount)) continue;
+    const swimmer = list(source.swimmers).find((row) => text(row?.id) === swimmerId);
+    if (!swimmer) continue;
+    const own = squadIds(swimmer);
+    const squadId = own.find((id) => setSquads.includes(id)) || (setSquads.length ? '' : own[0]);
+    if (!squadId) continue;
+    const selection = { date, squadId, templateId: text(template.id), linkedSetId: text(setRow.id) };
+    if (list(source.tests).some((row) => sameResult(row, { swimmerId, testItemKey: item.key }, selection))) continue; // never overwrite
+    const entries = bySquad.get(squadId) || [];
+    entries.push({ swimmerId, testItemKey: item.key, repResults: reps.slice(0, Math.max(setReps, 1)), expectedFingerprint: groupTestResultFingerprint(null) });
+    bySquad.set(squadId, entries);
+  }
+  let next = source; let created = 0;
+  for (const [squadId, entries] of bySquad) {
+    try {
+      const out = applyScopedGroupTestSubmission(next, { date, squadId, templateId: text(template.id), linkedSetId: text(setRow.id), entries });
+      next = out.db; created += out.changedCount;
+    } catch { /* a swimmer whose recorded reps are not a valid test entry stays as set results only */ }
+  }
+  return { db: next, created, templateId: text(template.id), testItemKey: item.key };
+}
