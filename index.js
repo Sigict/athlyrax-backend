@@ -3898,6 +3898,23 @@ app.post('/coach/poolside/sessions/:sessionId/lanes', requireStrictAuth, require
 });
 
 
+// ATHLYRAX_OWNER_SYSTEM_MAP_V1: read-only system map for the primary software owner only. The files live
+// outside the public website and are served only after server-side owner authorisation.
+const OWNER_MAP_DIR = path.join(__dirname, 'owner');
+const OWNER_MAP_FILES = { '/owner/system-map': ['system-map.html', 'text/html; charset=utf-8'], '/owner/system-map/app.js': ['system-map.js', 'text/javascript; charset=utf-8'], '/owner/system-map/data.json': ['system-map.data.json', 'application/json; charset=utf-8'], '/owner/system-map/designed': ['AthlyraX_Owner_System_Map.html', 'text/html; charset=utf-8'] };
+for (const [route, [file, type]] of Object.entries(OWNER_MAP_FILES)) {
+	app.get(route, requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
+		const full = path.join(OWNER_MAP_DIR, file);
+		if (!fs.existsSync(full)) { res.status(404).json({ error: 'Not available.' }); return; }
+		res.setHeader('Cache-Control', 'no-store');
+		res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+		res.setHeader('Content-Type', type);
+		// The supplied original map is a single self-contained file with inline script: allow only that, nothing external.
+		if (file === 'AthlyraX_Owner_System_Map.html') res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+		res.status(200).send(fs.readFileSync(full));
+	});
+}
+
 // ATHLYRAX_ATHLETE_ACCOUNT_INVITES_V1: link an athlete's login to an existing swimmer record.
 const ATHLETE_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.ATHLETE_INVITE_TTL_HOURS || '168', 10) || 168);
 const ATHLETE_INVITE_MANAGER_ROLES = new Set(['head-coach', 'coach', 'software-owner']);

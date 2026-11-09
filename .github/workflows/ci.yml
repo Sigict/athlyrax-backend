@@ -64,6 +64,9 @@ jobs:
       - name: Athlete App invitations link logins to existing swimmers
         run: node --test tests/athlete-account-invites.integration.test.mjs tests/athlete-home-projection.test.mjs
 
+      - name: Owner system map (owner-only access, data generated from code)
+        run: node --test tests/owner-system-map.integration.test.mjs
+
       - name: Athlete App phase 1 (session names, server capability profile, engine copy integrity)
         run: node --test tests/athlete-app-phase1.test.mjs tests/coach-poolside-projection.test.mjs
 
