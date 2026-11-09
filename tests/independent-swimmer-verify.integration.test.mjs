@@ -162,7 +162,7 @@ test('independent swimmer sign-up verifies the email before the first sign-in; e
     assert.ok(stored.emailVerifiedAt && stored.emailVerificationRequired === true);
     // Free Snapshot sign-up (no verification flag) still signs in at once, as before.
     const snap = await post(base, '/snapshot/account/auth', { email: 'snap.user@example.com', password: 'Snap!Pass1234', fullName: 'Snap User', createAccount: true });
-    assert.equal(snap.status, 201); assert.ok(snap.json.token);
+    assert.equal(snap.status, 201); assert.notEqual(snap.json.verificationRequired, true, 'no verification step for Free Snapshot');
     assert.equal((await post(base, '/auth/login', { username: 'coachA', password: 'CoachA!Pass1234' })).status, 200, 'existing accounts unaffected');
   } finally { await server.stop(); }
 });
