@@ -132,6 +132,16 @@ app.post('/coach/poolside/competitions/:fixtureId/events/:eventId/evidence', req
 		totalTime: req.body?.totalTime,
 		coachNotes: req.body?.coachNotes,
 		videoAnalyses: req.body?.videoAnalyses,
+		// Console race detail (validated in applyCoachPoolsideCompetitionEvidence; measured values only).
+		// This template is what production runs (patch-coach-link-lifecycle.mjs rewrites the index.js
+		// block that holds these routes), so it must match the index.js route.
+		splits: req.body?.splits,
+		segmentTimes: req.body?.segmentTimes,
+		strokeCount: req.body?.strokeCount,
+		position: req.body?.position,
+		heat: req.body?.heat,
+		lane: req.body?.lane,
+		splitLength: req.body?.splitLength,
 		sourceKind: req.body?.sourceKind || 'coach',
 		source: req.body?.source || 'coach-poolside',
 		updatedBy: req.auth?.username,

@@ -11,6 +11,9 @@ import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
+import { registerCpdModule03 } from './cpd-module03.mjs';
+import { registerCpdModule03Uploads } from './cpd-module03-uploads.mjs';
+import { registerCpdModule03Preview } from './cpd-module03-preview.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
 import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraining, personalTrainingPath } from './athlete-personal-training.mjs';
 import { buildClubResults, buildSelfReportedProgress, testProtocols } from './athlete-tests-races.mjs';
@@ -306,6 +309,10 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 		switch (String(event?.type || '')) {
 			case 'checkout.session.completed': {
 				const session = event?.data?.object;
+				if (session?.metadata?.course === 'cpd01-module03') {
+					if (cpdModule03) await cpdModule03.onCheckoutCompleted(session);
+					break;
+				}
 				if (session?.metadata?.course === 'cpd01-module02') {
 					// One-time education course: handled by the course module, never as a software subscription.
 					if (cpdModule02) await cpdModule02.onCheckoutCompleted(session);
@@ -347,6 +354,7 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 			case 'charge.dispute.created': {
 				// Course access ends when Stripe confirms a refund or dispute for that purchase.
 				if (cpdModule02) await cpdModule02.onRefundOrDispute(event?.data?.object);
+				if (cpdModule03) await cpdModule03.onRefundOrDispute(event?.data?.object);
 				break;
 			}
 			case 'invoice.paid': {
@@ -3878,6 +3886,22 @@ const cpdModule02 = registerCpdModule02(app, {
 		&& String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
 });
 
+// Module 03 learner course routes are provisioned independently; public sales default off.
+const cpdModule03 = registerCpdModule03(app, {
+  storageRoot: STORAGE_ROOT,
+  requireStrictAuth,
+  requireSoftwareOwnerRole,
+  sendMail: AUTH_SMTP_HOST && AUTH_SMTP_FROM
+    ? (message) => getAuthResetMailTransport().sendMail({ from: AUTH_SMTP_FROM, ...message })
+    : null,
+  isSoftwareOwner: (req) => String(req.auth?.role || '').trim() === 'software-owner'
+    && String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
+});
+
+// Module 03 private uploads and owner-only course preview remain isolated from learner records.
+registerCpdModule03Uploads(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
+registerCpdModule03Preview(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
+
 // ATHLYRAX_COACH_ROUTES_OUTSIDE_LINK_REGION: these routes live here because the coach-link build
 // transforms rewrite everything between the swimmer disconnect route and the /db route.
 app.post('/coach/observations', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
@@ -3907,6 +3931,23 @@ app.post('/coach/poolside/sessions/:sessionId/lanes', requireStrictAuth, require
 	}));
 });
 
+
+// ATHLYRAX_OWNER_SYSTEM_MAP_V1: read-only system map for the primary software owner only. The files live
+// outside the public website and are served only after server-side owner authorisation.
+const OWNER_MAP_DIR = path.join(__dirname, 'owner');
+const OWNER_MAP_FILES = { '/owner/system-map': ['system-map.html', 'text/html; charset=utf-8'], '/owner/system-map/app.js': ['system-map.js', 'text/javascript; charset=utf-8'], '/owner/system-map/data.json': ['system-map.data.json', 'application/json; charset=utf-8'], '/owner/system-map/designed': ['AthlyraX_Owner_System_Map.html', 'text/html; charset=utf-8'] };
+for (const [route, [file, type]] of Object.entries(OWNER_MAP_FILES)) {
+	app.get(route, requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
+		const full = path.join(OWNER_MAP_DIR, file);
+		if (!fs.existsSync(full)) { res.status(404).json({ error: 'Not available.' }); return; }
+		res.setHeader('Cache-Control', 'no-store');
+		res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+		res.setHeader('Content-Type', type);
+		// The supplied original map is a single self-contained file with inline script: allow only that, nothing external.
+		if (file === 'AthlyraX_Owner_System_Map.html') res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+		res.status(200).send(fs.readFileSync(full));
+	});
+}
 
 // ATHLYRAX_ATHLETE_ACCOUNT_INVITES_V1: link an athlete's login to an existing swimmer record.
 const ATHLETE_INVITE_TTL_HOURS = Math.max(1, Number.parseInt(process.env.ATHLETE_INVITE_TTL_HOURS || '168', 10) || 168);
@@ -7620,6 +7661,17 @@ app.post('/coach/poolside/sessions/:sessionId/attendance', requireStrictAuth, re
 	}));
 });
 
+app.post('/coach/poolside/sessions/:sessionId/sets/:setId/results', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachPoolsideCanonicalResult(db, {
+		sessionId: req.params?.sessionId,
+		setId: req.params?.setId,
+		swimmerId: req.body?.swimmerId,
+		reps: req.body?.reps,
+		source: req.body?.source,
+		updatedBy: req.auth?.username,
+	}));
+});
+
 app.post('/coach/poolside/sessions/:sessionId/sets/:setId/executions', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
 	await applyCoachPoolsideMutation(req, res, (db) => applyCoachPoolsideExecution(db, {
 		sessionId: req.params?.sessionId,
@@ -7650,6 +7702,14 @@ app.post('/coach/poolside/competitions/:fixtureId/events/:eventId/evidence', req
 		totalTime: req.body?.totalTime,
 		coachNotes: req.body?.coachNotes,
 		videoAnalyses: req.body?.videoAnalyses,
+		// Console race detail (validated in applyCoachPoolsideCompetitionEvidence; measured values only).
+		splits: req.body?.splits,
+		segmentTimes: req.body?.segmentTimes,
+		strokeCount: req.body?.strokeCount,
+		position: req.body?.position,
+		heat: req.body?.heat,
+		lane: req.body?.lane,
+		splitLength: req.body?.splitLength,
 		sourceKind: req.body?.sourceKind || 'coach',
 		source: req.body?.source || 'coach-poolside',
 		updatedBy: req.auth?.username,

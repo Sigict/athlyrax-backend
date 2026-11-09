@@ -67,6 +67,9 @@ jobs:
       - name: Athlete App invitations link logins to existing swimmers
         run: node --test tests/athlete-account-invites.integration.test.mjs tests/athlete-home-projection.test.mjs
 
+      - name: Owner system map (owner-only access, data generated from code)
+        run: node --test tests/owner-system-map.integration.test.mjs
+
       - name: Athlete App phase 1 (session names, server capability profile, engine copy integrity)
         run: node --test tests/athlete-app-phase1.test.mjs tests/coach-poolside-projection.test.mjs
 
@@ -76,6 +79,9 @@ jobs:
       - name: Athlete App phase 3A (tests and races, read-only club results)
         run: node --test tests/athlete-tests-races.test.mjs
 
+      - name: Testing workflow (poolside test-set results become linked test records)
+        run: node --test tests/poolside-test-set-link.test.mjs tests/console-competition-route-build.test.mjs tests/coach-poolside-template-parity.test.mjs
+
       - name: Athlete App S2 (fixtures, competition reflections, club fixtures read-only)
         run: node --test tests/athlete-competitions.test.mjs
 
@@ -84,6 +90,12 @@ jobs:
 
       - name: Athlete App S5a (Master v31 import, legacy archive, profile)
         run: node --test tests/athlete-import.test.mjs
+
+      - name: Module 03 owner preview (authorization, lesson checks, assessment, test certificate)
+        run: node --test tests/cpd-module03-preview.test.mjs
+
+      - name: Module 03 learner course (paid access, three checks, verified certificate)
+        run: node --test tests/cpd-module03-public.test.mjs
 
       - name: Full backend storage and security contract
         run: npm run test:storage-all

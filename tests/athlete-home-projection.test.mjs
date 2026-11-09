@@ -152,3 +152,26 @@ test('athlete sets show numeric send-offs as clock time', () => {
   const sets = buildAthleteHomeProjection(db, { username: 'a.user' }).sessions[0].sets;
   assert.deepEqual(sets.map((x) => x.sendoff), ['1:45', '1:40', '1:35']);
 });
+
+// ATHLYRAX_ATHLETE_OWN_CLUB_RESULTS
+test('athlete sees only their own recorded club results, lane and start offset', async () => {
+  const { buildAthleteHomeProjection } = await import('../athlete-home-projection.mjs');
+  const db = {
+    squads: [{ id: 'sq' }],
+    swimmers: [{ id: 'amy', firstName: 'Amy', squadId: 'sq', swimmerAccountUsername: 'amy.app' }, { id: 'ben', firstName: 'Ben', squadId: 'sq' }],
+    schedule: [{ id: 'sch', scheduleDate: '2026-11-08', squadIds: ['sq'], mainFocus: 'Test' }],
+    trainingSessions: [{ id: 'ts', scheduleId: 'sch', poolsideLanePlan: { lanes: [{ lane: 'Lane 2', swimmerIds: ['ben', 'amy'], sendoffSeconds: 60, staggerSeconds: 5 }] } }],
+    trainingSessionSets: [{ id: 'set', trainingSessionId: 'ts', reps: 2, distance: 50, sendOff: '1:00', resultsBySwimmer: {
+      amy: { reps: [{ rep: 1, overallTime: '31.20', overallStrokeCount: '36', splits: [{ time: '15.10', strokeCount: '18' }, { time: '16.10', strokeCount: '18' }], coachNote: 'private' }, {}], source: 'coach-poolside', updatedBy: 'coachA' },
+      ben: { reps: [{ rep: 1, overallTime: '29.90' }] },
+    } }],
+  };
+  const home = buildAthleteHomeProjection(db, { username: 'amy.app', athleteInviteManaged: true });
+  const s = home.sessions.find((x) => x.id === 'ts');
+  const set = s.sets[0];
+  assert.deepEqual(set.myResult.reps, [{ rep: 1, overallTime: '31.20', overallStrokeCount: '36', splits: [{ time: '15.10', strokeCount: '18', distance: null }, { time: '16.10', strokeCount: '18', distance: null }] }]);
+  assert.equal(set.myResult.label, 'Recorded by the club (read-only)');
+  assert.ok(!JSON.stringify(home).includes('29.90'), 'another swimmer\'s time is never included');
+  assert.ok(!JSON.stringify(home).includes('private') && !JSON.stringify(home).includes('coachA'), 'no coach-only fields');
+  assert.deepEqual(s.myLane, { lane: 'Lane 2', position: 2, swimmersInLane: 2, sendoffSeconds: 60, staggerSeconds: 5, startOffsetSeconds: 5 });
+});

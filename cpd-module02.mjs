@@ -59,7 +59,11 @@ function loadQuestions() {
 // background remains visible behind the original brand artwork.
 function pdfText(x) { return String(x).normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/[\\()]/g, (m) => '\\' + m); }
 function textWidth(s, size) { return String(s).length * size * 0.5; } // Helvetica average, used only for centring
-export function buildCertificatePdf({ name, completedAt, certificateId, score, verifyUrl, logoJpeg }) {
+export function buildCertificatePdf({ name, completedAt, certificateId, score, verifyUrl, logoJpeg,
+  courseHeading = 'CPD 01 - Module 02: Our Body, Our Engine',
+  courseSubtitle = 'Understanding Energy Systems',
+  courseSummary = 'Three video lessons (21 min 54 s), two knowledge checks and a final assessment',
+  preview = false }) {
   const W = 842, H = 595;
   const centre = (s, size, y, font = 'F1', rgb = '1 1 1') => `BT /${font} ${size} Tf ${rgb} rg ${Math.max(40, (W - textWidth(s, size)) / 2).toFixed(1)} ${y} Td (${pdfText(s)}) Tj ET`;
   const date = new Date(completedAt);
@@ -76,13 +80,13 @@ export function buildCertificatePdf({ name, completedAt, certificateId, score, v
     centre('This certifies that', 14, 352, 'F1', '0.8 0.88 0.93'),
     centre(name.slice(0, 70), 30, 306, 'F2'),
     centre('has successfully completed', 14, 270, 'F1', '0.8 0.88 0.93'),
-    centre('CPD 01 - Module 02: Our Body, Our Engine', 20, 236, 'F2', '0.33 0.86 0.97'),
-    centre('Understanding Energy Systems', 15, 212, 'F1', '0.33 0.86 0.97'),
-    centre('Three video lessons (21 min 54 s), two knowledge checks and a final assessment', 11.5, 176, 'F1', '0.8 0.88 0.93'),
+    centre(courseHeading, 20, 236, 'F2', '0.33 0.86 0.97'),
+    centre(courseSubtitle, 15, 212, 'F1', '0.33 0.86 0.97'),
+    centre(courseSummary, 11.5, 176, 'F1', '0.8 0.88 0.93'),
     centre(`Final assessment: ${score}/10 (pass mark 8/10)   |   Completed: ${dateText}`, 12, 152, 'F1'),
     centre(`Certificate ID: ${certificateId}`, 12, 112, 'F2'),
     centre(`Verify: ${verifyUrl}`, 9.5, 92, 'F1', '0.7 0.8 0.86'),
-    centre('Issued by AthlyraX Education - athlyrax.com', 9.5, 62, 'F1', '0.7 0.8 0.86'),
+    centre(preview ? 'OWNER PREVIEW - NOT A VALID CERTIFICATE' : 'Issued by AthlyraX Education - athlyrax.com', 9.5, 62, 'F1', preview ? '1 0.62 0.6' : '0.7 0.8 0.86'),
   );
   const stream = ops.join('\n') + '\n';
   const objects = [

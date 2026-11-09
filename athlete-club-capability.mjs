@@ -6,6 +6,7 @@
 import { buildScopedAthlyraxCapabilitySnapshot } from './capability-engine/src/utils/scopedCapabilitySnapshot.js';
 import { swimmingReportConfig } from './capability-engine/src/sports/swimming/swimmingReports.js';
 import { officialCapabilityRadar } from './capability-engine/src/utils/officialCapabilityRadar.js';
+import { swimmerSpeedLevel } from './capability-engine/src/utils/athlyraxCapabilityEngine.js';
 
 const text = (value) => String(value ?? '').trim();
 const asArray = (value) => (Array.isArray(value) ? value : []);
@@ -21,7 +22,22 @@ export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = cur
   if (!swimmerId || !season.start || !season.end) return null;
   const squadId = text(swimmer.currentSquadId || swimmer.squadId || asArray(swimmer.currentSquadIds)[0] || asArray(swimmer.squadIds)[0]) || 'all';
   const calculationDate = season.end < today ? season.end : today;
+  // ATHLYRAX_ATHLETE_CAPABILITY_SPEED_LEVEL: same rule as the club's ISP (ispCanonicalRadars.js).
+  // Consistency metrics are placed on the world-record scale by the swimmer's speed level; with no timed
+  // test or race in the window, the best timed swim of the previous 12 months sets it, and with none at
+  // all those metrics stay Not Scored ("Needs a timed test or race") instead of a raw consistency score.
+  const lookbackStart = new Date(Date.parse(`${calculationDate}T12:00:00Z`) - 364 * 86400000).toISOString().slice(0, 10);
+  let fallbackSpeedLevel = null;
+  try {
+    const history = buildScopedAthlyraxCapabilitySnapshot({
+      db, scope: { swimmerId, squadId, startDate: '', endDate: calculationDate }, activeWindow: { start: '', end: calculationDate },
+      activeAccountId: '', activeTenantId: text(tenantId), calculationDate,
+    });
+    fallbackSpeedLevel = swimmerSpeedLevel(asArray(history?.axes).flatMap((axis) => asArray(axis?.metricRecords))
+      .filter((record) => text(record?.date).slice(0, 10) >= lookbackStart));
+  } catch { fallbackSpeedLevel = null; }
   const snapshot = buildScopedAthlyraxCapabilitySnapshot({
+    fallbackSpeedLevel, requireSpeedLevel: true,
     db,
     scope: { swimmerId, squadId, seasonStartDate: season.start, startDate: season.start, endDate: season.end },
     activeWindow: { start: season.start, end: season.end },
