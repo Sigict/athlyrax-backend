@@ -12,6 +12,7 @@ import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerCpdModule03Uploads } from './cpd-module03-uploads.mjs';
+import { registerCpdModule03Preview } from './cpd-module03-preview.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
 import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraining, personalTrainingPath } from './athlete-personal-training.mjs';
 import { buildClubResults, buildSelfReportedProgress, testProtocols } from './athlete-tests-races.mjs';
@@ -3867,6 +3868,7 @@ const cpdModule02 = registerCpdModule02(app, {
 
 // Module 03 staged owner uploads only. No public sales or learner access enabled.
 registerCpdModule03Uploads(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
+registerCpdModule03Preview(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
 
 // ATHLYRAX_COACH_ROUTES_OUTSIDE_LINK_REGION: these routes live here because the coach-link build
 // transforms rewrite everything between the swimmer disconnect route and the /db route.
