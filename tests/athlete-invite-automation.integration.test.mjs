@@ -430,3 +430,45 @@ test('staged rollout: only clubs listed in ATHLETE_INVITE_EMAIL_TENANTS send aut
     assert.equal(bulk.payload.results[0].outcome, 'sent');
   } finally { await on.stop(); }
 });
+
+test('Send Again on a link-only invitation emails the guardian from the swimmer record; consent, athlete link, one linked record', async () => {
+  const seed = (paths) => writeJson(path.join(paths.storageRoot, 'tenants', 'tenant-a', 'db.json'), {
+    squads: [{ id: 'sq-a', name: 'Squad A' }],
+    swimmers: [{ id: 'amelia', firstName: 'Amelia', lastName: 'Foster', squadId: 'sq-a', dob: '2012-05-01', parent1Name: 'Tom Foster', parent2Name: 'Jane Foster', primaryContact: 'Parent 2', primaryContactEmail: 'jane.foster@example.com', swimmerEmail: 'amelia.f@example.com' }],
+    tests: [{ id: 't-am', swimmerId: 'amelia', time: '1:05.00' }],
+  });
+  const server = await startServer({ AUTH_LOGIN_RATE_MAX_ATTEMPTS: '200', AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS: '400' }, seed);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const ov = await request(base, '/coach/athlete-invites/overview', coach);
+    const r = ov.payload.swimmers.find((x) => x.swimmerId === 'amelia');
+    assert.deepEqual([r.athleteEmail, r.athleteSource, r.guardianEmail, r.guardianSource, r.guardianName, r.guardianRelationship], ['amelia.f@example.com', 'profile', 'jane.foster@example.com', 'profile', 'Jane Foster', 'Parent 2 / Mother']);
+    // An older invitation shared as a link.
+    const link = await post(base, '/coach/swimmers/amelia/athlete-invites', { guardianEmail: 'jane.foster@example.com' }, coach);
+    assert.equal(link.response.status, 201);
+    const sent = await post(base, `/coach/athlete-invites/${link.payload.invite.id}/resend`, {}, coach);
+    assert.equal(sent.response.status, 200, JSON.stringify(sent.payload));
+    assert.equal(sent.payload.kind, 'guardian');
+    assert.equal(sent.payload.superseded, link.payload.invite.id);
+    const invites = tenantDb(server).athleteAccountInvites;
+    assert.equal(invites.length, 2, 'history kept');
+    assert.equal(invites.find((i) => i.id === link.payload.invite.id).supersededBy, sent.payload.inviteId);
+    const st = await request(base, '/coach/swimmers/amelia/athlete-invites', coach);
+    assert.deepEqual(st.payload.invites.map((i) => [i.status, i.delivery]).sort(), [['awaiting-guardian', 'email'], ['revoked', 'link']]);
+    // Old guardian link refused; the emailed one works.
+    assert.notEqual((await post(base, '/athlete-invites/guardian-code', { token: link.payload.guardianToken })).response.status, 200);
+    const gTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'jane.foster@example.com')));
+    assert.equal((await post(base, '/athlete-invites/guardian-code', { token: gTok })).response.status, 200);
+    const code = await waitFor(() => (mails(server).filter((x) => x.to === 'jane.foster@example.com').map((x) => (x.text.match(/verification code is: (\d{6})/) || [])[1]).filter(Boolean))[0]);
+    assert.equal((await post(base, '/athlete-invites/guardian-consent', { token: gTok, name: 'Jane Foster', relationship: 'Parent', consent: true, consentVersion: 'athlete-app-guardian-consent-v2', code })).response.status, 200);
+    // The athlete link goes to the Swimmer Email automatically.
+    const aTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'amelia.f@example.com')));
+    assert.equal((await post(base, '/athlete-invites/accept', { token: aTok, username: 'amelia.foster', password: 'Athlete!Pass1234', fullName: 'Amelia Foster', email: 'amelia.f@example.com' })).response.status, 201);
+    const db = tenantDb(server);
+    assert.equal(db.swimmers.length, 1, 'no duplicate swimmer');
+    assert.equal(db.swimmers[0].swimmerAccountUsername, 'amelia.foster');
+    assert.deepEqual(db.tests.map((t) => [t.id, t.swimmerId, t.time]), [['t-am', 'amelia', '1:05.00']]);
+    assert.equal(db.swimmers[0].primaryContactEmail, 'jane.foster@example.com');
+  } finally { await server.stop(); }
+});

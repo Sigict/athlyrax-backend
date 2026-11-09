@@ -103,6 +103,11 @@ export function publicInvite(invite = {}, now = Date.now()) {
     targetEmail: text(invite.targetEmail), guardianRequired: invite.guardianRequired === true,
     guardianConsentAt: text(invite.guardianConsent?.at), acceptedAt: text(invite.acceptedAt), acceptedBy: text(invite.acceptedBy),
     revokedAt: text(invite.revokedAt), revokedBy: text(invite.revokedBy),
+    // How it reached the recipient: 'email' (sent by AthlyraX) or 'link' (shared by the coach), and the
+    // last email status the provider reported (queued | sent | failed | ...). No address, token or code.
+    delivery: invite.delivery === 'email' ? 'email' : 'link',
+    lastDeliveryStatus: text((Array.isArray(invite.deliveries) ? invite.deliveries : []).slice(-1)[0]?.status),
+    supersededBy: text(invite.supersededBy),
   };
 }
 
