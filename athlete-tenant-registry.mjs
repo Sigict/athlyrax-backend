@@ -72,8 +72,16 @@ export function activeAthleteTenantConnections(authUser = {}, primaryTenantId = 
 }
 
 export function mergeAthleteHomeProjections(projections = []) {
-  const valid = asArray(projections).filter((row) => row && typeof row === 'object' && row.athlete);
+  let valid = asArray(projections).filter((row) => row && typeof row === 'object' && row.athlete);
   if (!valid.length) return null;
+  // An independent athlete who joined a club: their own profile (primary space) and the club record
+  // are different records. While connected, the club record is the identity shown; the independent
+  // profile is not merged and is shown again after they leave. Two different club records still fail.
+  if (new Set(valid.map((row) => text(row?.athlete?.id))).size > 1) {
+    const club = valid.filter((row) => row.primaryTenantProjection !== true);
+    if (club.length && new Set(club.map((row) => text(row?.athlete?.id))).size === 1) valid = club;
+  }
+  valid = valid.map(({ primaryTenantProjection, ...row }) => row);
   const athleteId = text(valid[0]?.athlete?.id);
   if (!athleteId) return null;
   if (valid.some((row) => text(row?.athlete?.id) !== athleteId)) {

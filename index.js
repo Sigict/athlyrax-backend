@@ -955,6 +955,32 @@ function hashPasswordResetCode(code) {
 	return crypto.createHash('sha256').update(String(code || ''), 'utf8').digest('hex');
 }
 
+// Email verification for independent swimmer sign-ups (flag set only on accounts created with it).
+const emailVerifyByUser = new Map();
+const EMAIL_NOT_VERIFIED_RESPONSE = Object.freeze({ error: 'Verify your email address first: enter the 6-digit code we emailed you, or request a new code.', needsEmailVerification: true });
+// Ambiguity-safe identifier lookup (the same resolver the production sign-in uses).
+function lookupAccountByIdentifier(identifier) {
+	return resolveLoginUserByIdentifier(identifier)?.user || null;
+}
+function emailVerificationPending(user) {
+	return Boolean(user && user.emailVerificationRequired === true && !String(user.emailVerifiedAt || '').trim());
+}
+async function sendEmailVerificationCode(user) {
+	const email = String(user?.email || '').trim();
+	if (!AUTH_EMAIL_PATTERN.test(email)) throw new Error('No valid email address.');
+	const code = makePasswordResetCode();
+	const lines = [`Hi ${String(user.fullName || '').split(' ')[0] || 'there'},`, '', `Your AthlyraX verification code is: ${code}`, 'It expires in 30 minutes.', '', 'Enter it on the AthlyraX swimmer sign-in page to finish creating your account. If you did not sign up, ignore this email.'];
+	if (AUTH_PASSWORD_RESET_DELIVERY === 'smtp') {
+		if (!AUTH_SMTP_HOST || !AUTH_SMTP_FROM) throw new Error('SMTP is not configured.');
+		await getAuthResetMailTransport().sendMail({ from: AUTH_SMTP_FROM, to: email, subject: 'AthlyraX: verify your email', text: lines.join('\n') });
+	} else {
+		const outbox = String(process.env.ATHLYRAX_DEV_EMAIL_OUTBOX || '').trim();
+		if (outbox) fs.appendFileSync(outbox, `${JSON.stringify({ to: email, subject: 'AthlyraX: verify your email', text: lines.join('\n'), at: new Date().toISOString() })}\n`);
+		console.log(`[auth] development verification email to ${maskEmail(email)} (code not logged)`);
+	}
+	emailVerifyByUser.set(String(user.username).toLowerCase(), { codeHash: hashPasswordResetCode(code), expiresAtMs: Date.now() + 30 * 60000, sentAtMs: Date.now(), attempts: 0 });
+}
+
 function findAuthUserByIdentifier(identifier) {
 	const normalized = String(identifier || '').trim();
 	if (!normalized) return null;
@@ -1999,6 +2025,15 @@ function normalizeAuthUserRows(rows) {
 				partnerAttributionAt,
 				tenantId,
 				billing,
+				// Independent swimmer email verification (only accounts created with it carry the flag).
+				...(row?.emailVerificationRequired === true ? { emailVerificationRequired: true, emailVerifiedAt: String(row?.emailVerifiedAt || '').trim() } : {}),
+				// Athlete App club connections (active, left or revoked by the club): kept so a revocation and
+				// an independent athlete's club link hold after a restart.
+				...(Array.isArray(row?.athleteTenantConnections) && row.athleteTenantConnections.length ? { athleteTenantConnections: row.athleteTenantConnections.slice(-50).filter((c) => c && typeof c === 'object').map((c) => Object.fromEntries(['tenantId', 'clubId', 'clubName', 'status', 'source', 'connectedAt', 'revokedAt', 'revokedBy', 'leftAt'].filter((k) => c[k] !== undefined && c[k] !== null && c[k] !== '').map((k) => [k, String(c[k]).slice(0, 200)]))) } : {}),
+				...(row?.athleteInviteManaged === true ? { athleteInviteManaged: true } : {}),
+				...(row?.independentProfile && typeof row.independentProfile === 'object' ? { independentProfile: { tenantId: String(row.independentProfile.tenantId || '').slice(0, 120), swimmerId: String(row.independentProfile.swimmerId || '').slice(0, 120) } } : {}),
+				// Guardian-managed Athlete App logins: the verified parent/guardian receives password resets.
+				...(row?.managedBy && typeof row.managedBy === 'object' ? { managedBy: Object.fromEntries(['guardianEmail', 'guardianName', 'relationship', 'inviteId', 'tenantId', 'consentAt'].map((k) => [k, String(row.managedBy[k] || '').trim()])) } : {}),
 			};
 		})
 		.filter(Boolean);
@@ -4656,14 +4691,21 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		account = { username: String(signedIn.username), email: String(signedIn.email || '') };
 		// One athlete identity: an account that already has its own athlete profile in another space cannot
 		// also take over a club record (the two swimmer ids would be two identities).
+		// An independent athlete (own athlete profile in their own space) joins a club through the club's
+		// invitation: the club record becomes the identity the Athlete App shows while connected; the
+		// independent profile is kept unchanged (never merged) and is shown again if they leave the club.
+		// Personal training is stored per account, so it stays available throughout.
 		const primary = normalizeTenantId(signedIn.tenantId);
 		if (primary && primary !== t.key) {
 			const own = athleteTenantPaths(primary);
 			const ownDb = own ? readJsonFile(own.paths.dbPath) || {} : {};
-			if ((Array.isArray(ownDb.swimmers) ? ownDb.swimmers : []).some((r) => String(r?.swimmerAccountUsername || '').toLowerCase() === account.username.toLowerCase())) {
-				res.status(409).json({ error: 'This login already has its own athlete profile. Create a new login from this invitation; joining an existing independent profile to a club record is not supported yet.' });
+			const ownRow = (Array.isArray(ownDb.swimmers) ? ownDb.swimmers : []).find((r) => String(r?.swimmerAccountUsername || '').toLowerCase() === account.username.toLowerCase());
+			const otherClub = (Array.isArray(signedIn.athleteTenantConnections) ? signedIn.athleteTenantConnections : []).some((c) => normalizeTenantId(c?.tenantId) !== t.key && normalizeTenantId(c?.tenantId) !== primary && ['active', 'approved'].includes(String(c?.status || '').toLowerCase()));
+			if (otherClub) {
+				res.status(409).json({ error: 'This login is already connected to another club. Leave that club in the Athlete App first, then accept this invitation.' });
 				return;
 			}
+			if (ownRow) account.independentProfile = { tenantId: primary, swimmerId: String(ownRow.id || '') };
 		}
 	} else {
 		const password = String(req.body?.password || '');
@@ -4709,17 +4751,18 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 	// account cannot be saved, the account changes are rolled back and the link is undone; if even the
 	// undo fails, reconcileOrphanedAthleteLinks reverts it on the next club access.
 	const user = newUser || signedIn;
-	const before = newUser ? null : { athleteInviteManaged: user.athleteInviteManaged, athleteTenantConnections: user.athleteTenantConnections };
+	const before = newUser ? null : { athleteInviteManaged: user.athleteInviteManaged, athleteTenantConnections: user.athleteTenantConnections, independentProfile: user.independentProfile };
 	try {
 		user.athleteInviteManaged = true;
 		// The club connection the Athlete App shows (also for the account's own club).
 		const rows = Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections.filter((c) => normalizeTenantId(c?.tenantId) !== t.key) : [];
 		user.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, clubName: clubDisplayName(t.key) || 'Club', status: 'active', source: 'athlete-invite', connectedAt: new Date().toISOString() }];
+		if (account.independentProfile && !newUser) user.independentProfile = account.independentProfile;
 		if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_AUTH_PERSIST')) throw new Error('test: account save failed');
 		persistAuthUsers();
 	} catch (error) {
 		if (newUser) dropNewUser();
-		else { user.athleteInviteManaged = before.athleteInviteManaged; user.athleteTenantConnections = before.athleteTenantConnections; }
+		else { user.athleteInviteManaged = before.athleteInviteManaged; user.athleteTenantConnections = before.athleteTenantConnections; user.independentProfile = before.independentProfile; }
 		let undone = false;
 		try {
 			if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_LINK_COMPENSATION')) throw new Error('test: undo failed');
@@ -4744,6 +4787,34 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		payload.csrfToken = session.csrf;
 	}
 	res.status(newUser ? 201 : 200).json(payload);
+});
+
+// Athlete leaves a club they joined through an invitation. Only the account link is removed: the club
+// keeps its swimmer record and history; the athlete keeps their personal training and, for an
+// independent athlete, their own profile, which the Athlete App shows again.
+app.post('/swimmer/clubs/leave', requireStrictAuth, requireSwimmerRole, async (req, res) => {
+	const user = findAuthUser(String(req.auth?.username || '').trim());
+	const tenantKey = normalizeTenantId(req.body?.tenantId);
+	if (!user || !tenantKey) { res.status(400).json({ error: 'Choose the club to leave.' }); return; }
+	if (tenantKey === normalizeTenantId(user.tenantId)) { res.status(409).json({ error: 'This login was created by the club. Ask the club to remove the link instead.' }); return; }
+	const conn = (Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).find((c) => normalizeTenantId(c?.tenantId) === tenantKey && ['active', 'approved'].includes(String(c?.status || '').toLowerCase()));
+	const t = athleteTenantPaths(tenantKey);
+	if (!conn || !t) { res.status(404).json({ error: 'You are not connected to that club.' }); return; }
+	const username = String(user.username || '');
+	let out = null;
+	try {
+		out = await mutateAthleteTenantDb(t.paths, (db) => {
+			const row = (Array.isArray(db.swimmers) ? db.swimmers : []).find((r) => String(r?.swimmerAccountUsername || '').toLowerCase() === username.toLowerCase());
+			if (!row) return { ok: true, noLink: true, db };
+			return unlinkAthleteAccount(db, row.id, { actor: username, reason: 'Athlete left the club' });
+		});
+	} catch { out = null; }
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'Could not leave the club safely. Try again.' }); return; }
+	const before = user.athleteTenantConnections;
+	user.athleteTenantConnections = (Array.isArray(before) ? before : []).map((c) => (normalizeTenantId(c?.tenantId) === tenantKey ? { ...c, status: 'left', leftAt: new Date().toISOString() } : c));
+	try { persistAuthUsers(); } catch { user.athleteTenantConnections = before; res.status(503).json({ error: 'Could not save the change. Try again.' }); return; }
+	appendAuthAuditEvent({ action: 'athlete_left_club', req, status: 'success', target: username, details: { tenantId: tenantKey } });
+	res.status(200).json({ ok: true, left: tenantKey });
 });
 
 // Stopwatch / Assistant / Video results sent to the coach's club for review and import.
@@ -5069,6 +5140,11 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 			reason: 'approval_required',
 		});
 		res.status(403).json({ error: 'Your account is pending software-owner approval.' });
+		return;
+	}
+	if (emailVerificationPending(user)) {
+		appendAuthAuditEvent({ action: 'login_blocked', req, status: 'blocked', target: user.username, reason: 'email_not_verified' });
+		res.status(403).json(EMAIL_NOT_VERIFIED_RESPONSE);
 		return;
 	}
 
@@ -6412,11 +6488,13 @@ app.post('/content/capability/score', requireAuth, (req, res) => {
 	}
 });
 
-app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
+app.post('/snapshot/account/auth', requireLoginRateLimit, async (req, res) => {
 	const identifier = String(req.body?.email || '').trim();
 	const password = String(req.body?.password || '');
 	const fullName = String(req.body?.fullName || '').trim();
 	const createAccount = req.body?.createAccount === true;
+	// Independent swimmer sign-up (swimmer sign-in page) verifies the email before the first sign-in.
+	const requireEmailVerification = req.body?.requireEmailVerification === true;
 
 	if (!identifier || !password) {
 		res.status(400).json({ error: 'Email/username and password are required.' });
@@ -6480,10 +6558,19 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 			isApproved: true,
 			onboardingCompletedAt: '',
 			billing: getDefaultBillingState(),
+			...(requireEmailVerification ? { emailVerificationRequired: true, emailVerifiedAt: '' } : {}),
 		});
 
 		try {
 			persistAuthUsers();
+			if (requireEmailVerification) {
+				// No session until the email is verified: a 6-digit code is emailed to the address.
+				let sent = true;
+				try { await sendEmailVerificationCode(findAuthUser(username)); } catch { sent = false; }
+				appendAuthAuditEvent({ action: 'swimmer_signup', req, status: 'success', target: username, details: { verificationEmailSent: sent } });
+				res.status(201).json({ ok: true, verificationRequired: true, verificationEmailSent: sent, email: maskEmail(normalizedEmail), username });
+				return;
+			}
 			const session = issueAuthToken({ username, role: 'swimmer' });
 			res.status(201).json({
 				ok: true,
@@ -6505,9 +6592,39 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 		res.status(401).json({ error: 'Invalid credentials.' });
 		return;
 	}
+	if (emailVerificationPending(user)) { res.status(403).json(EMAIL_NOT_VERIFIED_RESPONSE); return; }
 
 	const session = issueAuthToken(user);
 	res.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });
+});
+
+// Independent swimmer email verification (code emailed at sign-up; resend allowed once a minute).
+app.post('/snapshot/account/verify-email', requireLoginRateLimit, (req, res) => {
+	const user = lookupAccountByIdentifier(String(req.body?.email || '').trim());
+	const code = String(req.body?.code || '').trim();
+	const entry = user ? emailVerifyByUser.get(String(user.username).toLowerCase()) : null;
+	if (user && !emailVerificationPending(user)) { res.status(200).json({ ok: true, alreadyVerified: true }); return; }
+	if (!user || !entry || entry.expiresAtMs < Date.now() || entry.attempts >= 5 || !/^\d{6}$/.test(code)) {
+		if (entry) entry.attempts += 1;
+		res.status(400).json({ error: 'The code is not valid or has expired. Request a new code.' });
+		return;
+	}
+	if (!safeEqualText(entry.codeHash, hashPasswordResetCode(code))) { entry.attempts += 1; res.status(400).json({ error: 'The code is not valid or has expired. Request a new code.' }); return; }
+	const previous = user.emailVerifiedAt;
+	user.emailVerifiedAt = new Date().toISOString();
+	try { persistAuthUsers(); } catch { user.emailVerifiedAt = previous; res.status(503).json({ error: 'Could not save the verification. Try again.' }); return; }
+	emailVerifyByUser.delete(String(user.username).toLowerCase());
+	appendAuthAuditEvent({ action: 'swimmer_email_verified', req, status: 'success', target: user.username });
+	res.status(200).json({ ok: true, username: user.username });
+});
+app.post('/snapshot/account/verify-email/resend', requireLoginRateLimit, async (req, res) => {
+	const user = lookupAccountByIdentifier(String(req.body?.email || '').trim());
+	const ok = { ok: true, message: 'If the account needs verification, a new code has been sent.' };
+	if (!user || !emailVerificationPending(user)) { res.status(200).json(ok); return; }
+	const last = emailVerifyByUser.get(String(user.username).toLowerCase());
+	if (last && Date.now() - last.sentAtMs < 60000) { res.status(429).json({ error: 'Please wait a minute before requesting another code.' }); return; }
+	try { await sendEmailVerificationCode(user); } catch { res.status(502).json({ error: 'The verification email could not be sent. Try again later.' }); return; }
+	res.status(200).json(ok);
 });
 
 app.post('/snapshot/account/password-reset/request', requireLoginRateLimit, async (req, res) => {

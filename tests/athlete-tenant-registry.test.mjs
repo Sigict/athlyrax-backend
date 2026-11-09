@@ -87,3 +87,13 @@ test('production index records accepted and disconnected coach tenants in the at
     'mergeAthleteHomeProjections(projections)',
   ]) assert.ok(source.includes(token), `missing production athlete tenant registry token: ${token}`);
 });
+
+test('independent athlete in a club: the club record is shown, the independent profile is not merged; two club records still fail', async () => {
+  const { mergeAthleteHomeProjections } = await import('../athlete-tenant-registry.mjs');
+  const p = (id, primary) => ({ athlete: { id }, primaryTenantProjection: primary, sessions: [], clubConnections: [] });
+  const merged = mergeAthleteHomeProjections([p('own', true), p('club-rec', false)]);
+  assert.equal(merged.athlete.id, 'club-rec');
+  assert.equal('primaryTenantProjection' in merged, false);
+  assert.equal(mergeAthleteHomeProjections([p('own', true)]).athlete.id, 'own', 'alone, the independent profile is shown');
+  assert.throws(() => mergeAthleteHomeProjections([p('a', false), p('b', false)]), /identity mismatch/);
+});
