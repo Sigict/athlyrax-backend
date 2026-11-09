@@ -1,0 +1,5676 @@
+{
+ "generatedFrom": {
+  "backend": "athlyrax-backend (index.js and *.mjs modules)",
+  "website": "athlyrax-v6-private (src, public)"
+ },
+ "note": "Generated from code by scripts/generate-owner-system-map.mjs. Storage is JSON per club; relationships marked \"inferred\" are naming conventions, not database constraints.",
+ "storage": [
+  {
+   "name": "tenants/<club>/db.json",
+   "description": "All club records (swimmers, squads, sessions, sets, results, tests, competitions, invitations ...). Written through serialised atomic writes with snapshots."
+  },
+  {
+   "name": "auth-users.json",
+   "description": "Login accounts: role, club (tenantId), password hash, billing state, athlete club connections. Never sent to browsers."
+  },
+  {
+   "name": "CPD store (Education)",
+   "description": "Module 02 and Module 03 separately manage verified purchases, lesson progress, completion and valid certificates. Module 03 owner-preview data remains separate from issued credentials."
+  },
+  {
+   "name": "Athlete personal store",
+   "description": "Athlete-owned records (plans, days, tests, fixtures, diary, goals, profile, legacy) in the athlete's own space (athlete-personal-training.mjs)."
+  }
+ ],
+ "collections": [
+  {
+   "name": "athleteAccountInvites",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-account-invites.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "athlete-account-invites.mjs",
+    "index.js"
+   ],
+   "websiteFiles": [],
+   "fields": [
+    "acceptedAt",
+    "acceptedBy",
+    "createdAt",
+    "createdBy",
+    "delivery",
+    "expiresAt",
+    "guardianCode",
+    "guardianConsent",
+    "guardianEmail",
+    "guardianRequired",
+    "guardianTokenHash",
+    "id",
+    "revokedAt",
+    "revokedBy",
+    "swimmerId",
+    "targetEmail",
+    "tenantKey",
+    "tokenHash"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "athlete-account-invites.mjs createAthleteInvite (+ fields added by later steps)"
+  },
+  {
+   "name": "attendance",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "coach-poolside-mutations.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/attendanceCanonicalCleanup.js",
+    "src/utils/capabilityGraphEvidenceContext.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/demoAttendanceProfiles.js",
+    "src/utils/demoRacePaceResults.js",
+    "src/utils/ispCanonicalSummary.js",
+    "src/utils/plannerSessionRoster.js",
+    "src/utils/planningExactSessionContext.js",
+    "src/utils/reportCanonicalScope.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/swimmerTrainingDeliveryRatios.js",
+    "src/utils/swimmersIspController.js",
+    "src/utils/swimmersIspEvidence.js",
+    "src/utils/swimmersSectionStateData.js",
+    "src/utils/systemAttendancePersistence.js",
+    "src/utils/trainingCycleReportFromEvidence.js",
+    "src/utils/trainingEvidenceReconciliation.js",
+    "src/utils/trainingStatsSectionData.js",
+    "src/utils/validationEvidenceWindowData.js",
+    "src/utils/validationThreeLayerReportData.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "attended",
+    "createdAt",
+    "createdBy",
+    "date",
+    "id",
+    "notes",
+    "ownerTenantId",
+    "ownerUsername",
+    "present",
+    "scheduleId",
+    "sessionId",
+    "status",
+    "swimmerId",
+    "tenantScope",
+    "updatedAt",
+    "volumeSwam",
+    "volumeTotal"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "auditLog",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/storage/DocumentsSection.jsx"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "changeLog",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "coaches",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/operations/SnapshotBulkUploadSection.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/CompetitionCoverageRuntimeController.jsx",
+    "src/components/planning/PlannerDayPopupCoachUi.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/components/system/ImportsSection.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerSessionPrint.js",
+    "src/utils/planningExactSessionContext.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/timetableMutations.js",
+    "src/utils/trainingCycleReportFromEvidence.js",
+    "public/stopwatch/index.html"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "active",
+    "createdAt",
+    "createdBy",
+    "email",
+    "firstName",
+    "id",
+    "lastName",
+    "name",
+    "ownerTenantId",
+    "ownerUsername",
+    "qualification",
+    "role",
+    "tenantScope",
+    "updatedAt"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "competitions",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/analysis/TrainingStatsWeekBreakdownCard.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/shared/AccountTrainingEvidenceModelPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/utils/ispCanonicalRadars.js",
+    "src/utils/ispCanonicalSummary.js",
+    "src/utils/plannerReportCompetition.js",
+    "src/utils/trainingStatsSectionData.js",
+    "src/utils/validationThreeLayerReportData.js",
+    "src/utils/validationWeeklyBreakdownData.js",
+    "src/utils/weeklyPopup.js",
+    "public/athlete-app/app.js",
+    "public/athlete-app/shell.js",
+    "public/stopwatch/club-link.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "conflictResolutions",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "documents",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/storage/DocumentsSection.jsx",
+    "src/utils/dashboardReadableData.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "fixtures",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-competitions.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "targeted-fixture-save.mjs"
+   ],
+   "writtenIn": [
+    "coach-poolside-mutations.mjs",
+    "targeted-fixture-save.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/fixtures/CompetitionEntryTimeRuntimeController.jsx",
+    "src/components/fixtures/FixturesSection.jsx",
+    "src/components/operations/AthleteAgreementsSection.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/SnapshotBulkUploadSection.jsx",
+    "src/components/planning/CompetitionCoverageRuntimeController.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/section/renderAdvancedSections.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalSwimmerEvidence.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/competitionDocumentImport.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/demoClubLevelTimes.js",
+    "src/utils/demoRaceSplitEvidence.js",
+    "src/utils/fixtureEditorPersistence.js",
+    "src/utils/fixtureResultRoundTrip.js",
+    "src/utils/longitudinalCompetitionHistory.js",
+    "src/utils/plannerCompetitionRefresh.js",
+    "src/utils/plannerReportCompetition.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/scheduledSessionsPrint.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "attendeeIds",
+    "coachIds",
+    "competitionType",
+    "createdAt",
+    "createdBy",
+    "endDate",
+    "endTime",
+    "events",
+    "galaEvents",
+    "id",
+    "isMainEvent",
+    "name",
+    "notes",
+    "ownerTenantId",
+    "ownerUsername",
+    "squadIds",
+    "startDate",
+    "startTime",
+    "targetCompetition",
+    "tenantScope",
+    "updatedAt",
+    "venue"
+   ],
+   "nestedFields": {
+    "events": [
+     "[].attendeeIds",
+     "[].date",
+     "[].distance",
+     "[].event",
+     "[].eventLabel",
+     "[].id",
+     "[].resultsBySwimmer",
+     "[].stroke"
+    ]
+   },
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "groups",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/components/validation/PersonalBestsPanel.jsx",
+    "src/utils/repResultCells.js",
+    "src/utils/testGroupCsv.js",
+    "public/athlete-app/competitions-model.js",
+    "public/athlete-app/fixtures-ui.js",
+    "public/stopwatch/club-link.js",
+    "public/stopwatch/index.html",
+    "public/video/index.html"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "mesoCycles",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "microCycles",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "notifications",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "schedule",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-home-projection.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs"
+   ],
+   "writtenIn": [
+    "coach-poolside-mutations.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/planning/TrainingPlannerSection.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/planning-core/generationCore.js",
+    "src/planning-core/importCore.js",
+    "src/planning-core/planningCore.js",
+    "src/utils/canonicalScheduleRows.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/cycleTrainingStart.js",
+    "src/utils/dbRevisionFetchGuard.js",
+    "src/utils/groupTestResultsMutation.js",
+    "src/utils/ispPlannerSource.js",
+    "src/utils/plannerAppMutations.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/plannerSessionRoster.js",
+    "src/utils/planningExactSessionContext.js",
+    "src/utils/scheduleAuthoritativeDelete.js",
+    "src/utils/scheduleMutations.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/sessionFileImport.js",
+    "src/utils/timetableMutations.js",
+    "public/athlete-app/existing-data-bridge.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "automaticCycleBlock",
+    "coachIds",
+    "createdAt",
+    "createdBy",
+    "cyclePhase",
+    "date",
+    "endTime",
+    "id",
+    "ownerTenantId",
+    "ownerUsername",
+    "phase",
+    "scheduleDate",
+    "sessionTypeId",
+    "source",
+    "squadIds",
+    "squadNames",
+    "startTime",
+    "status",
+    "tenantScope",
+    "timetableId",
+    "trainingSessionId",
+    "updatedAt",
+    "venueId"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "seasonPlans",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSection.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/scheduleGeneration.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "seasons",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "createdBy",
+    "endDate",
+    "id",
+    "label",
+    "name",
+    "ownerTenantId",
+    "ownerUsername",
+    "startDate",
+    "tenantScope",
+    "year"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "sessionTypes",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/scheduleGeneration.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/trainingCycleReportFromEvidence.js"
+   ],
+   "fields": [
+    "id",
+    "name"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "squads",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/analysis/TrainingStatsTargetsCard.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/operations/AllGroupTestResultsModal.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/operations/SnapshotBulkUploadSection.jsx",
+    "src/components/operations/TestsSection.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablePrintRuntimeController.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/components/system/ImportsSection.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/fixtures.js",
+    "src/utils/groupTestResultsMutation.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/plannerSessionPrint.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "ageRange",
+    "category",
+    "coachIds",
+    "code",
+    "createdAt",
+    "createdBy",
+    "id",
+    "maxCapacity",
+    "name",
+    "order",
+    "ownerTenantId",
+    "ownerUsername",
+    "sortOrder",
+    "swimmerIds",
+    "tenantScope",
+    "trainingLevel",
+    "updatedAt"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "swimmers",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-account-invites.mjs",
+    "athlete-home-projection.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "coaching-billing.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "athlete-account-invites.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AllGroupTestResultsModal.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/operations/SnapshotBulkUploadSection.jsx",
+    "src/components/operations/TestsSection.jsx",
+    "src/components/planning/PlannerDayPopup.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/section/renderAdvancedSections.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/components/section/renderValidationAdvancedSections.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/athlyraxCapabilityEngine.js",
+    "src/utils/canonicalGroupIspRadars.js",
+    "src/utils/canonicalSwimmerEvidence.js",
+    "src/utils/capabilityEvidenceReading.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/competitionDocumentImport.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/demoClubLevelTimes.js",
+    "src/utils/demoRacePaceResults.js",
+    "src/utils/demoStrokeCountUpgrade.js",
+    "src/utils/fixtures.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "active",
+    "createdAt",
+    "createdBy",
+    "currentSquadId",
+    "demoBaseline100",
+    "dob",
+    "firstName",
+    "fullName",
+    "gender",
+    "id",
+    "lastName",
+    "mainEvent",
+    "name",
+    "ownerTenantId",
+    "ownerUsername",
+    "pathway",
+    "physicalMeasurements",
+    "squadId",
+    "status",
+    "tenantScope",
+    "updatedAt"
+   ],
+   "nestedFields": {
+    "physicalMeasurements": [
+     "[].armSpanCm",
+     "[].date",
+     "[].heightCm",
+     "[].id",
+     "[].sittingHeightCm",
+     "[].weightKg"
+    ]
+   },
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "templateSets",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/planning/TemplatesSection.jsx"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "templateTests",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/operations/TestsSection.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/utils/groupTestResultsMutation.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "tests",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AllGroupTestResultsModal.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/operations/TestsSection.jsx",
+    "src/components/planning/PlannerDayPopup.jsx",
+    "src/components/planning/PlannerSessionResultsPopup.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/shared/AccountTrainingEvidenceModelPanel.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/components/validation/ValidationHubSection.jsx",
+    "src/pages/FreeSnapshotPage.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalGroupIspRadars.js",
+    "src/utils/canonicalRadarAxisTable.js",
+    "src/utils/canonicalSwimmerEvidence.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/demoClubLevelTimes.js",
+    "src/utils/demoStrokeCountUpgrade.js",
+    "src/utils/demoTestBatterySets.js",
+    "src/utils/demoTestSplitEvidence.js",
+    "src/utils/groupTestResultsMutation.js",
+    "src/utils/groupTestResultsRoundTrip.js",
+    "src/utils/ispCanonicalRadars.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "attendeeIds",
+    "category",
+    "createdAt",
+    "createdBy",
+    "date",
+    "distance",
+    "id",
+    "metric",
+    "notes",
+    "ownerTenantId",
+    "ownerUsername",
+    "plannedReps",
+    "repResults",
+    "resultTime",
+    "resultUnit",
+    "resultValue",
+    "scheduleId",
+    "sessionId",
+    "squadId",
+    "squadIds",
+    "swimmerId",
+    "swimmerName",
+    "templateId",
+    "templateName",
+    "tenantScope",
+    "testName",
+    "testType",
+    "trainingScheduleId",
+    "trainingSessionId",
+    "updatedAt"
+   ],
+   "nestedFields": {
+    "repResults": [
+     "[].overallStrokeCount",
+     "[].overallTime",
+     "[].rep"
+    ]
+   },
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "timetables",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/timetableMutations.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "active",
+    "createdBy",
+    "description",
+    "id",
+    "name",
+    "ownerTenantId",
+    "ownerUsername",
+    "tenantScope"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "timetableSlots",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/scheduleDedupe.js",
+    "src/utils/scheduleGeneration.js",
+    "src/utils/timetableMutations.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "active",
+    "coachId",
+    "coachIds",
+    "createdBy",
+    "day",
+    "dayLabel",
+    "endTime",
+    "id",
+    "name",
+    "ownerTenantId",
+    "ownerUsername",
+    "sessionTypeId",
+    "squadId",
+    "squadIds",
+    "startTime",
+    "tenantScope",
+    "timetableId",
+    "venueId"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "trainingPlannerWeeks",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSection.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/validation/CapabilityHubGraphPanel.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/swimmersIspEvidence.js",
+    "src/utils/trainingCycleReportFromEvidence.js",
+    "src/utils/trainingPlannerSectionStateData.js",
+    "src/utils/trainingStatsSectionData.js",
+    "src/utils/validationTargetCycleData.js",
+    "src/utils/validationWeeklyBreakdownData.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "automaticCycleBlock",
+    "createdAt",
+    "createdBy",
+    "cycleBlock",
+    "cyclePhase",
+    "id",
+    "ownerTenantId",
+    "ownerUsername",
+    "phase",
+    "plannedVolume",
+    "squadId",
+    "targetCompetition",
+    "tenantScope",
+    "updatedAt",
+    "weekStart",
+    "weekStartKey"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "trainingSessions",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "coach-poolside-mutations.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/planning-core/generationCore.js",
+    "src/planning-core/importCore.js",
+    "src/planning-core/planningCore.js",
+    "src/utils/athlyraxCapabilityEngine.js",
+    "src/utils/canonicalTrainingSessionLinks.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/cycleTrainingStart.js",
+    "src/utils/ispPlannerSource.js",
+    "src/utils/plannerAppMutations.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportCanonicalScope.js",
+    "src/utils/scheduleMutations.js",
+    "src/utils/scheduledSessionDetailsMutation.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/sessionFileImport.js",
+    "src/utils/systemAttendancePersistence.js",
+    "src/utils/validationThreeLayerReportData.js",
+    "public/swimmer-signin.html"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "createdAt",
+    "createdBy",
+    "cyclePhase",
+    "date",
+    "id",
+    "mainFocus",
+    "notes",
+    "ownerTenantId",
+    "ownerUsername",
+    "phase",
+    "scheduleDate",
+    "scheduleId",
+    "secondaryFocus",
+    "squadIds",
+    "status",
+    "swimmerIds",
+    "tenantScope",
+    "timetable",
+    "totalTime",
+    "totalVolume",
+    "updatedAt"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "trainingSessionSets",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js"
+   ],
+   "writtenIn": [
+    "coach-poolside-mutations.mjs"
+   ],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/operations/AthleteAgreementsSectionCore.jsx",
+    "src/components/operations/GroupTestResultsModal.jsx",
+    "src/components/planning/PlannerDayPopupCoachUi.jsx",
+    "src/components/planning/PlannerSessionResultsPopup.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/research/CoachLanguageResearchController.jsx",
+    "src/components/system/OverviewSection.jsx",
+    "src/planning-core/importCore.js",
+    "src/planning-core/planningCore.js",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/coachPrintSheets.js",
+    "src/utils/demoClubLevelTimes.js",
+    "src/utils/demoEnergyMix.js",
+    "src/utils/demoRacePaceResults.js",
+    "src/utils/demoSetSendOffs.js",
+    "src/utils/demoStrokeCountUpgrade.js",
+    "src/utils/demoTestBatterySets.js",
+    "src/utils/groupTestResultsMutation.js",
+    "src/utils/ispPlannerSource.js",
+    "src/utils/plannerAppMutations.js",
+    "src/utils/plannerCanonicalDayVolumes.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportCanonicalScope.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "createdAt",
+    "createdBy",
+    "date",
+    "description",
+    "distance",
+    "energy",
+    "energySystem",
+    "id",
+    "isTest",
+    "isTestSet",
+    "modality",
+    "ownerTenantId",
+    "ownerUsername",
+    "phase",
+    "plannedVolume",
+    "reps",
+    "resultsBySwimmer",
+    "rounds",
+    "scheduleDate",
+    "scheduleId",
+    "sessionId",
+    "setName",
+    "setTimeSeconds",
+    "setType",
+    "squadId",
+    "squadIds",
+    "stroke",
+    "tenantScope",
+    "totalTimeSec",
+    "totalVolume",
+    "trainingScheduleId",
+    "trainingSessionId",
+    "updatedAt"
+   ],
+   "nestedFields": {
+    "resultsBySwimmer": [
+     "<id>.overallStrokeCount",
+     "<id>.overallTime",
+     "<id>.reps",
+     "<id>.reps[].rep",
+     "<id>.reps[].strokeCount",
+     "<id>.reps[].time"
+    ]
+   },
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  },
+  {
+   "name": "trainingSetBlocks",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [
+    "index.js"
+   ],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerAppMutations.js",
+    "src/utils/trainingSessionSetCanonicalCleanup.js"
+   ],
+   "fields": [],
+   "nestedFields": {},
+   "fieldsSource": "no record builder found in code; fields are written by the Coaching Software forms"
+  },
+  {
+   "name": "venues",
+   "recognisedByIntegrityCheck": true,
+   "usedIn": [],
+   "writtenIn": [],
+   "websiteFiles": [
+    "src/AthlyraxPhase1App.jsx",
+    "src/components/coaches/CoachAdministrationSection.jsx",
+    "src/components/fixtures/FixturesSection.jsx",
+    "src/components/planning/CalendarSection.jsx",
+    "src/components/planning/PlannerDayPopup.jsx",
+    "src/components/planning/TemplatesSection.jsx",
+    "src/components/planning/TimetableInlineEditorTable.jsx",
+    "src/components/planning/TimetablesSection.jsx",
+    "src/components/section/renderSimpleSections.jsx",
+    "src/utils/accountTrainingEvidenceModel.js",
+    "src/utils/canonicalCalendar.js",
+    "src/utils/canonicalTimetable.js",
+    "src/utils/dashboardReadableData.js",
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportOperatingSystem.js",
+    "src/utils/scheduledSessionsPrint.js",
+    "src/utils/trainingCycleReportFromEvidence.js",
+    "src/utils/venueRegistry.js"
+   ],
+   "fields": [
+    "accountId",
+    "accountScope",
+    "active",
+    "city",
+    "code",
+    "createdBy",
+    "id",
+    "name",
+    "ownerTenantId",
+    "ownerUsername",
+    "tenantScope"
+   ],
+   "nestedFields": {},
+   "fieldsSource": "scripts/demo-showcase-dataset.mjs (records built by code)"
+  }
+ ],
+ "relationships": [
+  {
+   "field": "swimmerId",
+   "references": "swimmers",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-account-invites.mjs",
+    "athlete-club-capability.mjs",
+    "athlete-competitions.mjs",
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-tests-races.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "group-test-results.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "squadId",
+   "references": "squads",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-club-capability.mjs",
+    "athlete-home-projection.mjs",
+    "athlete-tenant-registry.mjs",
+    "coach-poolside-projection.mjs",
+    "group-test-results.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "currentSquadId",
+   "references": "squads",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-club-capability.mjs",
+    "athlete-home-projection.mjs",
+    "group-test-results.mjs"
+   ]
+  },
+  {
+   "field": "scheduleId",
+   "references": "schedule",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-home-projection.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "group-test-results.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "trainingSessionId",
+   "references": "trainingSessions",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "group-test-results.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "sessionId",
+   "references": "trainingSessions",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-home-projection.mjs",
+    "athlete-session-review.mjs",
+    "athlete-session-write.mjs",
+    "athlete-wearable-sync.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "cpd-module02.mjs",
+    "group-test-results.mjs",
+    "index.js",
+    "results-inbox.mjs",
+    "terra-wearable-provider.mjs"
+   ]
+  },
+  {
+   "field": "setId",
+   "references": "trainingSessionSets",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-home-projection.mjs",
+    "athlete-tenant-registry.mjs",
+    "athlete-wearable-sync.mjs",
+    "canonical-data-cleanup.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "group-test-results.mjs",
+    "index.js",
+    "results-inbox.mjs"
+   ]
+  },
+  {
+   "field": "fixtureId",
+   "references": "fixtures",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-competitions.mjs",
+    "athlete-tests-races.mjs",
+    "coach-observations.mjs",
+    "coach-poolside-mutations.mjs",
+    "coach-poolside-projection.mjs",
+    "index.js",
+    "targeted-fixture-save.mjs"
+   ]
+  },
+  {
+   "field": "inviteId",
+   "references": "athleteAccountInvites",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-account-invites.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "coachId",
+   "references": "coaches",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "coach-observations.mjs",
+    "coach-poolside-projection.mjs"
+   ]
+  },
+  {
+   "field": "tenantId",
+   "references": "tenant (club)",
+   "kind": "field reference (inferred, not database-enforced)",
+   "files": [
+    "athlete-club-capability.mjs",
+    "athlete-home-projection.mjs",
+    "athlete-session-write.mjs",
+    "athlete-tenant-registry.mjs",
+    "athlete-tests-races.mjs",
+    "index.js",
+    "operational-pilot-endpoints.mjs",
+    "results-inbox.mjs",
+    "terra-wearable-provider.mjs"
+   ]
+  },
+  {
+   "field": "swimmerAccountUsername",
+   "references": "auth-users.json username",
+   "kind": "enforced in code (unique link, checked on invitation acceptance and every athlete request)",
+   "files": [
+    "athlete-account-invites.mjs",
+    "index.js"
+   ]
+  },
+  {
+   "field": "tenantId",
+   "references": "club storage folder tenants/<club>",
+   "kind": "enforced in code (every request is scoped to the signed-in account's club)",
+   "files": [
+    "index.js"
+   ]
+  }
+ ],
+ "routes": [
+  {
+   "method": "POST",
+   "path": "/athlete-invites/accept",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4527,
+   "area": "Athlete App invitations",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/athlete-invites/guardian-code",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4482,
+   "area": "Athlete App invitations",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/athlete-invites/guardian-consent",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4508,
+   "area": "Athlete App invitations",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/athlete-invites/preview",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4471,
+   "area": "Athlete App invitations",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/audit/events",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 5743,
+   "area": "Accounts & login",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/config",
+   "guards": [],
+   "file": "index.js",
+   "line": 4636,
+   "area": "Accounts & login",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/guard",
+   "guards": [],
+   "file": "index.js",
+   "line": 5290,
+   "area": "Accounts & login",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Athlete App",
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/head-coach/handover",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6191,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRateLimit)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/auth/invites",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5890,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/auth/invites",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5773,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/login",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4936,
+   "area": "Accounts & login",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Athlete App invitations (public page)",
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/logout",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5705,
+   "area": "Accounts & login",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App",
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/me",
+   "guards": [],
+   "file": "index.js",
+   "line": 5262,
+   "area": "Accounts & login",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Coaching Software",
+    "Public website",
+    "Stopwatch"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/onboarding/complete",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5642,
+   "area": "Accounts & login",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/password-reset/confirm",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5120,
+   "area": "Accounts & login",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/password-reset/request",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5057,
+   "area": "Accounts & login",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/popup-exchange",
+   "guards": [],
+   "file": "index.js",
+   "line": 5217,
+   "area": "Accounts & login",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/popup-ticket",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5196,
+   "area": "Accounts & login",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/auth/presence/ping",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5757,
+   "area": "Accounts & login",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/presence/summary",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 5767,
+   "area": "Accounts & login",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/register",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4650,
+   "area": "Accounts & login",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/users",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5941,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/auth/users",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 5952,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "DELETE",
+   "path": "/auth/users/:username",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6303,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/auth/users/:username/approval",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6255,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/auth/users/:username/password",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6059,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/auth/users/:username/role",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6108,
+   "area": "Accounts & login",
+   "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/billing/catalog",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 5371,
+   "area": "Billing (Stripe)",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/billing/catalog",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 5383,
+   "area": "Billing (Stripe)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/billing/checkout-session",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5495,
+   "area": "Billing (Stripe)",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/billing/config",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5354,
+   "area": "Billing (Stripe)",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/billing/portal-session",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5608,
+   "area": "Billing (Stripe)",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/billing/subscription",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5478,
+   "area": "Billing (Stripe)",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/billing/webhook",
+   "guards": [],
+   "file": "index.js",
+   "line": 334,
+   "area": "Billing (Stripe)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/athlete-invites/:inviteId/revoke",
+   "guards": [
+    "requireStrictAuth",
+    "requireAthleteInviteManager"
+   ],
+   "file": "index.js",
+   "line": 4334,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireAthleteInviteManager)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/coach/athlete-session-proposals",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "index.js",
+   "line": 8389,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/coach/athlete-session-proposals/:sessionId/review",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "index.js",
+   "line": 8403,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/observations",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 4178,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/coach/poolside",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 8528,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coach Pool Console / Assistant",
+    "Coaching Software",
+    "Stopwatch"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/competitions/:fixtureId/events/:eventId/evidence",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8613,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/attendance",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8573,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/lanes",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 4197,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/sets/:setId",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8603,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/sets/:setId/executions",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8593,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/sets/:setId/results",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8582,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/poolside/sessions/:sessionId/swimmers/:swimmerId/observations",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 4186,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/coach/swimmer-links",
+   "guards": [
+    "requireStrictAuth",
+    "requireCoachLinkManagerRole"
+   ],
+   "file": "index.js",
+   "line": 7831,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireCoachLinkManagerRole)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/coach/swimmer-links/:requestId/accept",
+   "guards": [
+    "requireStrictAuth",
+    "requireCoachLinkDecisionRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 7856,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/swimmer-links/:requestId/reject",
+   "guards": [
+    "requireStrictAuth",
+    "requireCoachLinkDecisionRole"
+   ],
+   "file": "index.js",
+   "line": 8007,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/coach/swimmers/:swimmerId/athlete-invites",
+   "guards": [
+    "requireStrictAuth",
+    "requireAthleteInviteManager"
+   ],
+   "file": "index.js",
+   "line": 4294,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireAthleteInviteManager)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/swimmers/:swimmerId/athlete-invites",
+   "guards": [
+    "requireStrictAuth",
+    "requireAthleteInviteManager",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4311,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireAthleteInviteManager, requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/swimmers/:swimmerId/athlete-link/correct",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 4345,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/coach/tests/group-results",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8824,
+   "area": "Coaching Software / Pool Console",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/content/capability/score",
+   "guards": [
+    "requireAuth"
+   ],
+   "file": "index.js",
+   "line": 6499,
+   "area": "content",
+   "permission": "requireAuth",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/content/placeholders",
+   "guards": [],
+   "file": "index.js",
+   "line": 6406,
+   "area": "content",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/admin/revoke",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module02.mjs",
+   "line": 686,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/admin/sales",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module02.mjs",
+   "line": 624,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/cpd/module-02/admin/video/:lesson",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module02.mjs",
+   "line": 664,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/admin/videos",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module02.mjs",
+   "line": 583,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/assessment",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 484,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/certificate",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 514,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/checkout",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 332,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/claim",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 381,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/lesson-complete",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 470,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/logout",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 302,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/questions",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 459,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/recover",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 397,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-02/redeem",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 418,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/status",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 308,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/verify/:id",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 524,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-02/video/:lesson",
+   "guards": [],
+   "file": "cpd-module02.mjs",
+   "line": 433,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/admin/revoke",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03.mjs",
+   "line": 570,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/admin/sales",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03.mjs",
+   "line": 530,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "PUT",
+   "path": "/cpd/module-03/admin/video/:lesson",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-uploads.mjs",
+   "line": 28,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/admin/videos",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-uploads.mjs",
+   "line": 19,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/assessment",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 431,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/certificate",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 461,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/checkout",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 279,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/claim",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 328,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/lesson-complete",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 417,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/logout",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 249,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/owner/assessment",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 102,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/certificate",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 124,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/owner/lesson-complete",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 94,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/owner/logout",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 140,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/questions",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 88,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/status",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 61,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/verify/:id",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 139,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/video/:lesson",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 68,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/questions",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 406,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/recover",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 344,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/redeem",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 365,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/status",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 255,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/verify/:id",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 471,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/video/:lesson",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 380,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/db",
+   "guards": [
+    "requireAuth"
+   ],
+   "file": "index.js",
+   "line": 8855,
+   "area": "Club data (whole-club load/save)",
+   "permission": "requireAuth",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/db",
+   "guards": [
+    "requireAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 9405,
+   "area": "Club data (whole-club load/save)",
+   "permission": "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/db/ownership-backfill",
+   "guards": [
+    "requireAuth",
+    "requireAdminRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 9018,
+   "area": "Club data (whole-club load/save)",
+   "permission": "Signed in + role check (requireAuth, requireAdminRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/db/ownership-summary",
+   "guards": [
+    "requireAuth"
+   ],
+   "file": "index.js",
+   "line": 8988,
+   "area": "Club data (whole-club load/save)",
+   "permission": "requireAuth",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/db/schedule-delete",
+   "guards": [
+    "requireAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 9091,
+   "area": "Club data (whole-club load/save)",
+   "permission": "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/entitlements/stopwatch",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 5602,
+   "area": "entitlements",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Stopwatch"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/feedback",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 8686,
+   "area": "feedback",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/feedback",
+   "guards": [
+    "requireStrictAuth",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 8703,
+   "area": "feedback",
+   "permission": "Signed in + role check (requireAdminRateLimit)",
+   "calledBy": []
+  },
+  {
+   "method": "PATCH",
+   "path": "/feedback/:id/decision",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole",
+    "requireAdminRateLimit"
+   ],
+   "file": "index.js",
+   "line": 8746,
+   "area": "feedback",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/fixtures/:fixtureReference",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole",
+    "requireBillingWriteAccess"
+   ],
+   "file": "index.js",
+   "line": 8794,
+   "area": "fixtures",
+   "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/pilot/me",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "operational-pilot-endpoints.mjs",
+   "line": 53,
+   "area": "pilot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/pilot/owner",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "operational-pilot-endpoints.mjs",
+   "line": 54,
+   "area": "pilot",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/pilot/respond",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "operational-pilot-endpoints.mjs",
+   "line": 55,
+   "area": "pilot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/results-inbox",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "results-inbox.mjs",
+   "line": 132,
+   "area": "results-inbox",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/results-inbox",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "results-inbox.mjs",
+   "line": 102,
+   "area": "results-inbox",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/results-inbox/:id",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "results-inbox.mjs",
+   "line": 143,
+   "area": "results-inbox",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/results-inbox/:id/status",
+   "guards": [
+    "requireStrictAuth",
+    "requireWriteRole"
+   ],
+   "file": "results-inbox.mjs",
+   "line": 158,
+   "area": "results-inbox",
+   "permission": "Signed in + role check (requireWriteRole)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6767,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account/auth",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6514,
+   "area": "snapshot",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software",
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/snapshot/account/history",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6820,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/snapshot/account/history/:submissionId",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6843,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account/password-reset/confirm",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6667,
+   "area": "snapshot",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account/password-reset/request",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6618,
+   "area": "snapshot",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/snapshot/account/settings",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6878,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/account/settings",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 6886,
+   "area": "snapshot",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/snapshot/instant",
+   "guards": [
+    "requireLoginRateLimit"
+   ],
+   "file": "index.js",
+   "line": 6755,
+   "area": "snapshot",
+   "permission": "requireLoginRateLimit",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/swimmer/athlete-home",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8242,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/athlete-sessions",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8309,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/athlete-sessions/:sessionId/wearable-sync",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8464,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/capability/apply-event",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7356,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/capability/compute",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7325,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/coach/disconnect",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8063,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/coach/request",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7709,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/swimmer/personal-training",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 4402,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/personal-training/sync",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 4408,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/profile/sync",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7469,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/profile/targets",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 7387,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/swimmer/progress",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 4442,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/swimmer/test-catalogue",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 4438,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/swimmer/wearable-connections/terra/widget",
+   "guards": [
+    "requireStrictAuth",
+    "requireSwimmerRole"
+   ],
+   "file": "index.js",
+   "line": 8442,
+   "area": "Athlete App",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/webhooks/terra",
+   "guards": [],
+   "file": "index.js",
+   "line": 442,
+   "area": "External webhooks",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/website-analytics/collect",
+   "guards": [],
+   "file": "website-analytics.mjs",
+   "line": 94,
+   "area": "Website analytics",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": [
+    "Public website"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/website-analytics/owner-summary",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "website-analytics.mjs",
+   "line": 118,
+   "area": "Website analytics",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  }
+ ],
+ "integrations": [
+  {
+   "name": "Stripe (payments, subscriptions, CPD purchases)",
+   "env": [
+    "CPD_STRIPE_EXPECTED_ACCOUNT",
+    "CPD_STRIPE_SECRET_KEY",
+    "STRIPE_PRICE_ANNUAL",
+    "STRIPE_PRICE_MONTHLY",
+    "STRIPE_PRICE_TIER_1",
+    "STRIPE_PRICE_TIER_2",
+    "STRIPE_PRICE_TIER_3",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET"
+   ]
+  },
+  {
+   "name": "Email (SMTP / Brevo transactional)",
+   "env": [
+    "ATHLYRAX_DEV_EMAIL_OUTBOX",
+    "AUTH_SMTP_FROM",
+    "AUTH_SMTP_HOST",
+    "AUTH_SMTP_PASS",
+    "AUTH_SMTP_PORT",
+    "AUTH_SMTP_SECURE",
+    "AUTH_SMTP_USER",
+    "BILLING_EMAIL_NOTIFICATIONS_ENABLED",
+    "FEEDBACK_NOTIFICATION_EMAIL"
+   ]
+  },
+  {
+   "name": "Wearables (Terra)",
+   "env": [
+    "TERRA_API_KEY",
+    "TERRA_AUTH_FAILURE_URL",
+    "TERRA_AUTH_SUCCESS_URL",
+    "TERRA_DEV_ID",
+    "TERRA_SIGNING_SECRET"
+   ]
+  },
+  {
+   "name": "Storage and backups (Render disk)",
+   "env": [
+    "ATHLYRAX_SAFETY_BACKUP_ROOT",
+    "ATHLYRAX_STORAGE_ROOT",
+    "AUTH_AUDIT_BACKUP_INTERVAL_MS",
+    "AUTH_AUDIT_MAX_BACKUP_FILES",
+    "AUTH_USERS_BACKUP_PATH",
+    "BILLING_CATALOG_MAX_BACKUP_FILES",
+    "SWIMMER_SYNC_MAX_SNAPSHOTS"
+   ]
+  },
+  {
+   "name": "Authentication",
+   "env": [
+    "AUTH_ADMIN_RATE_MAX_ATTEMPTS",
+    "AUTH_ADMIN_RATE_WINDOW_MS",
+    "AUTH_ALLOW_BEARER_COMPAT",
+    "AUTH_ALLOW_COACH_INVITES",
+    "AUTH_ALLOW_COACH_SIGNUP",
+    "AUTH_AUDIT_BACKUP_INTERVAL_MS",
+    "AUTH_AUDIT_FETCH_MAX_ROWS",
+    "AUTH_AUDIT_MAX_ARCHIVE_FILES",
+    "AUTH_AUDIT_MAX_BACKUP_FILES",
+    "AUTH_AUDIT_MAX_BYTES",
+    "AUTH_AUTO_HEAL_SWIMMER_BINDINGS",
+    "AUTH_CSRF_COOKIE_NAME",
+    "AUTH_ENABLE_DEMO_SEED_USERS",
+    "AUTH_ENFORCE_CANONICAL_STORE",
+    "AUTH_INVITE_TTL_HOURS",
+    "AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS",
+    "AUTH_LOGIN_RATE_MAX_ATTEMPTS",
+    "AUTH_LOGIN_RATE_WINDOW_MS",
+    "AUTH_PASSWORD_RESET_DELIVERY",
+    "AUTH_PASSWORD_RESET_DEV_CODE_IN_RESPONSE",
+    "AUTH_PASSWORD_RESET_TTL_MINUTES",
+    "AUTH_PRESENCE_WINDOW_MS",
+    "AUTH_PREVENT_USER_SHRINK",
+    "AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME",
+    "AUTH_REQUIRED",
+    "AUTH_SECRET",
+    "AUTH_SESSION_COOKIE_NAME",
+    "AUTH_TOKEN_TTL_SECONDS",
+    "AUTH_USERS_BACKUP_PATH",
+    "AUTH_USERS_JSON",
+    "AUTH_USERS_PATH"
+   ]
+  }
+ ],
+ "modules": [
+  {
+   "id": "club",
+   "title": "Clubs & squads",
+   "group": "Coaching",
+   "desc": "Club structure, membership, lane/squad assignment",
+   "forms": [
+    {
+     "name": "Club setup",
+     "fields": "Name; clubs; owner; settings",
+     "note": "Manage club information"
+    },
+    {
+     "name": "Squad management",
+     "fields": "Squad; coach assignment; member list",
+     "note": "Manage squads"
+    }
+   ],
+   "tables": [
+    "Clubs",
+    "Squads",
+    "Memberships"
+   ],
+   "links": [
+    "coach",
+    "swimmer",
+    "session"
+   ],
+   "status": "Established concept",
+   "verified": {
+    "collections": [
+     "squads",
+     "coaches",
+     "venues",
+     "groups",
+     "seasons"
+    ],
+    "routes": [
+     "^/auth/users",
+     "^/auth/invites",
+     "^/auth/head-coach/handover",
+     "^/coach/swimmer-links"
+    ],
+    "apps": [
+     "Coaching Software"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "squads",
+     "coaches",
+     "venues",
+     "groups",
+     "seasons"
+    ],
+    "reads": [
+     "GET /auth/users",
+     "GET /coach/swimmer-links"
+    ],
+    "writes": [
+     "POST /auth/invites",
+     "DELETE /auth/invites",
+     "POST /auth/users",
+     "PUT /auth/users/:username/password",
+     "PUT /auth/users/:username/role",
+     "POST /auth/head-coach/handover",
+     "PUT /auth/users/:username/approval",
+     "DELETE /auth/users/:username",
+     "POST /coach/swimmer-links/:requestId/accept",
+     "POST /coach/swimmer-links/:requestId/reject"
+    ],
+    "permissions": [
+     "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+     "Signed in + role check (requireAdminRateLimit)",
+     "Signed in + role check (requireCoachLinkManagerRole)",
+     "Signed in (scope checked inside the handler)"
+    ],
+    "apps": [
+     "Coaching Software"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "coach",
+   "title": "Coaches & assistants",
+   "group": "Coaching",
+   "desc": "Accounts, permissions and session-specific leadership",
+   "forms": [
+    {
+     "name": "Coach permissions",
+     "fields": "Coach identity; account role; authorised club",
+     "note": "Club-level roles"
+    },
+    {
+     "name": "Session assistants",
+     "fields": "Session; lanes; temporary pass; leader",
+     "note": "Roles may differ by session"
+    }
+   ],
+   "tables": [
+    "Coach accounts",
+    "Session roles",
+    "Assistant pairing"
+   ],
+   "links": [
+    "club",
+    "session",
+    "console"
+   ],
+   "status": "Established concept",
+   "verified": {
+    "collections": [
+     "coaches"
+    ],
+    "routes": [
+     "^/auth/users",
+     "^/auth/invites",
+     "^/auth/presence",
+     "^/auth/head-coach"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Coach Pool Console / Assistant"
+    ],
+    "store": [
+     "auth-users.json"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "coaches"
+    ],
+    "reads": [
+     "GET /auth/presence/summary",
+     "GET /auth/users"
+    ],
+    "writes": [
+     "POST /auth/presence/ping",
+     "POST /auth/invites",
+     "DELETE /auth/invites",
+     "POST /auth/users",
+     "PUT /auth/users/:username/password",
+     "PUT /auth/users/:username/role",
+     "POST /auth/head-coach/handover",
+     "PUT /auth/users/:username/approval",
+     "DELETE /auth/users/:username"
+    ],
+    "permissions": [
+     "Signed in (scope checked inside the handler)",
+     "Primary software owner only",
+     "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+     "Signed in + role check (requireAdminRateLimit)"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Coach Pool Console / Assistant"
+    ],
+    "store": [
+     "auth-users.json"
+    ],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "swimmer",
+   "title": "Swimmer records",
+   "group": "Coaching",
+   "desc": "Identity, contact information, status and longitudinal data",
+   "forms": [
+    {
+     "name": "Edit swimmer",
+     "fields": "Name; DOB; squad; Primary Contact Email; athlete email (requested)",
+     "note": "Contact fields require code verification"
+    },
+    {
+     "name": "Athlete App access",
+     "fields": "Athlete email; guardian email; invitation status",
+     "note": "Existing per-swimmer invitation UI"
+    }
+   ],
+   "tables": [
+    "Swimmers",
+    "Contacts",
+    "Athlete links"
+   ],
+   "links": [
+    "club",
+    "invite",
+    "test",
+    "competition",
+    "result",
+    "capability"
+   ],
+   "status": "Live / active",
+   "verified": {
+    "collections": [
+     "swimmers"
+    ],
+    "routes": [
+     "^/coach/swimmer-links",
+     "^/coach/swimmers/",
+     "^/db$"
+    ],
+    "apps": [
+     "Coaching Software"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "swimmers"
+    ],
+    "reads": [
+     "GET /coach/swimmers/:swimmerId/athlete-invites",
+     "GET /coach/swimmer-links",
+     "GET /db"
+    ],
+    "writes": [
+     "POST /coach/swimmers/:swimmerId/athlete-invites",
+     "POST /coach/swimmers/:swimmerId/athlete-link/correct",
+     "POST /coach/swimmer-links/:requestId/accept",
+     "POST /coach/swimmer-links/:requestId/reject",
+     "PUT /db"
+    ],
+    "permissions": [
+     "Signed in + role check (requireAthleteInviteManager)",
+     "Signed in + role check (requireAthleteInviteManager, requireAdminRateLimit)",
+     "Signed in + role check (requireAdminRateLimit)",
+     "Signed in + role check (requireCoachLinkManagerRole)",
+     "Signed in (scope checked inside the handler)",
+     "requireAuth",
+     "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)"
+    ],
+    "apps": [
+     "Coaching Software"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "invite",
+   "title": "Athlete invitations",
+   "group": "Identity",
+   "desc": "Email invitations, guardian consent, account linking",
+   "forms": [
+    {
+     "name": "Create invitation",
+     "fields": "Athlete email; guardian email; one-time link",
+     "note": "Live individual invitations"
+    },
+    {
+     "name": "Guardian consent",
+     "fields": "Guardian email; code; consent",
+     "note": "Under-18 linked-account protection"
+    },
+    {
+     "name": "Bulk invitations",
+     "fields": "Swimmer selection; prefilled contact data; delivery status",
+     "note": "Requested, not yet verified live"
+    }
+   ],
+   "tables": [
+    "Invitations",
+    "Guardian consent",
+    "Account links",
+    "Email delivery log (planned)"
+   ],
+   "links": [
+    "swimmer",
+    "athlete",
+    "brevo"
+   ],
+   "status": "Partly live · automation planned",
+   "verified": {
+    "collections": [
+     "athleteAccountInvites",
+     "swimmers"
+    ],
+    "routes": [
+     "^/athlete-invites",
+     "^/coach/athlete-invites",
+     "^/coach/swimmers/:swimmerId/athlete"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App invitations (public page)"
+    ],
+    "store": [
+     "auth-users.json"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "athleteAccountInvites",
+     "swimmers"
+    ],
+    "reads": [
+     "GET /coach/swimmers/:swimmerId/athlete-invites"
+    ],
+    "writes": [
+     "POST /coach/swimmers/:swimmerId/athlete-invites",
+     "POST /coach/athlete-invites/:inviteId/revoke",
+     "POST /coach/swimmers/:swimmerId/athlete-link/correct",
+     "POST /athlete-invites/preview",
+     "POST /athlete-invites/guardian-code",
+     "POST /athlete-invites/guardian-consent",
+     "POST /athlete-invites/accept"
+    ],
+    "permissions": [
+     "Signed in + role check (requireAthleteInviteManager)",
+     "Signed in + role check (requireAthleteInviteManager, requireAdminRateLimit)",
+     "Signed in + role check (requireAdminRateLimit)",
+     "requireLoginRateLimit"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App invitations (public page)"
+    ],
+    "store": [
+     "auth-users.json"
+    ],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "session",
+   "title": "Training planning",
+   "group": "Coaching",
+   "desc": "Sessions, sets, repetition targets and send-offs",
+   "forms": [
+    {
+     "name": "Session planner",
+     "fields": "Date; title; phase; sets; lanes",
+     "note": "Coach-owned plan"
+    },
+    {
+     "name": "Set editor",
+     "fields": "Rounds; reps; distance; stroke; send-off; rest",
+     "note": "Delivery instructions"
+    }
+   ],
+   "tables": [
+    "Sessions",
+    "Sets",
+    "Repetition definitions",
+    "Schedules"
+   ],
+   "links": [
+    "club",
+    "coach",
+    "attendance",
+    "console",
+    "athlete",
+    "result"
+   ],
+   "status": "Live / active",
+   "verified": {
+    "collections": [
+     "schedule",
+     "trainingSessions",
+     "trainingSessionSets",
+     "trainingSetBlocks",
+     "timetables",
+     "timetableSlots",
+     "sessionTypes",
+     "trainingPlannerWeeks",
+     "seasonPlans",
+     "mesoCycles",
+     "microCycles",
+     "templateSets"
+    ],
+    "routes": [
+     "^/db",
+     "^/db/schedule-delete"
+    ],
+    "apps": [
+     "Coaching Software"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "schedule",
+     "trainingSessions",
+     "trainingSessionSets",
+     "trainingSetBlocks",
+     "timetables",
+     "timetableSlots",
+     "sessionTypes",
+     "trainingPlannerWeeks",
+     "seasonPlans",
+     "mesoCycles",
+     "microCycles",
+     "templateSets"
+    ],
+    "reads": [
+     "GET /db",
+     "GET /db/ownership-summary"
+    ],
+    "writes": [
+     "POST /db/ownership-backfill",
+     "POST /db/schedule-delete",
+     "PUT /db"
+    ],
+    "permissions": [
+     "requireAuth",
+     "Signed in + role check (requireAuth, requireAdminRole, requireBillingWriteAccess)",
+     "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)"
+    ],
+    "apps": [
+     "Coaching Software"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "attendance",
+   "title": "Attendance",
+   "group": "Coaching",
+   "desc": "Who attended and which sets were delivered",
+   "forms": [
+    {
+     "name": "Attendance register",
+     "fields": "Session; swimmer; attended status",
+     "note": "Feeds evidence selection"
+    }
+   ],
+   "tables": [
+    "Attendance",
+    "Session participation"
+   ],
+   "links": [
+    "session",
+    "swimmer",
+    "result",
+    "capability"
+   ],
+   "status": "Live / active",
+   "verified": {
+    "collections": [
+     "attendance"
+    ],
+    "routes": [
+     "^/coach/poolside/sessions/:sessionId/attendance",
+     "^/db$"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Coach Pool Console / Assistant"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "attendance"
+    ],
+    "reads": [
+     "GET /db"
+    ],
+    "writes": [
+     "POST /coach/poolside/sessions/:sessionId/attendance",
+     "PUT /db"
+    ],
+    "permissions": [
+     "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+     "requireAuth",
+     "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Coach Pool Console / Assistant"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "console",
+   "title": "Coach Pool Console",
+   "group": "Poolside",
+   "desc": "Lane clocks, assistants, splits and stroke recording",
+   "forms": [
+    {
+     "name": "Pool Console",
+     "fields": "Lanes; swimmers; splits; strokes; send-offs",
+     "note": "28/28 reported acceptance in recent conversation"
+    },
+    {
+     "name": "Assistant panel",
+     "fields": "Session pass; assigned lanes; conflict decisions",
+     "note": "Session-specific controls"
+    }
+   ],
+   "tables": [
+    "Pool session state",
+    "Lane assignments",
+    "Recorded repetitions"
+   ],
+   "links": [
+    "session",
+    "coach",
+    "result",
+    "video"
+   ],
+   "status": "Live-tested subset",
+   "verified": {
+    "collections": [
+     "trainingSessions",
+     "trainingSessionSets",
+     "attendance"
+    ],
+    "routes": [
+     "^/coach/poolside",
+     "^/coach/observations",
+     "^/entitlements/stopwatch"
+    ],
+    "apps": [
+     "Coach Pool Console / Assistant",
+     "Stopwatch"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "trainingSessions",
+     "trainingSessionSets",
+     "attendance"
+    ],
+    "reads": [
+     "GET /entitlements/stopwatch",
+     "GET /coach/poolside"
+    ],
+    "writes": [
+     "POST /coach/observations",
+     "POST /coach/poolside/sessions/:sessionId/swimmers/:swimmerId/observations",
+     "POST /coach/poolside/sessions/:sessionId/lanes",
+     "POST /coach/poolside/sessions/:sessionId/attendance",
+     "POST /coach/poolside/sessions/:sessionId/sets/:setId/results",
+     "POST /coach/poolside/sessions/:sessionId/sets/:setId/executions",
+     "POST /coach/poolside/sessions/:sessionId/sets/:setId",
+     "POST /coach/poolside/competitions/:fixtureId/events/:eventId/evidence"
+    ],
+    "permissions": [
+     "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
+     "Signed in (scope checked inside the handler)"
+    ],
+    "apps": [
+     "Coach Pool Console / Assistant",
+     "Stopwatch"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "result",
+   "title": "Training results",
+   "group": "Evidence",
+   "desc": "Actual repetitions, times, strokes, send-offs, splits and feedback",
+   "forms": [
+    {
+     "name": "Training Results",
+     "fields": "Repetition; time; split; stroke count; session",
+     "note": "Actual performance measurement"
+    },
+    {
+     "name": "Athlete personal training",
+     "fields": "Self-reported times; RPE; check-in",
+     "note": "Separate personal evidence"
+    }
+   ],
+   "tables": [
+    "Training results",
+    "Split measurements",
+    "Stroke counts",
+    "Training evidence"
+   ],
+   "links": [
+    "session",
+    "console",
+    "swimmer",
+    "capability",
+    "athlete"
+   ],
+   "status": "Live-tested subset",
+   "verified": {
+    "collections": [
+     "trainingSessionSets",
+     "coachObservations"
+    ],
+    "routes": [
+     "^/coach/poolside/sessions/:sessionId/sets",
+     "^/results-inbox",
+     "^/coach/athlete-session-proposals",
+     "^/swimmer/athlete-sessions"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Coach Pool Console / Assistant",
+     "Athlete App"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "trainingSessionSets",
+     "coachObservations"
+    ],
+    "reads": [
+     "GET /coach/athlete-session-proposals",
+     "GET /results-inbox",
+     "GET /results-inbox/:id"
+    ],
+    "writes": [
+     "POST /swimmer/athlete-sessions",
+     "POST /coach/athlete-session-proposals/:sessionId/review",
+     "POST /swimmer/athlete-sessions/:sessionId/wearable-sync",
+     "POST /coach/poolside/sessions/:sessionId/sets/:setId/results",
+     "POST /coach/poolside/sessions/:sessionId/sets/:setId/executions",
+     "POST /coach/poolside/sessions/:sessionId/sets/:setId",
+     "POST /results-inbox",
+     "POST /results-inbox/:id/status"
+    ],
+    "permissions": [
+     "Signed in (scope checked inside the handler)",
+     "Signed in + role check (requireWriteRole)",
+     "Signed in + role check (requireWriteRole, requireBillingWriteAccess)"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Coach Pool Console / Assistant",
+     "Athlete App"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "test",
+   "title": "Testing",
+   "group": "Evidence",
+   "desc": "Max effort, repeatability and 5×400 data",
+   "forms": [
+    {
+     "name": "Max effort tests",
+     "fields": "25, 50, 100, 200, 400 m",
+     "note": "Current agreed catalogue"
+    },
+    {
+     "name": "Repeatability",
+     "fields": "8×25; 8×50; 8×100",
+     "note": "Current agreed catalogue"
+    },
+    {
+     "name": "Aerobic/Durability",
+     "fields": "5×400",
+     "note": "Available for coaches and athlete self-report"
+    }
+   ],
+   "tables": [
+    "Test definitions",
+    "Test results",
+    "Test splits"
+   ],
+   "links": [
+    "swimmer",
+    "athlete",
+    "capability"
+   ],
+   "status": "Live-tested",
+   "verified": {
+    "collections": [
+     "tests",
+     "templateTests"
+    ],
+    "routes": [
+     "^/coach/tests",
+     "^/swimmer/test-catalogue"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "tests",
+     "templateTests"
+    ],
+    "reads": [
+     "GET /swimmer/test-catalogue"
+    ],
+    "writes": [
+     "POST /coach/tests/group-results"
+    ],
+    "permissions": [
+     "Signed in (scope checked inside the handler)",
+     "Signed in + role check (requireWriteRole, requireBillingWriteAccess)"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "competition",
+   "title": "Competition",
+   "group": "Evidence",
+   "desc": "Fixtures, races, times, splits, course and race history",
+   "forms": [
+    {
+     "name": "Fixture editor",
+     "fields": "Meet; date; course; target event",
+     "note": "Competition planning"
+    },
+    {
+     "name": "Race result",
+     "fields": "Event; distance; stroke; time; splits; course",
+     "note": "Competition evidence"
+    }
+   ],
+   "tables": [
+    "Fixtures",
+    "Race entries",
+    "Competition results"
+   ],
+   "links": [
+    "swimmer",
+    "athlete",
+    "capability",
+    "video"
+   ],
+   "status": "Live-tested subset",
+   "verified": {
+    "collections": [
+     "fixtures",
+     "competitions"
+    ],
+    "routes": [
+     "^/fixtures/",
+     "^/coach/poolside/competitions"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "fixtures",
+     "competitions"
+    ],
+    "reads": [],
+    "writes": [
+     "POST /coach/poolside/competitions/:fixtureId/events/:eventId/evidence",
+     "POST /fixtures/:fixtureReference"
+    ],
+    "permissions": [
+     "Signed in + role check (requireWriteRole, requireBillingWriteAccess)"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "capability",
+   "title": "Capability engine & ISP",
+   "group": "Assessment",
+   "desc": "Training / Testing / Competition / Integrated eight-axis assessment",
+   "forms": [
+    {
+     "name": "Evidence selection",
+     "fields": "Date range; source; attendance; tests; races",
+     "note": "Sufficiency and confidence"
+    },
+    {
+     "name": "ISP view",
+     "fields": "Eight axes; status; integrated report",
+     "note": "Not Scored when evidence insufficient"
+    }
+   ],
+   "tables": [
+    "Canonical evidence",
+    "Axis outputs",
+    "Score sufficiency",
+    "ISP snapshots"
+   ],
+   "links": [
+    "result",
+    "test",
+    "competition",
+    "athlete",
+    "coach"
+   ],
+   "status": "Live parity checked",
+   "verified": {
+    "collections": [
+     "swimmerAnalyses",
+     "tests",
+     "fixtures",
+     "trainingSessionSets",
+     "attendance"
+    ],
+    "routes": [
+     "^/content/capability",
+     "^/swimmer/capability",
+     "^/swimmer/progress"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App"
+    ],
+    "engine": true
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "swimmerAnalyses",
+     "tests",
+     "fixtures",
+     "trainingSessionSets",
+     "attendance"
+    ],
+    "reads": [
+     "GET /swimmer/progress"
+    ],
+    "writes": [
+     "POST /content/capability/score",
+     "POST /swimmer/capability/compute",
+     "POST /swimmer/capability/apply-event"
+    ],
+    "permissions": [
+     "Signed in (scope checked inside the handler)",
+     "requireAuth"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": true,
+    "note": ""
+   }
+  },
+  {
+   "id": "athlete",
+   "title": "Athlete App",
+   "group": "Athlete",
+   "desc": "Personal planning, offline training, progress, and authorised club data",
+   "forms": [
+    {
+     "name": "My Training",
+     "fields": "Personal sessions; sets; stopwatch; actuals",
+     "note": "Offline-first personal store"
+    },
+    {
+     "name": "My Progress",
+     "fields": "Personal versus club results",
+     "note": "Source-labelled"
+    },
+    {
+     "name": "My Development",
+     "fields": "Diary; goals; calendar; volume",
+     "note": "Self-reported data"
+    },
+    {
+     "name": "Import backup",
+     "fields": "Preview; legacy archive; confirm",
+     "note": "S5 reported live-tested"
+    }
+   ],
+   "tables": [
+    "Personal sessions",
+    "Offline sync store",
+    "Personal tests",
+    "Diary",
+    "Goals"
+   ],
+   "links": [
+    "swimmer",
+    "invite",
+    "session",
+    "test",
+    "competition",
+    "capability"
+   ],
+   "status": "S1–S5 live-tested",
+   "verified": {
+    "collections": [
+     "swimmers"
+    ],
+    "routes": [
+     "^/swimmer/"
+    ],
+    "apps": [
+     "Athlete App"
+    ],
+    "store": [
+     "Athlete personal store"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "swimmers"
+    ],
+    "reads": [
+     "GET /swimmer/personal-training",
+     "GET /swimmer/test-catalogue",
+     "GET /swimmer/progress",
+     "GET /swimmer/athlete-home"
+    ],
+    "writes": [
+     "POST /swimmer/personal-training/sync",
+     "POST /swimmer/capability/compute",
+     "POST /swimmer/capability/apply-event",
+     "POST /swimmer/profile/targets",
+     "POST /swimmer/profile/sync",
+     "POST /swimmer/coach/request",
+     "POST /swimmer/coach/disconnect",
+     "POST /swimmer/athlete-sessions",
+     "POST /swimmer/wearable-connections/terra/widget",
+     "POST /swimmer/athlete-sessions/:sessionId/wearable-sync"
+    ],
+    "permissions": [
+     "Signed in (scope checked inside the handler)"
+    ],
+    "apps": [
+     "Athlete App"
+    ],
+    "store": [
+     "Athlete personal store"
+    ],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "video",
+   "title": "Video Analysis",
+   "group": "Products",
+   "desc": "Standalone or connected video analysis (audit pending)",
+   "forms": [
+    {
+     "name": "Video workspace",
+     "fields": "Upload; playback; events; annotations",
+     "note": "Must be audited against code"
+    }
+   ],
+   "tables": [
+    "Video assets (verify)",
+    "Annotations (verify)",
+    "Analysis measures (verify)"
+   ],
+   "links": [
+    "swimmer",
+    "console",
+    "competition",
+    "payments"
+   ],
+   "status": "Needs audit",
+   "verified": {
+    "collections": [],
+    "routes": [],
+    "apps": [
+     "Video Analysis"
+    ],
+    "note": "No server routes or club collections found for Video Analysis: it runs in the browser and exchanges results as a file import."
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [],
+    "reads": [],
+    "writes": [],
+    "permissions": [],
+    "apps": [
+     "Video Analysis"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": "No server routes or club collections found for Video Analysis: it runs in the browser and exchanges results as a file import."
+   }
+  },
+  {
+   "id": "education",
+   "title": "Athlyra Education",
+   "group": "Products",
+   "desc": "CPD modules, assessments and certificates",
+   "forms": [
+    {
+     "name": "CPD module",
+     "fields": "Player; questions; course progress",
+     "note": "Separate Education product"
+    },
+    {
+     "name": "Certificate",
+     "fields": "Completion; certificate export",
+     "note": "Module outcome"
+    }
+   ],
+   "tables": [
+    "Module progress",
+    "Quiz results",
+    "Certificates"
+   ],
+   "links": [
+    "payments",
+    "brevo"
+   ],
+   "status": "Live / separate product",
+   "verified": {
+    "collections": [],
+    "routes": [
+     "^/cpd/"
+    ],
+    "apps": [
+     "Education",
+     "Education (CPD)"
+    ],
+    "store": [
+     "CPD store (Education)"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [],
+    "reads": [
+     "GET /cpd/module-02/status",
+     "GET /cpd/module-02/video/:lesson",
+     "GET /cpd/module-02/questions",
+     "GET /cpd/module-02/certificate",
+     "GET /cpd/module-02/verify/:id",
+     "GET /cpd/module-02/admin/videos",
+     "GET /cpd/module-02/admin/sales",
+     "GET /cpd/module-03/admin/videos"
+    ],
+    "writes": [
+     "POST /cpd/module-02/logout",
+     "POST /cpd/module-02/checkout",
+     "POST /cpd/module-02/claim",
+     "POST /cpd/module-02/recover",
+     "POST /cpd/module-02/redeem",
+     "POST /cpd/module-02/lesson-complete",
+     "POST /cpd/module-02/assessment",
+     "PUT /cpd/module-02/admin/video/:lesson",
+     "POST /cpd/module-02/admin/revoke",
+     "PUT /cpd/module-03/admin/video/:lesson"
+    ],
+    "permissions": [
+     "Public (token/secret or rate limit checked inside the handler where relevant)",
+     "Primary software owner only"
+    ],
+    "apps": [
+     "Education",
+     "Education (CPD)"
+    ],
+    "store": [
+     "CPD store (Education)"
+    ],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "payments",
+   "title": "Subscriptions & billing",
+   "group": "Commercial",
+   "desc": "Stripe coaching subscriptions, CPD and future video purchases",
+   "forms": [
+    {
+     "name": "Stripe checkout",
+     "fields": "Product; price; payment; consent",
+     "note": "Billing live/test mode depends on product"
+    }
+   ],
+   "tables": [
+    "Stripe products",
+    "Prices",
+    "Subscriptions",
+    "Webhook events"
+   ],
+   "links": [
+    "club",
+    "education",
+    "video"
+   ],
+   "status": "Configured by product",
+   "verified": {
+    "collections": [],
+    "routes": [
+     "^/billing/",
+     "^/cpd/module-02/checkout",
+     "^/entitlements/"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Education (CPD)"
+    ],
+    "integrations": [
+     "Stripe (payments, subscriptions, CPD purchases)"
+    ],
+    "store": [
+     "auth-users.json"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [],
+    "reads": [
+     "GET /billing/config",
+     "GET /billing/catalog",
+     "GET /billing/subscription",
+     "GET /entitlements/stopwatch"
+    ],
+    "writes": [
+     "POST /cpd/module-02/checkout",
+     "POST /billing/webhook",
+     "PUT /billing/catalog",
+     "POST /billing/checkout-session",
+     "POST /billing/portal-session"
+    ],
+    "permissions": [
+     "Public (token/secret or rate limit checked inside the handler where relevant)",
+     "Signed in (scope checked inside the handler)",
+     "Primary software owner only"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Education (CPD)"
+    ],
+    "store": [
+     "auth-users.json"
+    ],
+    "integrations": [
+     "Stripe (payments, subscriptions, CPD purchases)"
+    ],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "brevo",
+   "title": "Email delivery",
+   "group": "Integrations",
+   "desc": "Education subscriptions; athlete transactional invitations under development",
+   "forms": [
+    {
+     "name": "Subscriber form",
+     "fields": "Email; confirmation",
+     "note": "Education subscriptions"
+    },
+    {
+     "name": "Invitation delivery",
+     "fields": "Sender; recipient; status",
+     "note": "Requested Brevo transactional integration"
+    }
+   ],
+   "tables": [
+    "Education mailing list",
+    "Transactional delivery (planned)"
+   ],
+   "links": [
+    "invite",
+    "education"
+   ],
+   "status": "Education existing · invitations planned",
+   "verified": {
+    "collections": [
+     "athleteAccountInvites"
+    ],
+    "routes": [
+     "^/athlete-invites/guardian-code",
+     "^/webhooks/brevo",
+     "^/auth/password-reset"
+    ],
+    "apps": [
+     "Public website",
+     "Athlete App invitations (public page)"
+    ],
+    "integrations": [
+     "Email (SMTP / Brevo transactional)"
+    ]
+   },
+   "source": "owner map (conceptual)",
+   "code": {
+    "collections": [
+     "athleteAccountInvites"
+    ],
+    "reads": [],
+    "writes": [
+     "POST /athlete-invites/guardian-code",
+     "POST /auth/password-reset/request",
+     "POST /auth/password-reset/confirm"
+    ],
+    "permissions": [
+     "requireLoginRateLimit"
+    ],
+    "apps": [
+     "Public website",
+     "Athlete App invitations (public page)"
+    ],
+    "store": [],
+    "integrations": [
+     "Email (SMTP / Brevo transactional)"
+    ],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "auth",
+   "title": "Accounts & login",
+   "group": "Identity",
+   "desc": "Sign-in, registration, roles, sessions, password reset, audit log",
+   "forms": [
+    {
+     "name": "Sign in",
+     "fields": "Username or email; password",
+     "note": "Cookie session with CSRF token"
+    },
+    {
+     "name": "Password reset",
+     "fields": "Username or email; code; new password",
+     "note": "Code by email (guardian email for guardian-managed logins)"
+    }
+   ],
+   "tables": [
+    "Login accounts",
+    "Audit log"
+   ],
+   "links": [
+    "coach",
+    "athlete",
+    "payments"
+   ],
+   "status": "Live",
+   "verified": {
+    "collections": [],
+    "routes": [
+     "^/auth/",
+     "^/snapshot/account"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App",
+     "Public website"
+    ],
+    "store": [
+     "auth-users.json"
+    ],
+    "integrations": [
+     "Authentication"
+    ]
+   },
+   "source": "added from code (not in the owner map)",
+   "code": {
+    "collections": [],
+    "reads": [
+     "GET /auth/config",
+     "GET /auth/popup-ticket",
+     "GET /auth/me",
+     "GET /auth/guard",
+     "GET /auth/audit/events",
+     "GET /auth/presence/summary",
+     "GET /auth/users",
+     "GET /snapshot/account/history",
+     "GET /snapshot/account/history/:submissionId",
+     "GET /snapshot/account/settings"
+    ],
+    "writes": [
+     "POST /auth/register",
+     "POST /auth/login",
+     "POST /auth/password-reset/request",
+     "POST /auth/password-reset/confirm",
+     "POST /auth/popup-exchange",
+     "POST /auth/onboarding/complete",
+     "POST /auth/logout",
+     "POST /auth/presence/ping",
+     "POST /auth/invites",
+     "DELETE /auth/invites",
+     "POST /auth/users",
+     "PUT /auth/users/:username/password",
+     "PUT /auth/users/:username/role",
+     "POST /auth/head-coach/handover",
+     "PUT /auth/users/:username/approval",
+     "DELETE /auth/users/:username",
+     "POST /snapshot/account/auth",
+     "POST /snapshot/account/password-reset/request",
+     "POST /snapshot/account/password-reset/confirm",
+     "POST /snapshot/account",
+     "POST /snapshot/account/settings"
+    ],
+    "permissions": [
+     "Public (token/secret or rate limit checked inside the handler where relevant)",
+     "requireLoginRateLimit",
+     "Signed in (scope checked inside the handler)",
+     "Primary software owner only",
+     "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
+     "Signed in + role check (requireAdminRateLimit)"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Athlete App",
+     "Public website"
+    ],
+    "store": [
+     "auth-users.json"
+    ],
+    "integrations": [
+     "Authentication"
+    ],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "inbox",
+   "title": "Results inbox",
+   "group": "Evidence",
+   "desc": "Results sent to the club (files from Console, Video Analysis, athletes) waiting for coach review",
+   "forms": [
+    {
+     "name": "Results inbox",
+     "fields": "Submission; swimmer; status",
+     "note": "Coach accepts or rejects"
+    }
+   ],
+   "tables": [
+    "Results inbox submissions"
+   ],
+   "links": [
+    "result",
+    "console",
+    "video"
+   ],
+   "status": "Live",
+   "verified": {
+    "collections": [],
+    "routes": [
+     "^/results-inbox"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Coach Pool Console / Assistant",
+     "Video Analysis"
+    ]
+   },
+   "source": "added from code (not in the owner map)",
+   "code": {
+    "collections": [],
+    "reads": [
+     "GET /results-inbox",
+     "GET /results-inbox/:id"
+    ],
+    "writes": [
+     "POST /results-inbox",
+     "POST /results-inbox/:id/status"
+    ],
+    "permissions": [
+     "Signed in + role check (requireWriteRole)"
+    ],
+    "apps": [
+     "Coaching Software",
+     "Coach Pool Console / Assistant",
+     "Video Analysis"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "snapshot",
+   "title": "Free Snapshot",
+   "group": "Products",
+   "desc": "Free eight-axis snapshot accounts and submissions",
+   "forms": [
+    {
+     "name": "Snapshot",
+     "fields": "Swimmer details; results",
+     "note": "Public free product"
+    }
+   ],
+   "tables": [
+    "Snapshot accounts and history"
+   ],
+   "links": [
+    "capability",
+    "auth"
+   ],
+   "status": "Live",
+   "verified": {
+    "collections": [],
+    "routes": [
+     "^/snapshot/"
+    ],
+    "apps": [
+     "Public website"
+    ]
+   },
+   "source": "added from code (not in the owner map)",
+   "code": {
+    "collections": [],
+    "reads": [
+     "GET /snapshot/account/history",
+     "GET /snapshot/account/history/:submissionId",
+     "GET /snapshot/account/settings"
+    ],
+    "writes": [
+     "POST /snapshot/account/auth",
+     "POST /snapshot/account/password-reset/request",
+     "POST /snapshot/account/password-reset/confirm",
+     "POST /snapshot/instant",
+     "POST /snapshot/account",
+     "POST /snapshot/account/settings"
+    ],
+    "permissions": [
+     "requireLoginRateLimit",
+     "Signed in (scope checked inside the handler)"
+    ],
+    "apps": [
+     "Public website"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "wearables",
+   "title": "Wearables",
+   "group": "Integrations",
+   "desc": "Terra connections and wearable session sync into the Athlete App",
+   "forms": [
+    {
+     "name": "Connect wearable",
+     "fields": "Provider widget",
+     "note": "Athlete-initiated"
+    }
+   ],
+   "tables": [
+    "Wearable connections",
+    "Wearable deliveries"
+   ],
+   "links": [
+    "athlete",
+    "result"
+   ],
+   "status": "Live (provider configuration dependent)",
+   "verified": {
+    "collections": [
+     "athleteWearableConnections",
+     "athleteWearableDeliveries"
+    ],
+    "routes": [
+     "^/swimmer/wearable",
+     "^/webhooks/terra",
+     "^/swimmer/athlete-sessions/:sessionId/wearable"
+    ],
+    "apps": [
+     "Athlete App"
+    ],
+    "integrations": [
+     "Wearables (Terra)"
+    ]
+   },
+   "source": "added from code (not in the owner map)",
+   "code": {
+    "collections": [],
+    "reads": [],
+    "writes": [
+     "POST /webhooks/terra",
+     "POST /swimmer/wearable-connections/terra/widget",
+     "POST /swimmer/athlete-sessions/:sessionId/wearable-sync"
+    ],
+    "permissions": [
+     "Public (token/secret or rate limit checked inside the handler where relevant)",
+     "Signed in (scope checked inside the handler)"
+    ],
+    "apps": [
+     "Athlete App"
+    ],
+    "store": [],
+    "integrations": [
+     "Wearables (Terra)"
+    ],
+    "engine": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "owner",
+   "title": "Owner administration",
+   "group": "Commercial",
+   "desc": "Tier policy, platform insights, website analytics, feedback inbox, pilot, system map",
+   "forms": [
+    {
+     "name": "Tier & Platform Control",
+     "fields": "Tier visibility; billing overview; analytics",
+     "note": "Primary software owner only"
+    },
+    {
+     "name": "Feedback inbox",
+     "fields": "Message; status; decision",
+     "note": ""
+    }
+   ],
+   "tables": [
+    "Website analytics",
+    "Feedback",
+    "Pilot responses"
+   ],
+   "links": [
+    "payments",
+    "auth",
+    "coach"
+   ],
+   "status": "Live",
+   "verified": {
+    "collections": [],
+    "routes": [
+     "^/website-analytics/owner",
+     "^/feedback",
+     "^/pilot/",
+     "^/owner/",
+     "^/db/ownership",
+     "^/auth/audit"
+    ],
+    "apps": [
+     "Coaching Software"
+    ]
+   },
+   "source": "added from code (not in the owner map)",
+   "code": {
+    "collections": [],
+    "reads": [
+     "GET /auth/audit/events",
+     "GET /feedback",
+     "GET /db/ownership-summary",
+     "GET /pilot/me",
+     "GET /pilot/owner",
+     "GET /website-analytics/owner-summary"
+    ],
+    "writes": [
+     "POST /feedback",
+     "PATCH /feedback/:id/decision",
+     "POST /db/ownership-backfill",
+     "POST /pilot/respond"
+    ],
+    "permissions": [
+     "Primary software owner only",
+     "Signed in + role check (requireAdminRateLimit)",
+     "requireAuth",
+     "Signed in + role check (requireAuth, requireAdminRole, requireBillingWriteAccess)",
+     "Signed in (scope checked inside the handler)"
+    ],
+    "apps": [
+     "Coaching Software"
+    ],
+    "store": [],
+    "integrations": [],
+    "engine": false,
+    "note": ""
+   }
+  }
+ ],
+ "forms": [
+  {
+   "name": "Day",
+   "file": "public/athlete-app/personal-ui.js",
+   "app": "Athlete App",
+   "fields": [
+    "data",
+    "id"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Index inputs",
+   "file": "public/athlete-app/index.html",
+   "app": "Athlete App",
+   "fields": [
+    "athleteGoalCategory",
+    "athleteGoalDate",
+    "athleteGoalHorizon",
+    "athleteGoalMeasure",
+    "athleteGoalOutcome",
+    "athleteGoalText",
+    "developmentEvent",
+    "developmentMonth",
+    "developmentType",
+    "diaryDate",
+    "diaryFeel",
+    "diaryNote",
+    "diaryType",
+    "diaryVisibility",
+    "fixtureCourse",
+    "fixtureDate",
+    "fixtureDeadline",
+    "fixtureEndDate",
+    "fixtureFilter",
+    "fixtureMainTarget",
+    "fixtureName",
+    "fixtureNotes",
+    "fixtureSeasonFilter",
+    "fixtureStatus",
+    "fixtureVenue",
+    "graphTestEvent",
+    "importBackupFile",
+    "meetReflectionDate",
+    "meetReflectionName",
+    "meetReflectionNote",
+    "meetReflectionPreparation",
+    "meetReflectionRecovery",
+    "meetReflectionSatisfaction",
+    "plannerCurrentPhase",
+    "plannerCycleNote",
+    "plannerSeason",
+    "plannerSelectedWeek",
+    "profileClubText",
+    "profileDob",
+    "profileMainEvent",
+    "profileNote",
+    "profilePreferredName",
+    "profileSex",
+    "pt_day_date",
+    "pt_plan_date",
+    "pt_plan_end",
+    "pt_plan_focus",
+    "pt_plan_note",
+    "pt_plan_pool",
+    "pt_plan_repeat",
+    "pt_plan_start",
+    "pt_plan_title",
+    "pt_plan_until",
+    "pt_plan_venue",
+    "pt_ps_length",
+    "pt_ps_mode",
+    "pt_ps_rep",
+    "sessionDateInput",
+    "sessionDisciplineInput",
+    "sessionStartInput"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Plan",
+   "file": "public/athlete-app/personal-ui.js",
+   "app": "Athlete App",
+   "fields": [
+    "data",
+    "id"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Athlete-invite inputs",
+   "file": "public/athlete-invite.html",
+   "app": "Athlete App invitations (public page)",
+   "fields": [
+    "ePass",
+    "eUser",
+    "gCode",
+    "gConsent",
+    "gName",
+    "gRel",
+    "nEmail",
+    "nName",
+    "nPass",
+    "nUser"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Index inputs",
+   "file": "public/coach-app/index.html",
+   "app": "Coach Pool Console / Assistant",
+   "fields": [
+    "bodyTemp",
+    "captureSwimmer",
+    "heartRate",
+    "hrv",
+    "lane1sendoff",
+    "lane2sendoff",
+    "lane3sendoff",
+    "lengthDistance",
+    "respiration",
+    "sendoff",
+    "sessionDate",
+    "sessionSelect",
+    "skinTemp",
+    "spo2",
+    "strokeCount",
+    "strokeRate",
+    "unit"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Availability",
+   "file": "src/components/coaches/CoachAdministrationSection.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "datedUnavailable",
+    "regularUnavailable"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Base",
+   "file": "src/components/operations/AthleteAgreementsSectionCore.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "goals",
+    "monitoringPlan",
+    "reviewMeta"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Coach Review",
+   "file": "src/components/trainingValidation/TrainingValidationEvidencePopup.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "attitudeScore",
+    "coachabilityScore",
+    "consistencyScore",
+    "date",
+    "effortScore",
+    "focus",
+    "focusScore",
+    "notes",
+    "techniqueScore"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Coach Review Edit",
+   "file": "src/components/trainingValidation/TrainingValidationEvidencePopup.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "attitudeScore",
+    "coachabilityScore",
+    "consistencyScore",
+    "date",
+    "effortScore",
+    "focus",
+    "focusScore",
+    "notes",
+    "techniqueScore"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Entity Editor",
+   "file": "src/AthlyraxPhase1App.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "active",
+    "asn",
+    "category",
+    "currentSquadId",
+    "dob",
+    "email",
+    "emergencyContactName",
+    "emergencyContactPhone",
+    "firstName",
+    "gender",
+    "id",
+    "lastName",
+    "name",
+    "phone",
+    "primaryContact",
+    "primaryContactEmail",
+    "primaryContactPhone",
+    "qualification",
+    "sortOrder"
+   ],
+   "source": "form state",
+   "likelyTables": [
+    {
+     "name": "swimmers",
+     "shared": [
+      "active",
+      "currentSquadId",
+      "dob",
+      "firstName",
+      "gender",
+      "lastName"
+     ]
+    },
+    {
+     "name": "coaches",
+     "shared": [
+      "active",
+      "email",
+      "firstName",
+      "lastName",
+      "qualification"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Measurement",
+   "file": "src/components/swimmers/SwimmersSection.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "armSpanCm",
+    "date",
+    "heightCm",
+    "sittingHeightCm",
+    "weightKg"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Measurement",
+   "file": "src/components/trainingValidation/TrainingValidationEvidencePopup.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "armSpanCm",
+    "date",
+    "heightCm",
+    "sittingHeightCm",
+    "weightKg"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Observation",
+   "file": "src/components/swimmers/SwimmersSection.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "date",
+    "mainFocus",
+    "notes"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Pay",
+   "file": "src/components/coaches/CoachAdministrationSection.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "competitionRate",
+    "effectiveDate",
+    "notes",
+    "payType",
+    "trainingRate"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Personal",
+   "file": "src/components/coaches/CoachAdministrationSection.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "active",
+    "address",
+    "city",
+    "country",
+    "email",
+    "emergencyContact",
+    "employmentStatus",
+    "name",
+    "notes",
+    "phone",
+    "startDate"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Poolside",
+   "file": "src/components/operations/TestsSection.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "date",
+    "squadId",
+    "templateId"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Qualification",
+   "file": "src/components/coaches/CoachAdministrationSection.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "certificateReference",
+    "expiryDate",
+    "governingBody",
+    "issueDate",
+    "level",
+    "name",
+    "type"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Swimmer Isp",
+   "file": "src/components/swimmers/SwimmersSection.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "asaN",
+    "coachSummaries",
+    "coachSummaryDraft",
+    "cycleEndTargetTime",
+    "dob",
+    "ispAssessments",
+    "lastReview",
+    "mainStroke",
+    "mainStrokeDistances",
+    "physicalMeasurements",
+    "secondStroke",
+    "secondStrokeDistances",
+    "status"
+   ],
+   "source": "form state",
+   "likelyTables": [
+    {
+     "name": "swimmers",
+     "shared": [
+      "dob",
+      "physicalMeasurements",
+      "status"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Swimmer Isp",
+   "file": "src/utils/swimmersIspController.js",
+   "app": "Coaching Software",
+   "fields": [
+    "asaN",
+    "coachSummaries",
+    "coachSummaryDraft",
+    "cycleEndTargetTime",
+    "dob",
+    "lastReview",
+    "mainStroke",
+    "mainStrokeDistances",
+    "physicalMeasurements",
+    "secondStroke",
+    "secondStrokeDistances",
+    "status"
+   ],
+   "source": "form state",
+   "likelyTables": [
+    {
+     "name": "swimmers",
+     "shared": [
+      "dob",
+      "physicalMeasurements",
+      "status"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Test Entry",
+   "file": "src/components/trainingValidation/TrainingValidationEvidencePopup.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "date",
+    "notes",
+    "resultUnit",
+    "resultValue",
+    "resultValues",
+    "swimmerId",
+    "testName"
+   ],
+   "source": "form state",
+   "likelyTables": [
+    {
+     "name": "tests",
+     "shared": [
+      "resultUnit",
+      "resultValue",
+      "swimmerId",
+      "testName"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Venue",
+   "file": "src/AthlyraxPhase1App.jsx",
+   "app": "Coaching Software",
+   "fields": [
+    "active",
+    "code",
+    "id",
+    "name",
+    "notes"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Module-02 inputs",
+   "file": "public/education/module-02.html",
+   "app": "Education",
+   "fields": [
+    "buyer-email",
+    "buyer-name",
+    "digital-content-consent",
+    "recover-email"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Contact inputs",
+   "file": "public/contact.html",
+   "app": "Public website",
+   "fields": [
+    "email",
+    "name",
+    "subject"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Research-demo-app inputs",
+   "file": "public/research-demo-app.html",
+   "app": "Public website",
+   "fields": [
+    "loginPassword",
+    "loginUsername"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Researchers-signin inputs",
+   "file": "public/researchers-signin.html",
+   "app": "Public website",
+   "fields": [
+    "researchContact",
+    "researchOrg",
+    "researchPurpose"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Signup",
+   "file": "public/js/app.js",
+   "app": "Public website",
+   "fields": [
+    "addEventListener",
+    "querySelector"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Snapshot inputs",
+   "file": "public/snapshot.html",
+   "app": "Public website",
+   "fields": [
+    "changedConditionPerformanceRetention",
+    "changedConditionTechnicalRetention",
+    "lateSessionPerformanceRetention",
+    "lateSessionTechnicalRetention",
+    "mainStroke",
+    "max100Sc",
+    "max100Time",
+    "max200Sc",
+    "max200Time",
+    "max25Sc",
+    "max25Time",
+    "max400Sc",
+    "max400Time",
+    "max50Sc",
+    "max50Time",
+    "maxEffortStroke",
+    "pbRace",
+    "pbStrokeCount",
+    "pbTime",
+    "responseToChange",
+    "set25MaxSc",
+    "set25MaxTime",
+    "set25MinSc",
+    "set25MinTime",
+    "set50MaxSc",
+    "set50MaxTime",
+    "set50MinSc",
+    "set50MinTime",
+    "trainingConsistency"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Swimmer-signin inputs",
+   "file": "public/swimmer-signin.html",
+   "app": "Public website",
+   "fields": [
+    "activeInput",
+    "activePopup",
+    "asnInput",
+    "asnPopup",
+    "authPassword",
+    "authUsername",
+    "clubInput",
+    "clubPopup",
+    "coachCode",
+    "coachCodePopup",
+    "coachEmail",
+    "coachEmailPopup",
+    "coachQuestion",
+    "coachQuestionPopup",
+    "coachReplyParent1",
+    "coachReplyParent2",
+    "currentSquadInput",
+    "currentSquadPopup",
+    "displayNameInput",
+    "displayNamePopup",
+    "dobInput",
+    "dobPopup",
+    "firstNameInput",
+    "firstNamePopup",
+    "forgotIdentifier",
+    "forgotNewPassword",
+    "genderInput",
+    "genderPopup",
+    "homeTimeSlider",
+    "integratedTimeSlider",
+    "ispAsaNInput",
+    "ispCycleEndTargetTimeInput",
+    "ispDobInput",
+    "ispLastReviewInput",
+    "ispMainStrokeDistancesInput",
+    "ispMainStrokeInput",
+    "ispReportAgreementLimitationsInput",
+    "ispReportAgreementStrengthsInput",
+    "ispReportAllergiesInput",
+    "ispReportAthleteCommunicationInput",
+    "ispReportAthleteEffortInput",
+    "ispReportAthleteHabitsInput",
+    "ispReportAthleteSignOffInput",
+    "ispReportAttendanceLimitationsInput",
+    "ispReportCapabilitySummaryInput",
+    "ispReportClearanceStatusInput",
+    "ispReportCoachFeedbackReviewInput",
+    "ispReportCoachNarrativeInput",
+    "ispReportCoachProgrammeFocusInput",
+    "ispReportCoachSignOffInput",
+    "ispReportCoachSupportInput",
+    "ispReportCompetitionBestInput",
+    "ispReportCompetitionSummaryInput",
+    "ispReportConditionsInput",
+    "ispReportConfidenceLevelInput",
+    "ispReportConsistencyTrendInput",
+    "ispReportCurrentPhaseInput",
+    "ispReportDevelopmentRecordInput",
+    "ispReportEventDensityInput",
+    "ispReportExternalLoadInput"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Competition Video",
+   "file": "public/stopwatch/index.html",
+   "app": "Stopwatch",
+   "fields": [
+    "analysisEnd",
+    "analysisRegion",
+    "analysisStart",
+    "autoAnalysis",
+    "cachedEventId",
+    "cachedFixtureId",
+    "cachedHeat",
+    "cachedLaneEntry",
+    "canonicalSwimmerId",
+    "captureId",
+    "competition",
+    "confirmed",
+    "confirmedAt",
+    "createdAt",
+    "deviceId",
+    "distance",
+    "duration",
+    "eventId",
+    "eventLabel",
+    "eventNumber",
+    "expiresAt",
+    "fileName",
+    "fileSize",
+    "heat",
+    "lane",
+    "localVideoAvailable",
+    "mimeType",
+    "recorderCoachId",
+    "recorderCoachName",
+    "status",
+    "strokeCycles",
+    "swimmerId",
+    "swimmerName",
+    "videoExpired",
+    "visibility"
+   ],
+   "source": "form state",
+   "likelyTables": [
+    {
+     "name": "tests",
+     "shared": [
+      "distance",
+      "swimmerId",
+      "swimmerName"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Index inputs",
+   "file": "public/stopwatch/assistant/index.html",
+   "app": "Stopwatch",
+   "fields": [
+    "localAnswerCode",
+    "localOfferCode",
+    "passCode",
+    "passFile"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Index inputs",
+   "file": "public/stopwatch/index.html",
+   "app": "Stopwatch",
+   "fields": [
+    "aiResultsCameraFile",
+    "aiResultsImportFile",
+    "assistantNameInput",
+    "athlyraxAnalysisSwimmer",
+    "athlyraxCoreImportFile",
+    "clubConnectionCode",
+    "clubConnectionEmail",
+    "consoleDockLibrary",
+    "consoleDockMarkerSwimmer",
+    "consoleDockMarkerType",
+    "consoleFrameRate",
+    "consoleOcrTarget",
+    "dockEvent",
+    "dockFixture",
+    "dockHeat",
+    "dockLane",
+    "dockPool",
+    "dockSwimmer",
+    "fxCompetition",
+    "fxCourse",
+    "fxDate",
+    "fxSeason",
+    "fxVenue",
+    "genericResultsLaneSelect",
+    "heatExtraClub",
+    "heatGuestLane",
+    "heatGuestName",
+    "importFile",
+    "manualVideoCompetition",
+    "manualVideoEvent",
+    "manualVideoEventNo",
+    "manualVideoHeat",
+    "manualVideoLane",
+    "manualVideoName",
+    "manualVideoSwimmer",
+    "msActivity",
+    "msAthlete",
+    "msCapability",
+    "msContext",
+    "msEvidenceType",
+    "msMetric",
+    "msNote",
+    "msUnit",
+    "msValue",
+    "quickMarkerType",
+    "swimmerNoteSwimmer",
+    "swimmerNoteText",
+    "swimmerNoteType",
+    "swimmerNoteVisibility",
+    "trainingPoolLengthSelect",
+    "v392ImportAction",
+    "v392ImportTarget",
+    "v392ImportText",
+    "v392LocalJsonFile",
+    "v392SetImportCamera",
+    "v392SetImportFile",
+    "v425VideoSearch",
+    "v425VideoSort",
+    "v425VideoStatus",
+    "v458Comment"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Video Heat",
+   "file": "public/stopwatch/index.html",
+   "app": "Stopwatch",
+   "fields": [
+    "forEach",
+    "some"
+   ],
+   "source": "form state",
+   "likelyTables": []
+  },
+  {
+   "name": "Index inputs",
+   "file": "public/video/index.html",
+   "app": "Video Analysis",
+   "fields": [
+    "calDist",
+    "calWidth",
+    "manDist",
+    "manTime",
+    "manType",
+    "rate",
+    "replaceVideo",
+    "seekBar",
+    "swimmerSelect",
+    "upload"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  }
+ ],
+ "engine": {
+  "axes": [
+   "Technical Control",
+   "Efficiency",
+   "Robustness of Efficiency",
+   "Aerobic Capacity",
+   "Anaerobic Capacity",
+   "Power & Speed Expression",
+   "Adaptability",
+   "Durability"
+  ],
+  "profiles": [
+   {
+    "name": "Training",
+    "from": "Attended sessions with recorded results (sets, reps, times, splits, stroke counts, send-offs)",
+    "collections": [
+     "attendance",
+     "trainingSessions",
+     "trainingSessionSets"
+    ]
+   },
+   {
+    "name": "Testing",
+    "from": "Standard tests (Max 1×25–400, Repeatability 8×25/50/100, 5×400)",
+    "collections": [
+     "tests"
+    ]
+   },
+   {
+    "name": "Competition",
+    "from": "Race results with splits, stroke counts and pool course",
+    "collections": [
+     "fixtures",
+     "competitions"
+    ]
+   },
+   {
+    "name": "Integrated",
+    "from": "Combination of the three profiles with evidence sufficiency and confidence; feeds the ISP report",
+    "collections": [
+     "swimmerAnalyses"
+    ]
+   }
+  ],
+  "files": [
+   "src/utils/accountTrainingEvidenceModel.js",
+   "src/utils/athlyraxCapabilityEngine.js",
+   "src/utils/axisModel.js",
+   "src/utils/canonicalGroupIspRadars.js",
+   "src/utils/canonicalRadarAxisTable.js",
+   "src/utils/canonicalRadarDisplayAuthority.js",
+   "src/utils/canonicalSwimmerEvidence.js",
+   "src/utils/canonicalTrainingPlanRadars.js",
+   "src/utils/capabilityDecisionEngine.js",
+   "src/utils/capabilityEvidenceReading.js",
+   "src/utils/capabilityGraphEvidenceContext.js",
+   "src/utils/capabilityRadarFormulaBinding.js",
+   "src/utils/capabilitySnapshotParity.js",
+   "src/utils/capabilitySnapshotParityInput.js",
+   "src/utils/demoRaceSplitEvidence.js",
+   "src/utils/demoTestSplitEvidence.js",
+   "src/utils/displayedRadarAxis.js",
+   "src/utils/ispCanonicalRadars.js",
+   "src/utils/ispCanonicalSummary.js",
+   "src/utils/ispPlannerSource.js",
+   "src/utils/ispPrintRadarSvg.js",
+   "src/utils/ispReportCanonicalRadars.js",
+   "src/utils/officialCapabilityRadar.js",
+   "src/utils/olympicCapabilityCalibration.js",
+   "src/utils/recordedRaceResultDisplay.js",
+   "src/utils/scopedCapabilitySnapshot.js",
+   "src/utils/scoredCompetitionEvidenceCardRows.js",
+   "src/utils/strictEvidenceScope.js",
+   "src/utils/swimmersIspController.js",
+   "src/utils/swimmersIspEvidence.js",
+   "src/utils/swimmersIspEvidencePopup.js",
+   "src/utils/trainingCycleReportFromEvidence.js",
+   "src/utils/trainingEvidenceReconciliation.js",
+   "src/utils/trainingGraphEvidence.js",
+   "src/utils/validationBaselineEvidence.js",
+   "src/utils/validationEvidenceCardsData.js",
+   "src/utils/validationEvidenceWindowData.js"
+  ],
+  "note": "One canonical engine (src/utils/athlyraxCapabilityEngine.js and its canonical helpers). The backend copy used by the Athlete App is verified byte-identical by tests. Self-reported athlete results are kept separate and do not change club capability scores."
+ },
+ "accountFields": [
+  "athleteInviteManaged",
+  "athleteTenantConnections",
+  "billing",
+  "createdAt",
+  "createdVia",
+  "email",
+  "fullName",
+  "isApproved",
+  "onboardingCompletedAt",
+  "passwordHash",
+  "role",
+  "swimClub",
+  "tenantId",
+  "tokenValidAfter",
+  "username"
+ ],
+ "roles": [
+  "software-owner (primary owner)",
+  "head-coach",
+  "coach",
+  "assistant-coach",
+  "viewer",
+  "swimmer (athlete)"
+ ]
+}

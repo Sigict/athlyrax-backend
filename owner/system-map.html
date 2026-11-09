@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>AthlyraX Owner System Map</title>
+<style>
+:root{--bg:#07121e;--sidebar:#0d1d2c;--panel:#102638;--panel2:#152f43;--line:#2b4658;--text:#eaf4fa;--muted:#a3b6c3;--teal:#56d9be;--blue:#76b9ff;--amber:#ffd17a}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,Arial}button,input,select{font:inherit}button{cursor:pointer}.app{display:grid;grid-template-columns:280px minmax(0,1fr);min-height:100vh}.side{background:var(--sidebar);border-right:1px solid var(--line);padding:25px 16px;position:sticky;top:0;height:100vh;overflow:auto}.brand{letter-spacing:.18em;font-size:22px;font-weight:800;color:var(--teal)}.side p,.muted{color:var(--muted)}.side p{font-size:12px;margin:5px 0 18px}.search{width:100%;background:#091724;border:1px solid var(--line);color:white;border-radius:9px;padding:11px 12px;margin-bottom:12px}.nav-title{font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.15em;margin:20px 8px 7px}.nav{display:grid;gap:3px}.nav button{width:100%;padding:10px 11px;text-align:left;color:var(--muted);border:0;background:transparent;border-radius:8px;display:flex;align-items:center;gap:9px}.nav button:hover,.nav button.on{background:var(--panel2);color:var(--text)}.nav button.on{border-left:3px solid var(--teal)}.dot{width:8px;height:8px;border-radius:50%;background:var(--blue);display:inline-block;flex-shrink:0}.dot.Commercial{background:var(--amber)}.dot.Integrations{background:#bba3ff}.dot.Products{background:#ffa9aa}.dot.Assessment{background:var(--teal)}.main{padding:34px clamp(18px,4vw,60px);max-width:1500px;width:100%;margin:auto}h1{font-size:clamp(28px,3vw,42px);margin:0 0 5px;letter-spacing:-.025em}h2{font-size:20px;margin:0 0 13px}h3{font-size:15px;margin:0 0 10px}.lead{font-size:15px;color:var(--muted);margin:0 0 25px}.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:20px 0}.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:8px;padding:9px 13px}.btn:hover{border-color:var(--teal)}.btn.active{background:#135a58;border-color:var(--teal)}.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:20px}.overview{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:12px;margin:20px 0}.stat{font-size:26px;font-weight:800;color:var(--teal)}.small{font-size:12px;color:var(--muted)}.layout{display:grid;grid-template-columns:minmax(0,1fr) 375px;gap:15px}.map{min-height:620px}.flowgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.node{border:1px solid var(--line);background:#0c1e2d;border-radius:12px;padding:13px;text-align:left;color:var(--text);min-height:96px}.node:hover,.node.sel{outline:2px solid var(--teal);background:#103344}.node strong{display:block;font-size:13px;line-height:1.25}.node em{display:block;margin-top:8px;color:var(--muted);font-size:11px;font-style:normal}.grouphead{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--teal);margin:22px 0 9px}.detail .tag{display:inline-block;padding:3px 8px;background:#17394c;border:1px solid #336079;border-radius:20px;color:#c4ebfa;font-size:11px;margin:8px 0}.detail p{color:var(--muted)}.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0}.tabs button{border:1px solid var(--line);background:transparent;color:var(--muted);padding:7px 10px;border-radius:7px}.tabs button.on{color:var(--text);border-color:var(--teal);background:#17423e}.item{background:#0b1d2a;border:1px solid #2a4355;border-radius:9px;padding:11px 12px;margin:8px 0}.item b{display:block;margin-bottom:4px}.item span{color:var(--muted);font-size:12px;display:block}.link{color:var(--teal);background:#123a3a;border:1px solid #316e66;padding:5px 9px;border-radius:8px;margin:3px;display:inline-block}.detail{position:sticky;top:20px;align-self:start}.rail{display:flex;flex-wrap:wrap;gap:4px}.legend{padding:13px;border-top:1px solid var(--line);margin-top:20px;color:var(--muted);font-size:12px}.warning{border-left:3px solid var(--amber);padding:10px 14px;background:#302716;font-size:12px;color:#ffe5b3;margin:17px 0;border-radius:6px}.path{font-size:12px;color:var(--muted)}.path strong{color:var(--text)}.arrow{color:var(--teal);padding:0 7px}.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--teal)}.hide{display:none!important}@media(max-width:1000px){.layout{grid-template-columns:1fr}.detail{position:static}.overview{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){.app{display:block}.side{position:static;height:auto;padding:16px}.nav{display:flex;overflow:auto}.nav button{white-space:nowrap;width:auto}.nav-title{display:none}.main{padding:20px 15px}.flowgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.node{min-height:100px}.overview{grid-template-columns:repeat(2,1fr)}}@media print{.side,.toolbar{display:none}.app{display:block}.main{padding:0}.layout{grid-template-columns:1fr}.detail{position:static}body{background:#fff;color:#000}.card,.node{background:#fff;color:#000}.node em,.small{color:#555}}
+
+/* additions for the code-verified layer */
+.badge{display:inline-block;font-size:11px;border-radius:999px;padding:1px 8px;margin-left:6px;border:1px solid var(--line)}
+.badge.confirmed{color:#0b2b22;background:var(--teal);border-color:var(--teal)}.badge.inferred{color:#2b1d00;background:var(--amber);border-color:var(--amber)}.badge.conceptual{color:var(--text);background:#3b4a63}
+.fieldlist{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}.fieldlist code{background:#0a1a28;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12px}
+.flowline{font-size:13px;margin:3px 0}.flowline .arrow{color:var(--teal);margin:0 6px}
+.clickable{color:var(--blue);cursor:pointer;text-decoration:underline;background:none;border:0;padding:0;font:inherit}
+.views{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 14px}
+@media (max-width:900px){.app{grid-template-columns:1fr}.side{position:static;height:auto}.layout{grid-template-columns:1fr}.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.flowgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="side">
+  <div class="brand">ATHLYRAX</div>
+  <p>Owner system map · read-only · owner access only</p>
+  <input id="search" class="search" type="search" placeholder="Find a module, table, form or field…" aria-label="Search">
+  <div id="navigation"></div>
+  <div class="legend"><span class="badge confirmed">confirmed in code</span><br><span class="badge inferred">inferred from code</span><br><span class="badge conceptual">conceptual (owner map)</span></div>
+</aside>
+<main class="main">
+  <h1>AthlyraX owner system map</h1>
+  <p class="lead">How coaching, poolside timing, athlete data, assessment, video, payments and education connect. It combines the owner's functional map with what the code actually does.</p>
+  <div class="overview">
+    <div class="card"><div class="stat" id="cModules">–</div><div class="small">Modules and applications</div></div>
+    <div class="card"><div class="stat" id="cTables">–</div><div class="small">Data tables (club collections)</div></div>
+    <div class="card"><div class="stat" id="cForms">–</div><div class="small">Forms found in code</div></div>
+    <div class="card"><div class="stat" id="cRoutes">–</div><div class="small">Server routes</div></div>
+  </div>
+  <div class="warning" id="scope">Loading…</div>
+  <div class="views" role="tablist" aria-label="Views">
+    <button class="btn active" data-view="modules">Modules</button>
+    <button class="btn" data-view="tables">Tables</button>
+    <button class="btn" data-view="forms">Forms</button>
+    <button class="btn" data-view="engine">Capability engine</button>
+    <button class="btn" data-view="routes">Routes &amp; permissions</button>
+    <button class="btn" data-view="external">External services</button>
+    <button class="btn" id="print">Print / save PDF</button>
+  </div>
+  <div class="layout">
+    <section class="card map"><h2 id="listTitle">Modules and data flow</h2><p class="small" id="listHint"></p><div id="flow"></div></section>
+    <section class="card detail" id="detail" aria-live="polite"><h2>Select an item</h2><p>Choose a tile, table or form to see its details and connections.</p></section>
+  </div>
+</main>
+</div>
+<script src="system-map/app.js"></script>
+</body>
+</html>
