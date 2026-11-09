@@ -404,3 +404,29 @@ test('guardian-managed login for an athlete without email: verified consent, sep
     await server.stop();
   }
 });
+
+test('staged rollout: only clubs listed in ATHLETE_INVITE_EMAIL_TENANTS send automatic invitation emails', async () => {
+  const sender = { ATHLETE_INVITE_FROM: 'AthlyraX <invites@example.com>' };
+  // Club A is not listed: no automatic email, nothing created by the bulk route; link invitations still work.
+  const off = await startServer({ ...sender, ATHLETE_INVITE_EMAIL_TENANTS: 'tenant-z' }, seedSquad);
+  try {
+    const coach = await login(off.baseUrl, 'coachA', 'CoachA!Pass1234');
+    const ov = await request(off.baseUrl, '/coach/athlete-invites/overview', coach);
+    assert.equal(ov.payload.email.available, false);
+    const bulk = await post(off.baseUrl, '/coach/athlete-invites/bulk', { requestId: 'stagedOff0001', items: [{ swimmerId: 'adult1', athleteEmail: 'ada@example.com' }] }, coach);
+    assert.equal(bulk.response.status, 503);
+    assert.equal((tenantDb(off).athleteAccountInvites || []).length, 0, 'nothing created');
+    const link = await post(off.baseUrl, '/coach/swimmers/adult1/athlete-invites', { email: 'ada@example.com' }, coach);
+    assert.equal(link.response.status, 201, JSON.stringify(link.payload));
+    assert.ok(link.payload.athleteToken, 'link-based invitation unchanged');
+  } finally { await off.stop(); }
+  // Club A listed: automatic email available.
+  const on = await startServer({ ...sender, ATHLETE_INVITE_EMAIL_TENANTS: 'tenant-a' }, seedSquad);
+  try {
+    const coach = await login(on.baseUrl, 'coachA', 'CoachA!Pass1234');
+    assert.equal((await request(on.baseUrl, '/coach/athlete-invites/overview', coach)).payload.email.available, true);
+    const bulk = await post(on.baseUrl, '/coach/athlete-invites/bulk', { requestId: 'stagedOn00001', items: [{ swimmerId: 'adult1', athleteEmail: 'ada@example.com' }] }, coach);
+    assert.equal(bulk.response.status, 200, JSON.stringify(bulk.payload));
+    assert.equal(bulk.payload.results[0].outcome, 'sent');
+  } finally { await on.stop(); }
+});

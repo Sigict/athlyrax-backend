@@ -3997,6 +3997,9 @@ async function reconcileAthleteLinks(t, req) {
 	} catch {}
 }
 function guardianDeliveryMode() {
+	// During a staged rollout (ATHLETE_INVITE_EMAIL_TENANTS set) verification codes keep using the
+	// existing security sender for every club, exactly as before automatic invitations.
+	if (ATHLETE_INVITE_EMAIL_TENANTS.length) return AUTH_SMTP_HOST && AUTH_SMTP_FROM ? 'smtp' : (IS_PRODUCTION ? '' : 'console');
 	// The verified invitation sender (ATHLETE_INVITE_FROM) is used when configured.
 	if (ATHLETE_INVITE_SENDER && BREVO_API_KEY) return 'invite-mail';
 	if (AUTH_SMTP_HOST && AUTH_SMTP_FROM) return ATHLETE_INVITE_SENDER ? 'invite-mail' : 'smtp';
@@ -4133,20 +4136,27 @@ function parseSender(value) {
 	return validInviteEmail(email) ? { email, name: (m && m[1] ? m[1].trim() : '') || 'AthlyraX' } : null;
 }
 const ATHLETE_INVITE_SENDER = parseSender(ATHLETE_INVITE_FROM);
-function inviteMailProvider() {
+// Staged rollout: when ATHLETE_INVITE_EMAIL_TENANTS is set (comma-separated club keys), only those clubs
+// send automatic invitation emails; every other club keeps the link-based invitation. Unset = all clubs.
+const ATHLETE_INVITE_EMAIL_TENANTS = String(process.env.ATHLETE_INVITE_EMAIL_TENANTS || '').split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
+function inviteEmailAllowedFor(tenantKey) {
+	return !ATHLETE_INVITE_EMAIL_TENANTS.length || ATHLETE_INVITE_EMAIL_TENANTS.includes(String(tenantKey || '').trim().toLowerCase());
+}
+function inviteMailProvider(tenantKey = '') {
 	if (ATHLETE_INVITE_SENDER) {
+		if (!inviteEmailAllowedFor(tenantKey)) return '';
 		if (BREVO_API_KEY) return 'brevo-api';
 		if (AUTH_SMTP_HOST) return 'smtp';
 	}
 	return IS_PRODUCTION ? '' : 'console';
 }
-function inviteMailStatus() {
-	const provider = inviteMailProvider();
+function inviteMailStatus(tenantKey = '') {
+	const provider = inviteMailProvider(tenantKey);
 	return { available: Boolean(provider), provider, sender: ATHLETE_INVITE_SENDER?.email || (provider === 'console' ? 'development outbox' : ''), deliveryEvents: Boolean(BREVO_WEBHOOK_SECRET) };
 }
 // Sends one service email. Returns { provider, messageId }. Throws on failure (message has no secrets).
-async function sendInviteMail({ to, toName = '', replyTo = null, subject, text, html, tag = '' }) {
-	const provider = inviteMailProvider();
+async function sendInviteMail({ to, toName = '', replyTo = null, subject, text, html, tag = '', tenantKey = '' }) {
+	const provider = inviteMailProvider(tenantKey);
 	if (!provider) throw new Error('Invitation email is not configured.');
 	if (provider === 'brevo-api') {
 		const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 15000);
@@ -4192,10 +4202,10 @@ async function deliverInvitation(t, { inviteId, deliveryId, kind, to, swimmerNam
 	const replyTo = clubReplyTo(t.key, actor);
 	const mail = buildInviteEmail({ kind, clubName: clubDisplayName(t.key), coachName: coachDisplayName(actor), swimmerName, link: inviteUrlFor(token), expiresAt, replyTo });
 	let result; let error = '';
-	try { result = await sendInviteMail({ to, replyTo, subject: mail.subject, text: mail.text, html: mail.html, tag: inviteMailTag(t.key, inviteId) }); }
+	try { result = await sendInviteMail({ to, replyTo, subject: mail.subject, text: mail.text, html: mail.html, tag: inviteMailTag(t.key, inviteId), tenantKey: t.key }); }
 	catch (e) { error = e instanceof Error ? e.message : 'Email could not be sent.'; }
 	try {
-		await mutateAthleteTenantDb(t.paths, (db) => ({ ok: true, db: updateDelivery(db, inviteId, deliveryId, result ? { provider: result.provider, messageId: result.messageId, status: 'sent' } : { provider: inviteMailProvider(), status: 'failed', error }) }));
+		await mutateAthleteTenantDb(t.paths, (db) => ({ ok: true, db: updateDelivery(db, inviteId, deliveryId, result ? { provider: result.provider, messageId: result.messageId, status: 'sent' } : { provider: inviteMailProvider(t.key), status: 'failed', error }) }));
 	} catch {}
 	return { ok: Boolean(result), error };
 }
@@ -4213,10 +4223,10 @@ const athleteBulkInFlight = new Set();
 // Coach: every swimmer in the club with saved contacts and invitation state (no secrets).
 app.get('/coach/athlete-invites/overview', requireStrictAuth, requireAthleteInviteManager, async (req, res) => {
 	const t = athleteTenantPaths(athleteInviteActorTenant(req));
-	if (!t) { res.status(200).json({ ok: true, available: false, reason: 'Athlete App invitations are managed from a club coaching account.', swimmers: [], email: inviteMailStatus() }); return; }
+	if (!t) { res.status(200).json({ ok: true, available: false, reason: 'Athlete App invitations are managed from a club coaching account.', swimmers: [], email: inviteMailStatus('') }); return; }
 	await reconcileAthleteLinks(t, req);
 	const db = readJsonFile(t.paths.dbPath) || {};
-	res.status(200).json({ ok: true, available: true, club: clubDisplayName(t.key), replyTo: clubReplyTo(t.key, req.auth?.username)?.email || '', email: inviteMailStatus(), stateLabels: COACH_STATE_LABELS, swimmers: clubOverview(db) });
+	res.status(200).json({ ok: true, available: true, club: clubDisplayName(t.key), replyTo: clubReplyTo(t.key, req.auth?.username)?.email || '', email: inviteMailStatus(t.key), stateLabels: COACH_STATE_LABELS, swimmers: clubOverview(db) });
 });
 
 // Coach: the exact email a swimmer (or their parent/guardian) would receive, with the link withheld.
@@ -4236,7 +4246,7 @@ app.post('/coach/athlete-invites/email-preview', requireStrictAuth, requireAthle
 app.post('/coach/athlete-invites/bulk', requireStrictAuth, requireAthleteInviteManager, requireAdminRateLimit, async (req, res) => {
 	const t = athleteTenantPaths(athleteInviteActorTenant(req));
 	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
-	if (!inviteMailProvider()) { res.status(503).json({ error: 'Automatic invitation email is not configured yet. No invitations were created.' }); return; }
+	if (!inviteMailProvider(t.key)) { res.status(503).json({ error: 'Automatic invitation email is not configured yet. No invitations were created.' }); return; }
 	const requestId = String(req.body?.requestId || '').trim();
 	if (!/^[A-Za-z0-9_-]{8,80}$/.test(requestId)) { res.status(400).json({ error: 'A request id is required.' }); return; }
 	const { items, dupes } = dedupeBulkItems(req.body?.items);
@@ -4272,7 +4282,7 @@ app.post('/coach/athlete-invites/bulk', requireStrictAuth, requireAthleteInviteM
 				db = markAutoDelivery(created.db, created.invite.id, { requestId });
 				const kind = plan.sendTo; const to = kind === 'guardian' ? plan.guardianEmail : plan.athleteEmail;
 				const deliveryId = newDeliveryId();
-				db = recordDelivery(db, created.invite.id, { id: deliveryId, kind, to, provider: inviteMailProvider(), status: 'queued', now });
+				db = recordDelivery(db, created.invite.id, { id: deliveryId, kind, to, provider: inviteMailProvider(t.key), status: 'queued', now });
 				// Under-18: only the guardian link is sent now; the athlete link is minted after consent.
 				jobs.push({ inviteId: created.invite.id, deliveryId, kind, to, swimmerId: plan.swimmerId, swimmerName: plan.name, token: kind === 'guardian' ? created.guardianToken : created.athleteToken, expiresAt: created.invite.expiresAt, contactsSaved: contact.changed });
 				results.push({ swimmerId: plan.swimmerId, name: plan.name, outcome: 'queued', kind, inviteId: created.invite.id });
@@ -4303,7 +4313,7 @@ app.post('/coach/athlete-invites/bulk', requireStrictAuth, requireAthleteInviteM
 app.post('/coach/athlete-invites/:inviteId/resend', requireStrictAuth, requireAthleteInviteManager, requireAdminRateLimit, async (req, res) => {
 	const t = athleteTenantPaths(athleteInviteActorTenant(req));
 	if (!t) { res.status(403).json({ error: 'Club scope is unavailable.' }); return; }
-	if (!inviteMailProvider()) { res.status(503).json({ error: 'Automatic invitation email is not configured yet.' }); return; }
+	if (!inviteMailProvider(t.key)) { res.status(503).json({ error: 'Automatic invitation email is not configured yet.' }); return; }
 	const actor = String(req.auth?.username || ''); const inviteId = String(req.params.inviteId || '');
 	const newEmail = String(req.body?.email || '').trim().toLowerCase();
 	if (newEmail && !validInviteEmail(newEmail)) { res.status(400).json({ error: 'Enter a valid email address.' }); return; }
@@ -4331,7 +4341,7 @@ app.post('/coach/athlete-invites/:inviteId/resend', requireStrictAuth, requireAt
 		db = rot.db;
 		if (kind === 'guardian' && newEmail) db = { ...db, [ATHLETE_INVITE_COLLECTION]: db[ATHLETE_INVITE_COLLECTION].map((i) => (i.id === inviteId ? { ...i, guardianEmail: newEmail, guardianCode: null } : i)) };
 		const deliveryId = newDeliveryId();
-		db = recordDelivery(db, inviteId, { id: deliveryId, kind, to, provider: inviteMailProvider(), status: 'queued', now });
+		db = recordDelivery(db, inviteId, { id: deliveryId, kind, to, provider: inviteMailProvider(t.key), status: 'queued', now });
 		job = { inviteId, deliveryId, kind, to, swimmerName: swimmerDisplayName(row), token: rot.token, expiresAt: invite.expiresAt };
 		return { ok: true, db };
 	}).catch(() => null);
@@ -4497,7 +4507,7 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 	let athleteInvitation = ''; let athleteSentTo = '';
 	if (!out.already && out.invite.delivery === 'email') {
 		if (!out.invite.targetEmail) athleteInvitation = 'athlete-email-needed';
-		else if (!inviteMailProvider()) athleteInvitation = 'pending';
+		else if (!inviteMailProvider(t.key)) athleteInvitation = 'pending';
 		else {
 			let job = null;
 			try {
@@ -4507,7 +4517,7 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 					const row = (db0.swimmers || []).find((r) => String(r?.id) === String(out.invite.swimmerId)) || {};
 					const deliveryId = newDeliveryId();
 					job = { inviteId: out.invite.id, deliveryId, kind: 'athlete', to: rot.invite.targetEmail, swimmerName: swimmerDisplayName(row), token: rot.token, expiresAt: rot.invite.expiresAt };
-					return { ok: true, db: recordDelivery(rot.db, out.invite.id, { id: deliveryId, kind: 'athlete', to: rot.invite.targetEmail, provider: inviteMailProvider(), status: 'queued' }) };
+					return { ok: true, db: recordDelivery(rot.db, out.invite.id, { id: deliveryId, kind: 'athlete', to: rot.invite.targetEmail, provider: inviteMailProvider(t.key), status: 'queued' }) };
 				});
 				if (minted?.ok && job) {
 					const sent = await deliverInvitation(t, { ...job, actor: out.invite.createdBy });
