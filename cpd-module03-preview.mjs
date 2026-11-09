@@ -30,7 +30,7 @@ function covered(list){return list.reduce((s,[a,b])=>s+b-a+1,0);}
 export function registerCpdModule03Preview(app,{storageRoot,requireStrictAuth,requireSoftwareOwnerRole}) {
   const root=path.join(storageRoot,'cpd',ROOT_NAME);
   const base='/cpd/module-03/owner';
-  const guards=[requireStrictAuth,requireSoftwareOwnerRole];
+  // Guards are written explicitly per route for auditable access rules.
   const bank=JSON.parse(fs.readFileSync(path.join(DIR,'cpd-module03-private-questions.json'),'utf8')).questions;
   if(bank.length!==19||Object.entries(SECTIONS).some(([s])=>bank.filter(q=>q.section===s).length!==(s==='final'?10:3)))
     throw new Error('Module 03 questions missing or invalid');
@@ -58,14 +58,14 @@ export function registerCpdModule03Preview(app,{storageRoot,requireStrictAuth,re
     if(section==='final')return p.lessons.length===3&&['check-1','check-2','check-3'].every(s=>p.checks.includes(s));
     return true;
   }
-  app.get(base+'/status',...guards,(_req,res)=>{
+  app.get(base+'/status', requireStrictAuth, requireSoftwareOwnerRole,(_req,res)=>{
     const p=load();
     nocache(res).json({course:'cpd01-module03',title:'Swimming Set Design — From Purpose to Practice',
       price:{amount:499,currency:'gbp'},salesEnabled:false,testMode:true,ownerPreview:true,
       paidAccess:true,learner:{name:'AthlyraX Owner Preview',email:'owner preview'},accessRevoked:'',
       lessons:LESSONS,progress:view(p),certificate:p.certificate?{id:p.certificate.id,score:p.certificate.score}:null});
   });
-  app.get(base+'/video/:lesson',...guards,(req,res)=>{
+  app.get(base+'/video/:lesson', requireStrictAuth, requireSoftwareOwnerRole,(req,res)=>{
     const n=Number(req.params.lesson), size=videoSize(n);
     if(!Number.isInteger(n)||n<1||n>3||!size)return fail(res,404,'Lesson video not uploaded.');
     let from=0,to=Math.min(size-1,SEND_LIMIT-1);
@@ -85,13 +85,13 @@ export function registerCpdModule03Preview(app,{storageRoot,requireStrictAuth,re
       'Content-Length':String(to-from+1),'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});
     fs.createReadStream(videoPath(n),{start:from,end:to}).on('error',()=>res.destroy()).pipe(res);
   });
-  app.get(base+'/questions',...guards,(req,res)=>{
+  app.get(base+'/questions', requireStrictAuth, requireSoftwareOwnerRole,(req,res)=>{
     const section=String(req.query.section||''),p=load();
     if(!SECTIONS[section])return fail(res,400,'Unknown assessment.');
     if(!unlocked(p,section))return fail(res,409,'Complete the preceding lessons and checks first.');
     nocache(res).json({section,questions:bank.filter(q=>q.section===section).map(q=>({id:q.id,question:q.question,options:q.options}))});
   });
-  app.post(base+'/lesson-complete',...guards,(req,res)=>{
+  app.post(base+'/lesson-complete', requireStrictAuth, requireSoftwareOwnerRole,(req,res)=>{
     const n=Number(req.body?.lesson),p=load();
     if(!Number.isInteger(n)||n<1||n>3)return fail(res,400,'Invalid lesson.');
     if(n>1&&!p.checks.includes('check-'+(n-1)))return fail(res,409,'Complete the prior knowledge check first.');
@@ -99,7 +99,7 @@ export function registerCpdModule03Preview(app,{storageRoot,requireStrictAuth,re
     if(!p.lessons.includes(n))p.lessons.push(n);
     p.lessons.sort();save(p);nocache(res).json(view(p));
   });
-  app.post(base+'/assessment',...guards,(req,res)=>{
+  app.post(base+'/assessment', requireStrictAuth, requireSoftwareOwnerRole,(req,res)=>{
     const section=String(req.body?.section||''),p=load();
     if(!SECTIONS[section])return fail(res,400,'Unknown assessment.');
     if(!unlocked(p,section))return fail(res,409,'Complete the preceding lessons and checks first.');
@@ -121,7 +121,7 @@ export function registerCpdModule03Preview(app,{storageRoot,requireStrictAuth,re
     nocache(res).json({section,score,total:10,pass,passMark:8,attempts:p.finalAttempts,
       certificate:p.certificate?{id:p.certificate.id}:null});
   });
-  app.get(base+'/certificate',...guards,(_req,res)=>{
+  app.get(base+'/certificate', requireStrictAuth, requireSoftwareOwnerRole,(_req,res)=>{
     const p=load();
     if(!p.certificate)return fail(res,403,'Pass the final assessment first.');
     let logoJpeg=null;
@@ -136,6 +136,6 @@ export function registerCpdModule03Preview(app,{storageRoot,requireStrictAuth,re
     res.set({'Content-Type':'application/pdf','Cache-Control':'private, no-store',
       'Content-Disposition':'attachment; filename="AthlyraX-Module03-OWNER-PREVIEW.pdf"'}).send(pdf);
   });
-  app.get(base+'/verify/:id',...guards,(_req,res)=>nocache(res).json({valid:false,preview:true}));
-  app.post(base+'/logout',...guards,(_req,res)=>nocache(res).json({ok:true}));
+  app.get(base+'/verify/:id', requireStrictAuth, requireSoftwareOwnerRole,(_req,res)=>nocache(res).json({valid:false,preview:true}));
+  app.post(base+'/logout', requireStrictAuth, requireSoftwareOwnerRole,(_req,res)=>nocache(res).json({ok:true}));
 }
