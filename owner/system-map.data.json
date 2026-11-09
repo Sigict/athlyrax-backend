@@ -15,7 +15,7 @@
   },
   {
    "name": "CPD store (Education)",
-   "description": "Course purchases, entitlements, progress, completions and certificates (cpd-module02.mjs)."
+   "description": "Module 02 purchases, entitlements, progress, completions and certificates; isolated Module 03 owner-preview videos and assessment records. Module 03 public sales are disabled."
   },
   {
    "name": "Athlete personal store",
@@ -2229,22 +2229,124 @@
   {
    "method": "PUT",
    "path": "/cpd/module-03/admin/video/:lesson",
-   "guards": [],
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
    "file": "cpd-module03-uploads.mjs",
    "line": 28,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "permission": "Primary software owner only",
    "calledBy": []
   },
   {
    "method": "GET",
    "path": "/cpd/module-03/admin/videos",
-   "guards": [],
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
    "file": "cpd-module03-uploads.mjs",
    "line": 19,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "permission": "Primary software owner only",
    "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/owner/assessment",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 102,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/certificate",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 124,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/owner/lesson-complete",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 94,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/owner/logout",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 140,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/questions",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 88,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/status",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 61,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/verify/:id",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 139,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/owner/video/:lesson",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03-preview.mjs",
+   "line": 68,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
   },
   {
    "method": "GET",
