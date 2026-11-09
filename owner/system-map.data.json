@@ -15,7 +15,7 @@
   },
   {
    "name": "CPD store (Education)",
-   "description": "Module 02 purchases, entitlements, progress, completions and certificates; isolated Module 03 owner-preview videos and assessment records. Module 03 public sales are disabled."
+   "description": "Module 02 and Module 03 separately manage verified purchases, lesson progress, completion and valid certificates. Module 03 owner-preview data remains separate from issued credentials."
   },
   {
    "name": "Athlete personal store",
@@ -2227,6 +2227,30 @@
    "calledBy": []
   },
   {
+   "method": "POST",
+   "path": "/cpd/module-03/admin/revoke",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03.mjs",
+   "line": 570,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/admin/sales",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "cpd-module03.mjs",
+   "line": 530,
+   "area": "Education (CPD)",
+   "permission": "Primary software owner only"
+  },
+  {
    "method": "PUT",
    "path": "/cpd/module-03/admin/video/:lesson",
    "guards": [
@@ -2251,6 +2275,60 @@
    "area": "Education (CPD)",
    "permission": "Primary software owner only",
    "calledBy": []
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/assessment",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 431,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/certificate",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 461,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/checkout",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 279,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/claim",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 328,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/lesson-complete",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 417,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/logout",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 249,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
   },
   {
    "method": "POST",
@@ -2347,6 +2425,60 @@
    "line": 68,
    "area": "Education (CPD)",
    "permission": "Primary software owner only"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/questions",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 406,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/recover",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 344,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "POST",
+   "path": "/cpd/module-03/redeem",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 365,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/status",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 255,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/verify/:id",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 471,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+  },
+  {
+   "method": "GET",
+   "path": "/cpd/module-03/video/:lesson",
+   "guards": [],
+   "file": "cpd-module03.mjs",
+   "line": 380,
+   "area": "Education (CPD)",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
   },
   {
    "method": "GET",
