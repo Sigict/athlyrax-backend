@@ -109,6 +109,11 @@ test('states and delivery events', () => {
   // Resend limits: a failed attempt may be retried at once; a successful one waits a minute.
   assert.equal(resendAllowed({ deliveries: [{ kind: 'athlete', status: 'failed', at: now.toISOString() }] }, 'athlete', now).ok, true);
   assert.equal(resendAllowed({ deliveries: [{ kind: 'athlete', status: 'sent', at: now.toISOString() }] }, 'athlete', now).status, 429);
+  // A corrected address is sent at once; the same address still waits (no repeated message).
+  const sentTo = { deliveries: [{ kind: 'guardian', to: 'wrong@example.com', status: 'sent', at: now.toISOString() }] };
+  assert.equal(resendAllowed(sentTo, 'guardian', now, 'right@example.com').ok, true);
+  assert.equal(resendAllowed(sentTo, 'guardian', now, 'WRONG@example.com').status, 429);
+  assert.equal(resendAllowed({ deliveries: Array.from({ length: 5 }, (_, i) => ({ kind: 'guardian', to: `a${i}@example.com`, status: 'sent', at: now.toISOString() })) }, 'guardian', now, 'new@example.com').status, 429, 'total sends stay capped');
 });
 
 test('email subject never contains line breaks from club data (header injection)', () => {

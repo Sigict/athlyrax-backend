@@ -186,11 +186,15 @@ export function rotateInviteToken(db = {}, inviteId, kind, { now = new Date(), t
 }
 
 // Resend limits per invitation and kind.
-export function resendAllowed(invite = {}, kind, now = new Date()) {
+// `to`: the address this send goes to. A corrected address (different from the last one) is sent at
+// once, because the previous message went to the wrong place; the same address waits a minute so a
+// repeated click cannot send the same message twice. The total number of sends stays capped.
+export function resendAllowed(invite = {}, kind, now = new Date(), to = '') {
   const sends = list(invite.deliveries).filter((d) => d.kind === kind);
   if (sends.length >= RESEND_MAX_SENDS) return { ok: false, status: 429, error: 'This invitation has been sent the maximum number of times. Withdraw it and create a new one.' };
   const last = sends.filter((d) => d.status !== 'failed').pop(); // a failed attempt can be retried at once
-  if (last && now.getTime() - Date.parse(last.at) < RESEND_MIN_SECONDS * 1000) return { ok: false, status: 429, error: 'Please wait a minute before sending again.' };
+  const sameRecipient = !normalizeEmail(to) || !last || normalizeEmail(last.to) === normalizeEmail(to);
+  if (last && sameRecipient && now.getTime() - Date.parse(last.at) < RESEND_MIN_SECONDS * 1000) return { ok: false, status: 429, error: 'Please wait a minute before sending again.' };
   return { ok: true };
 }
 

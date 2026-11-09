@@ -4313,12 +4313,12 @@ app.post('/coach/athlete-invites/:inviteId/resend', requireStrictAuth, requireAt
 		const invite = (db0[ATHLETE_INVITE_COLLECTION] || []).find((i) => i?.id === inviteId);
 		if (!invite) return { ok: false, status: 404, error: 'Invitation not found.' };
 		const kind = inviteStatus(invite) === 'awaiting-guardian' ? 'guardian' : 'athlete';
-		const allowed = resendAllowed(invite, kind, now);
+		const to = newEmail || (kind === 'guardian' ? invite.guardianEmail : invite.targetEmail);
+		const allowed = resendAllowed(invite, kind, now, to);
 		if (!allowed.ok) return allowed;
 		let db = db0;
 		const { row } = uniqueSwimmerRow(db, invite.swimmerId);
 		if (!row) return { ok: false, status: 409, error: 'The swimmer record for this invitation is unavailable.' };
-		const to = newEmail || (kind === 'guardian' ? invite.guardianEmail : invite.targetEmail);
 		if (!to) return { ok: false, status: 400, error: 'Enter the athlete email address.' };
 		if (kind === 'athlete' && invite.guardianRequired && to === invite.guardianEmail) return { ok: false, status: 400, error: 'The athlete email must differ from the parent/guardian email.' };
 		if (req.body?.save === true && newEmail) {
