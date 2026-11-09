@@ -957,6 +957,10 @@ function hashPasswordResetCode(code) {
 // Email verification for independent swimmer sign-ups (flag set only on accounts created with it).
 const emailVerifyByUser = new Map();
 const EMAIL_NOT_VERIFIED_RESPONSE = Object.freeze({ error: 'Verify your email address first: enter the 6-digit code we emailed you, or request a new code.', needsEmailVerification: true });
+// Ambiguity-safe identifier lookup (the same resolver the production sign-in uses).
+function lookupAccountByIdentifier(identifier) {
+	return resolveLoginUserByIdentifier(identifier)?.user || null;
+}
 function emailVerificationPending(user) {
 	return Boolean(user && user.emailVerificationRequired === true && !String(user.emailVerifiedAt || '').trim());
 }
@@ -6548,7 +6552,7 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, async (req, res) => {
 
 // Independent swimmer email verification (code emailed at sign-up; resend allowed once a minute).
 app.post('/snapshot/account/verify-email', requireLoginRateLimit, (req, res) => {
-	const user = findAuthUserByIdentifier(String(req.body?.email || '').trim());
+	const user = lookupAccountByIdentifier(String(req.body?.email || '').trim());
 	const code = String(req.body?.code || '').trim();
 	const entry = user ? emailVerifyByUser.get(String(user.username).toLowerCase()) : null;
 	if (user && !emailVerificationPending(user)) { res.status(200).json({ ok: true, alreadyVerified: true }); return; }
@@ -6566,7 +6570,7 @@ app.post('/snapshot/account/verify-email', requireLoginRateLimit, (req, res) => 
 	res.status(200).json({ ok: true, username: user.username });
 });
 app.post('/snapshot/account/verify-email/resend', requireLoginRateLimit, async (req, res) => {
-	const user = findAuthUserByIdentifier(String(req.body?.email || '').trim());
+	const user = lookupAccountByIdentifier(String(req.body?.email || '').trim());
 	const ok = { ok: true, message: 'If the account needs verification, a new code has been sent.' };
 	if (!user || !emailVerificationPending(user)) { res.status(200).json(ok); return; }
 	const last = emailVerifyByUser.get(String(user.username).toLowerCase());
