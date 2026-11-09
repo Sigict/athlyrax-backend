@@ -208,6 +208,8 @@ function safeClubConnection(connection = {}) {
     squadId: text(connection.squadId || connection.squadCode),
     squadName: text(connection.squadName || connection.squad),
     status: text(connection.status || 'active'),
+    // How the connection was made (e.g. 'athlete-invite': the athlete may leave it from the app).
+    source: text(connection.source),
     startDate: text(connection.startDate),
     endDate: text(connection.endDate),
     swimmingSessionPolicy: text(connection.swimmingSessionPolicy),
