@@ -85,7 +85,7 @@ function mergeRanges(ranges) {
 }
 const coveredBytes = (ranges) => ranges.reduce((s, r) => s + (r[1] - r[0] + 1), 0);
 
-export function registerCpdModule02(app, deps) {
+export function registerCpdModule03(app, deps) {
   const { storageRoot, requireStrictAuth, requireSoftwareOwnerRole, sendMail = null, isSoftwareOwner = () => false } = deps;
   const root = path.join(storageRoot, 'cpd', 'module-03');
   const store = makeStore(root);
@@ -410,7 +410,7 @@ export function registerCpdModule02(app, deps) {
     if (!ent) return fail(res, 401, 'Course purchase required.');
     const p = getProgress(ent.sessionId), def = SECTIONS[section];
     if (!p.lessons.includes(def.afterLesson)) return fail(res, 409, `Watch lesson ${def.afterLesson} first.`);
-    if (section === 'final' && !(p.lessons.length === 3 && ['check-1', 'check-2', 'check-3'].every(s => p.checks.includes(s)))) return fail(res, 409, 'Complete all three lessons and both knowledge checks first.');
+    if (section === 'final' && !(p.lessons.length === 3 && ['check-1', 'check-2', 'check-3'].every(s => p.checks.includes(s)))) return fail(res, 409, 'Complete all three lessons and all three knowledge checks first.');
     noStore(res).json({ section, questions: questions.filter((x) => x.section === section).map((x) => ({ id: x.id, question: x.question, options: x.options })) });
   });
 
@@ -435,7 +435,7 @@ export function registerCpdModule02(app, deps) {
     const def = SECTIONS[section]; if (!def) return fail(res, 400, 'Invalid assessment section.');
     const p = getProgress(ent.sessionId);
     if (!p.lessons.includes(def.afterLesson)) return fail(res, 409, `Watch lesson ${def.afterLesson} first.`);
-    if (section === 'final' && !(p.lessons.length === 3 && ['check-1', 'check-2', 'check-3'].every(s => p.checks.includes(s)))) return fail(res, 409, 'Complete all three lessons and both knowledge checks first.');
+    if (section === 'final' && !(p.lessons.length === 3 && ['check-1', 'check-2', 'check-3'].every(s => p.checks.includes(s)))) return fail(res, 409, 'Complete all three lessons and all three knowledge checks first.');
     const qs = questions.filter((x) => x.section === section), answers = req.body?.answers;
     if (!Array.isArray(answers) || answers.length !== qs.length || answers.some((x) => !Number.isInteger(x) || x < 0 || x > 3)) return fail(res, 400, 'Answer every question before submitting.');
     const score = qs.reduce((s, q, i) => s + Number(q.correct_option_index === answers[i]), 0);
