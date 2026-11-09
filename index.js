@@ -13,6 +13,7 @@ import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerCpdModule03 } from './cpd-module03.mjs';
 import { registerCpdModule03Uploads } from './cpd-module03-uploads.mjs';
+import { registerInvestorAccess } from './investor-access.mjs';
 import { registerCpdModule03Preview } from './cpd-module03-preview.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
 import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraining, personalTrainingPath } from './athlete-personal-training.mjs';
@@ -3896,6 +3897,12 @@ const cpdModule03 = registerCpdModule03(app, {
     : null,
   isSoftwareOwner: (req) => String(req.auth?.role || '').trim() === 'software-owner'
     && String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
+});
+
+// Private investor & partner page: invitation-only, enforced on the server for the page and the video.
+registerInvestorAccess(app, {
+	storageRoot: STORAGE_ROOT, secret: AUTH_SECRET, requireStrictAuth, requireSoftwareOwnerRole, requireLoginRateLimit,
+	isProduction: IS_PRODUCTION, siteUrl: String(process.env.ATHLYRAX_PUBLIC_SITE_URL || 'https://athlyrax.com').replace(/\/+$/, ''),
 });
 
 // Module 03 private uploads and owner-only course preview remain isolated from learner records.
