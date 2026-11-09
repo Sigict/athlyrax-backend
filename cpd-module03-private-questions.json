@@ -1,0 +1,257 @@
+{
+  "module_id": "athlyrax-cpd01-module03",
+  "assessment_policy": {
+    "knowledge_checks": "3 formative checks, feedback and retries",
+    "final_assessment": "10 questions; pass 8/10; unlimited retakes",
+    "certificate": "Owner preview certificates are not publicly verifiable. Paid course entitlements must be activated in a later review."
+  },
+  "questions": [
+    {
+      "id": "KC1-01",
+      "section": "check-1",
+      "question": "A coach wants swimmers to develop controlled aerobic endurance. What should determine the design of the set?",
+      "options": [
+        "The number of metres normally used by the squad.",
+        "The intended response, followed by suitable pace, repetitions, recovery and technical focus.",
+        "The interval that allows the fastest swimmer to complete the most repetitions.",
+        "The training category written beside the set."
+      ],
+      "correct_option_index": 1,
+      "explanation": "Begin with the objective; the planned distance or label does not by itself establish the demand."
+    },
+    {
+      "id": "KC1-02",
+      "section": "check-1",
+      "question": "Two swimmers complete 8 × 100 m on the same send-off. One reports 4/10 effort with stable technique; the other 8/10 with deteriorating control. What does this demonstrate?",
+      "options": [
+        "The second swimmer necessarily trained more effectively.",
+        "The same written set can create different demands and require individual adjustments.",
+        "A common send-off guarantees equal recovery and adaptation.",
+        "The first swimmer should always increase distance."
+      ],
+      "correct_option_index": 1,
+      "explanation": "Swim times, available rest, effort and technique determine the response."
+    },
+    {
+      "id": "KC1-03",
+      "section": "check-1",
+      "question": "Why is actual recovery important when evaluating a repeated set?",
+      "options": [
+        "It establishes time before the next repetition and changes the demand of subsequent work.",
+        "It remains unchanged whenever the send-off is fixed.",
+        "It only matters for maximum speed.",
+        "It is more useful than all other observations combined."
+      ],
+      "correct_option_index": 0,
+      "explanation": "A fixed interval can provide progressively less rest as swim times slow."
+    },
+    {
+      "id": "KC2-04",
+      "section": "check-2",
+      "question": "A coach writes 3 × 400 m and labels it EN1. Which observation supports that objective?",
+      "options": [
+        "The swimmer finishes even at near-maximal effort.",
+        "The swimmer holds sustainable effort, controlled breathing and stable technique.",
+        "The swimmer gets the longest possible rest.",
+        "The distance alone confirms EN1."
+      ],
+      "correct_option_index": 1,
+      "explanation": "The intended controlled aerobic demand must be confirmed from the swimmer's response."
+    },
+    {
+      "id": "KC2-05",
+      "section": "check-2",
+      "question": "Why is substantial recovery suitable for repeated maximum-speed efforts?",
+      "options": [
+        "It allows fatigue to accumulate as fast as possible.",
+        "It protects peak velocity and coordination across repetitions.",
+        "It guarantees aerobic improvement.",
+        "It removes the need to monitor technique."
+      ],
+      "correct_option_index": 1,
+      "explanation": "Pure speed training prioritises very fast, technically coordinated efforts."
+    },
+    {
+      "id": "KC2-06",
+      "section": "check-2",
+      "question": "Which distinction between the LP and LT examples is consistent with the lesson?",
+      "options": [
+        "LP protects high output with substantial rest; LT uses deliberately incomplete rest in hard repeats.",
+        "They differ only by swimming distance.",
+        "LP always requires minimal rest.",
+        "LT requires full recovery after each repetition."
+      ],
+      "correct_option_index": 0,
+      "explanation": "The purpose of recovery distinguishes high-output and deliberately fatiguing sets."
+    },
+    {
+      "id": "KC3-07",
+      "section": "check-3",
+      "question": "The swimmer meets the 100 m target three times but then slows. What should a coach investigate first?",
+      "options": [
+        "Whether the total distance was finished.",
+        "Whether one faster repeat is possible.",
+        "Changes in technique, actual recovery, effort and earlier session work.",
+        "Whether everyone else also slowed."
+      ],
+      "correct_option_index": 2,
+      "explanation": "Slower times are an observation, not a sufficient explanation."
+    },
+    {
+      "id": "KC3-08",
+      "section": "check-3",
+      "question": "Maximum-speed repetitions lose velocity and coordination. What best protects the objective?",
+      "options": [
+        "Continue unchanged because fatigue is useful.",
+        "Shorten recovery to increase difficulty.",
+        "Extend rest, reduce repetitions or stop speed work when quality cannot recover.",
+        "Increase the distance to maintain volume."
+      ],
+      "correct_option_index": 2,
+      "explanation": "The speed objective is lost when very fast and technically sound work cannot be reproduced."
+    },
+    {
+      "id": "KC3-09",
+      "section": "check-3",
+      "question": "The coach changes the send-off after repetition four. What should be recorded?",
+      "options": [
+        "Only the total distance.",
+        "The original prescription and actual times, send-offs, completed repetitions and changes.",
+        "Only the new send-off, deleting the original.",
+        "Only the fastest repetition."
+      ],
+      "correct_option_index": 1,
+      "explanation": "Keep the planned prescription separate from the work actually delivered."
+    },
+    {
+      "id": "FIN-10",
+      "section": "final",
+      "question": "A coach wants controlled endurance for swimmers with different abilities. Which approach best fits that objective?",
+      "options": [
+        "Give everyone the same pace and send-off.",
+        "Individualise pace and rest where necessary to obtain similarly controlled responses.",
+        "Use the fastest athlete's pace for everyone.",
+        "Use longer repetitions for everyone."
+      ],
+      "correct_option_index": 1,
+      "explanation": "The coaching aim is an appropriate relative demand, not identical numbers."
+    },
+    {
+      "id": "FIN-11",
+      "section": "final",
+      "question": "A swimmer completes 6 × 200 m at consistent times, but each feels near-maximal. The aim was sustainable aerobic work. What follows?",
+      "options": [
+        "Consistent times prove success.",
+        "Effort suggests the intended sustainable demand may not have been achieved.",
+        "Relabel the session maximum speed.",
+        "Reduce the rest automatically."
+      ],
+      "correct_option_index": 1,
+      "explanation": "Repeatability alone does not establish whether effort and quality fitted the objective."
+    },
+    {
+      "id": "FIN-12",
+      "section": "final",
+      "question": "A swimmer cannot reproduce the desired EN3 demand during 6 × 100 m. What should the coach consider?",
+      "options": [
+        "Keep the target unchanged regardless of response.",
+        "Adjust pace, repetition length, recovery or volume to make demanding aerobic work appropriately repeatable.",
+        "Replace with easy work but keep the EN3 label.",
+        "Remove all recovery."
+      ],
+      "correct_option_index": 1,
+      "explanation": "Distances and recoveries are examples, not fixed definitions of EN3."
+    },
+    {
+      "id": "FIN-13",
+      "section": "final",
+      "question": "Two swimmers complete similar 50 m times but one has less rest and deteriorating technique. What is supported?",
+      "options": [
+        "Their demand must be identical.",
+        "The shorter recovery can create a different demand requiring evaluation against the objective.",
+        "Less rest always means better speed adaptation.",
+        "The swim time alone is sufficient."
+      ],
+      "correct_option_index": 1,
+      "explanation": "Technical execution and actual recovery affect the stimulus."
+    },
+    {
+      "id": "FIN-14",
+      "section": "final",
+      "question": "During 4 × 50 m high-output work with substantial rest, performance declines sharply. Which response is most defensible?",
+      "options": [
+        "Continue because severe fatigue is essential.",
+        "Check whether high output can be reproduced; adjust recovery or end the set if not.",
+        "Shorten rest automatically.",
+        "Treat the decline as EN1."
+      ],
+      "correct_option_index": 1,
+      "explanation": "The LP-oriented intention requires maintaining sufficiently high quality and output."
+    },
+    {
+      "id": "FIN-15",
+      "section": "final",
+      "question": "During LT-oriented hard repeats, effort rises and times drift moderately while technique remains acceptable. How interpret this?",
+      "options": [
+        "Any slowing is failure.",
+        "Some drift may fit the aim if quality and safety remain appropriate.",
+        "Always add repeats as effort rises.",
+        "Stop monitoring because fatigue was intended."
+      ],
+      "correct_option_index": 1,
+      "explanation": "Planned incomplete recovery can cause fatigue but must remain bounded."
+    },
+    {
+      "id": "FIN-16",
+      "section": "final",
+      "question": "A swimmer completes all prescribed aerobic metres, but effort rises greatly and stroke control declines. What does volume alone establish?",
+      "options": [
+        "Only that the distance was completed, not that the intended response occurred.",
+        "The intended adaptation was achieved.",
+        "Long-term capability improved.",
+        "The original prescription should be recorded as delivered unchanged."
+      ],
+      "correct_option_index": 0,
+      "explanation": "Actual work and observed response must be interpreted together."
+    },
+    {
+      "id": "FIN-17",
+      "section": "final",
+      "question": "During 6 × 100 m on 1:50, three late repeats exceed target and stroke count and effort rise. What is the best decision?",
+      "options": [
+        "Demand the original target without change.",
+        "Check the swimmer and modify the remaining work if needed to preserve the objective.",
+        "Delete the slower results.",
+        "Assume lack of aerobic capacity."
+      ],
+      "correct_option_index": 1,
+      "explanation": "The evidence suggests an objective/response mismatch requiring coaching judgement."
+    },
+    {
+      "id": "FIN-18",
+      "section": "final",
+      "question": "One unusually fast training repetition is recorded. What can be said about development?",
+      "options": [
+        "It proves lasting improvement.",
+        "It guarantees matching competition performance.",
+        "It is useful evidence, but long-term improvement needs repeated observations and context.",
+        "Other repetitions no longer matter."
+      ],
+      "correct_option_index": 2,
+      "explanation": "One performance cannot by itself prove durable adaptation."
+    },
+    {
+      "id": "FIN-19",
+      "section": "final",
+      "question": "A set was modified because the swimmer could not maintain pace and technique. What review best informs future decisions?",
+      "options": [
+        "Compare only completed metres.",
+        "Treat the original training label as proof of the adaptation.",
+        "Review the objective, actual splits, recovery, technique, modifications and patterns across sessions.",
+        "Use only the fastest repetition."
+      ],
+      "correct_option_index": 2,
+      "explanation": "Intent, observation, adjustment and accurate records form the central coaching process."
+    }
+  ]
+}

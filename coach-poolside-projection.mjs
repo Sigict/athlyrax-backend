@@ -116,8 +116,25 @@ export function buildCoachPoolsideProjection(db = {}, { date = '' } = {}) {
       createdAt: text(row.createdAt),
       updatedAt: text(row.updatedAt),
     }));
+  // ATHLYRAX_CONSOLE_COMPETITION_LINK: competitions around the selected date (30 days before to 60 after),
+  // so the Console can attach race results to the club's own fixture and event. Planned data only.
+  const dayNum = (d) => { const t = Date.parse(`${text(d).slice(0, 10)}T00:00:00Z`); return Number.isFinite(t) ? t / 86400000 : null; };
+  const sel = dayNum(selectedDate);
+  const competitions = rows(db.fixtures).filter((f) => text(f.status).toLowerCase() !== 'deleted' && !f.deletedAt).filter((f) => {
+    const a = dayNum(f.startDate || f.date); const b = dayNum(f.endDate || f.startDate || f.date);
+    return a !== null && sel !== null && b >= sel - 30 && a <= sel + 60;
+  }).map((f) => ({
+    id: text(f.id || f.fixtureId), name: text(f.name || f.title || f.competitionName) || 'Competition',
+    startDate: text(f.startDate || f.date).slice(0, 10), endDate: text(f.endDate).slice(0, 10), venue: text(f.venue || f.venueName), course: text(f.course || f.poolCourse || f.poolLength),
+    events: [...rows(f.events), ...rows(f.galaEvents)].map((e) => ({
+      id: text(e.id), number: text(e.eventN || e.eventNumber || e.number || e.event), label: text(e.eventLabel || e.label || e.name),
+      distance: Number(e.distance) || null, stroke: text(e.stroke), date: text(e.date).slice(0, 10),
+      swimmerIds: rows(e.attendeeIds).map(text).filter(Boolean),
+    })).filter((e) => e.id),
+  })).filter((f) => f.id).sort((a, b) => a.startDate.localeCompare(b.startDate)).slice(0, 40);
   return {
     date: selectedDate,
+    competitions,
     sessions: canonicalSessions.map((session) => ({
       id: sessionId(session),
       scheduleId: text(session.scheduleId),
