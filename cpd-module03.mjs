@@ -440,7 +440,7 @@ export function registerCpdModule03(app, deps) {
     if (!Array.isArray(answers) || answers.length !== qs.length || answers.some((x) => !Number.isInteger(x) || x < 0 || x > 3)) return fail(res, 400, 'Answer every question before submitting.');
     const score = qs.reduce((s, q, i) => s + Number(q.correct_option_index === answers[i]), 0);
     if (section !== 'final') {
-      if (!p.checks.includes(section)) p.checks = [...p.checks, section];
+      if (score === qs.length && !p.checks.includes(section)) p.checks = [...p.checks, section];
       saveProgress(ent.sessionId, true);
       return noStore(res).json({ section, score, total: qs.length, feedback: qs.map((q, i) => ({ questionId: q.id, correct: q.correct_option_index === answers[i], correctAnswerIndex: q.correct_option_index, explanation: q.explanation })) });
     }
