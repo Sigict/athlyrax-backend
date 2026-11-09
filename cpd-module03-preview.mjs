@@ -107,7 +107,7 @@ export function registerCpdModule03Preview(app,{storageRoot,requireStrictAuth,re
     if(!Array.isArray(answers)||answers.length!==qs.length||answers.some(a=>!Number.isInteger(a)||a<0||a>3))return fail(res,400,'Answer every question.');
     const score=qs.reduce((sum,q,i)=>sum+(q.correct_option_index===answers[i]?1:0),0);
     if(section!=='final'){
-      if(!p.checks.includes(section))p.checks.push(section);
+      if(score===qs.length&&!p.checks.includes(section))p.checks.push(section);
       save(p);
       return nocache(res).json({section,score,total:qs.length,feedback:qs.map((q,i)=>({
         questionId:q.id,correct:q.correct_option_index===answers[i],correctAnswerIndex:q.correct_option_index,explanation:q.explanation

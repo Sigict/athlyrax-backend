@@ -11,6 +11,7 @@ import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
+import { registerCpdModule03 } from './cpd-module03.mjs';
 import { registerCpdModule03Uploads } from './cpd-module03-uploads.mjs';
 import { registerCpdModule03Preview } from './cpd-module03-preview.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
@@ -306,6 +307,10 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 		switch (String(event?.type || '')) {
 			case 'checkout.session.completed': {
 				const session = event?.data?.object;
+				if (session?.metadata?.course === 'cpd01-module03') {
+					if (cpdModule03) await cpdModule03.onCheckoutCompleted(session);
+					break;
+				}
 				if (session?.metadata?.course === 'cpd01-module02') {
 					// One-time education course: handled by the course module, never as a software subscription.
 					if (cpdModule02) await cpdModule02.onCheckoutCompleted(session);
@@ -347,6 +352,7 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 			case 'charge.dispute.created': {
 				// Course access ends when Stripe confirms a refund or dispute for that purchase.
 				if (cpdModule02) await cpdModule02.onRefundOrDispute(event?.data?.object);
+				if (cpdModule03) await cpdModule03.onRefundOrDispute(event?.data?.object);
 				break;
 			}
 			case 'invoice.paid': {
@@ -3866,7 +3872,19 @@ const cpdModule02 = registerCpdModule02(app, {
 		&& String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
 });
 
-// Module 03 staged owner uploads only. No public sales or learner access enabled.
+// Module 03 learner course routes are provisioned independently; public sales default off.
+const cpdModule03 = registerCpdModule03(app, {
+  storageRoot: STORAGE_ROOT,
+  requireStrictAuth,
+  requireSoftwareOwnerRole,
+  sendMail: AUTH_SMTP_HOST && AUTH_SMTP_FROM
+    ? (message) => getAuthResetMailTransport().sendMail({ from: AUTH_SMTP_FROM, ...message })
+    : null,
+  isSoftwareOwner: (req) => String(req.auth?.role || '').trim() === 'software-owner'
+    && String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
+});
+
+// Module 03 private uploads and owner-only course preview remain isolated from learner records.
 registerCpdModule03Uploads(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
 registerCpdModule03Preview(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
 

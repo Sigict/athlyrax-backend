@@ -91,5 +91,8 @@ jobs:
       - name: Module 03 owner preview (authorization, lesson checks, assessment, test certificate)
         run: node --test tests/cpd-module03-preview.test.mjs
 
+      - name: Module 03 learner course (paid access, three checks, verified certificate)
+        run: node --test tests/cpd-module03-public.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
