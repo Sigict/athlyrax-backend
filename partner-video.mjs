@@ -8,12 +8,11 @@ export function registerPartnerVideo(app,{storageRoot,requireStrictAuth,requireS
   const dir=path.join(storageRoot,'public-media','partner-video');
   const video=path.join(dir,'athlyrax-partner-presentation.mp4');
   const tmp=video+'.upload';
-  const base='/media/partner-video';
   const MAX_VIDEO=300*1024*1024, MAX_CHUNK=8*1024*1024;
   const noStore=(res)=>res.set('Cache-Control','no-store');
   const size=()=>{try{const st=fs.statSync(video);return st.isFile()&&st.size>1024?st.size:0}catch{return 0}};
-  app.get(base+'/status',(_req,res)=>noStore(res).json({ready:size()>0}));
-  app.get(base,(req,res)=>{
+  app.get('/media/partner-video/status',(_req,res)=>noStore(res).json({ready:size()>0}));
+  app.get('/media/partner-video',(req,res)=>{
     const total=size();
     if(!total)return res.status(404).set('Cache-Control','no-store').send('Partner video not published');
     const range=req.headers.range;
@@ -29,9 +28,8 @@ export function registerPartnerVideo(app,{storageRoot,requireStrictAuth,requireS
     res.status(206).set({'Content-Range':`bytes ${start}-${end}/${total}`,'Content-Length':String(end-start+1)});
     return fs.createReadStream(video,{start,end}).pipe(res);
   });
-  const owner=[requireStrictAuth,requireSoftwareOwnerRole];
-  app.get(base+'/admin/status',...owner,(_req,res)=>noStore(res).json({ready:size()>0,bytes:size()}));
-  app.put(base+'/admin/upload',...owner,express.raw({type:'application/octet-stream',limit:MAX_CHUNK}),(req,res)=>{
+  app.get('/media/partner-video/admin/status',requireStrictAuth,requireSoftwareOwnerRole,(_req,res)=>noStore(res).json({ready:size()>0,bytes:size()}));
+  app.put('/media/partner-video/admin/upload',requireStrictAuth,requireSoftwareOwnerRole,express.raw({type:'application/octet-stream',limit:MAX_CHUNK}),(req,res)=>{
     const offset=Number(req.query.offset),total=Number(req.query.total),body=Buffer.isBuffer(req.body)?req.body:null;
     if(!body||!body.length||body.length>MAX_CHUNK||!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(total)||total<1024||total>MAX_VIDEO||offset+body.length>total)
       return res.status(400).json({error:'Invalid upload chunk'});
