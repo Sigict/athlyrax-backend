@@ -11,6 +11,7 @@ import helmet from 'helmet';
 import Stripe from 'stripe';
 import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
+import { registerCpdModule03Uploads } from './cpd-module03-uploads.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
 import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraining, personalTrainingPath } from './athlete-personal-training.mjs';
 import { buildClubResults, buildSelfReportedProgress, testProtocols } from './athlete-tests-races.mjs';
@@ -3863,6 +3864,9 @@ const cpdModule02 = registerCpdModule02(app, {
 	isSoftwareOwner: (req) => String(req.auth?.role || '').trim() === 'software-owner'
 		&& String(req.auth?.username || '').trim().toLowerCase() === AUTH_PRIMARY_SOFTWARE_OWNER_USERNAME,
 });
+
+// Module 03 staged owner uploads only. No public sales or learner access enabled.
+registerCpdModule03Uploads(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
 
 // ATHLYRAX_COACH_ROUTES_OUTSIDE_LINK_REGION: these routes live here because the coach-link build
 // transforms rewrite everything between the swimmer disconnect route and the /db route.
