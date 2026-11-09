@@ -20,7 +20,7 @@ import { buildClubResults, buildSelfReportedProgress, testProtocols } from './at
 import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
 import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
 import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
-import { savedContacts, applyContactChoice, clubOverview, COACH_STATE_LABELS, buildInviteEmail, markAutoDelivery, rotateInviteToken, resendAllowed, recordDelivery, updateDelivery, newDeliveryId, applyDeliveryEvent, planBulkItem, dedupeBulkItems, BULK_MAX_ITEMS } from './athlete-invite-delivery.mjs';
+import { savedContacts, applyContactChoice, supersedeLinkInvite, clubOverview, COACH_STATE_LABELS, buildInviteEmail, markAutoDelivery, rotateInviteToken, resendAllowed, recordDelivery, updateDelivery, newDeliveryId, applyDeliveryEvent, planBulkItem, dedupeBulkItems, BULK_MAX_ITEMS } from './athlete-invite-delivery.mjs';
 import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES, DuplicateSwimmerIdError, duplicateSwimmerIds, uniqueSwimmerRow } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
@@ -4322,8 +4322,19 @@ app.post('/coach/athlete-invites/:inviteId/resend', requireStrictAuth, requireAt
 		const now = new Date();
 		const invite = (db0[ATHLETE_INVITE_COLLECTION] || []).find((i) => i?.id === inviteId);
 		if (!invite) return { ok: false, status: 404, error: 'Invitation not found.' };
+		if (invite.delivery !== 'email' && ['pending', 'awaiting-guardian'].includes(inviteStatus(invite))) {
+			// A link-only invitation is replaced by a new emailed one: its links stop working and it stays in
+			// the history as replaced. Addresses come from the swimmer record unless the coach typed one.
+			const sup = supersedeLinkInvite(db0, inviteId, { tenantKey: t.key, actor, now, email: newEmail, save: req.body?.save === true, confirmReplace: req.body?.confirmReplace === true, ttlHours: ATHLETE_INVITE_TTL_HOURS });
+			if (!sup.ok) return sup;
+			const deliveryId = newDeliveryId();
+			const db = recordDelivery(markAutoDelivery(sup.db, sup.invite.id, {}), sup.invite.id, { id: deliveryId, kind: sup.kind, to: sup.to, provider: inviteMailProvider(t.key), status: 'queued', now });
+			job = { inviteId: sup.invite.id, deliveryId, kind: sup.kind, to: sup.to, swimmerName: sup.swimmerName, token: sup.token, expiresAt: sup.invite.expiresAt, superseded: inviteId };
+			return { ok: true, db };
+		}
 		const kind = inviteStatus(invite) === 'awaiting-guardian' ? 'guardian' : 'athlete';
-		const to = newEmail || (kind === 'guardian' ? invite.guardianEmail : invite.targetEmail);
+		const savedNow = savedContacts(uniqueSwimmerRow(db0, invite.swimmerId).row || {});
+		const to = newEmail || (kind === 'guardian' ? (invite.guardianEmail || savedNow.guardianEmail) : (invite.targetEmail || savedNow.athleteEmail));
 		const allowed = resendAllowed(invite, kind, now, to);
 		if (!allowed.ok) return allowed;
 		let db = db0;
@@ -4339,7 +4350,7 @@ app.post('/coach/athlete-invites/:inviteId/resend', requireStrictAuth, requireAt
 		const rot = rotateInviteToken(db, inviteId, kind, { now, ...(kind === 'athlete' ? { targetEmail: to } : {}) });
 		if (!rot.ok) return rot;
 		db = rot.db;
-		if (kind === 'guardian' && newEmail) db = { ...db, [ATHLETE_INVITE_COLLECTION]: db[ATHLETE_INVITE_COLLECTION].map((i) => (i.id === inviteId ? { ...i, guardianEmail: newEmail, guardianCode: null } : i)) };
+		if (kind === 'guardian' && to !== normalizeInviteEmailForResend(invite.guardianEmail)) db = { ...db, [ATHLETE_INVITE_COLLECTION]: db[ATHLETE_INVITE_COLLECTION].map((i) => (i.id === inviteId ? { ...i, guardianEmail: to, guardianCode: null } : i)) };
 		const deliveryId = newDeliveryId();
 		db = recordDelivery(db, inviteId, { id: deliveryId, kind, to, provider: inviteMailProvider(t.key), status: 'queued', now });
 		job = { inviteId, deliveryId, kind, to, swimmerName: swimmerDisplayName(row), token: rot.token, expiresAt: invite.expiresAt };
@@ -4349,8 +4360,9 @@ app.post('/coach/athlete-invites/:inviteId/resend', requireStrictAuth, requireAt
 	const sent = await deliverInvitation(t, { ...job, actor });
 	appendAuthAuditEvent({ action: 'athlete_invite_resent', req, status: sent.ok ? 'success' : 'error', target: inviteId, details: { tenantId: t.key, kind: job.kind } });
 	if (!sent.ok) { res.status(502).json({ error: 'Email delivery failed. Check the address and try again.' }); return; }
-	res.status(200).json({ ok: true, kind: job.kind, sentTo: maskEmail(job.to) });
+	res.status(200).json({ ok: true, kind: job.kind, sentTo: maskEmail(job.to), inviteId: job.inviteId, superseded: job.superseded || '' });
 });
+function normalizeInviteEmailForResend(v) { return String(v || '').trim().toLowerCase(); }
 
 // Email provider delivery events (Brevo transactional webhook). Requires BREVO_WEBHOOK_SECRET.
 app.post('/webhooks/brevo/athlete-invites', async (req, res) => {

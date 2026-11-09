@@ -9,7 +9,7 @@
 //   only the parent/guardian link first; the athlete link is minted and emailed after consent.
 // - Delivery records hold provider, message id and status only; never a token or code.
 import crypto from 'node:crypto';
-import { ATHLETE_INVITE_COLLECTION, inviteStatus, uniqueSwimmerRow, swimmerDisplayName, linkedAccountOf, guardianRequiredFor, swimmerAgeYears, maskEmail } from './athlete-account-invites.mjs';
+import { ATHLETE_INVITE_COLLECTION, createAthleteInvite, inviteStatus, uniqueSwimmerRow, swimmerDisplayName, linkedAccountOf, guardianRequiredFor, swimmerAgeYears, maskEmail } from './athlete-account-invites.mjs';
 
 export const CONTACT_FIELD = 'athleteContacts';
 export const BULK_MAX_ITEMS = 60;
@@ -44,31 +44,48 @@ const PROFILE_ATHLETE_EMAIL = 'swimmerEmail';
 const LEGACY_GUARDIAN_EMAIL = ['parentGuardianEmail', 'parentEmail', 'guardianEmail', 'parent1Email', 'primaryGuardianEmail'];
 const firstValid = (row, fields) => { for (const f of fields) { const v = normalizeEmail(row?.[f]); if (validEmail(v)) return { value: v, source: f }; } return { value: '', source: '' }; };
 
-// Saved invitation contacts, then imported club fields as a suggestion (marked source: 'imported:<field>').
+// The parent/guardian chosen as Primary Contact in Edit Swimmer (Parent 1 / Father, Parent 2 / Mother
+// or Other) with its name, relationship and Primary Contact Email. The swimmer record is the source of truth.
+const PROFILE_GUARDIAN_EMAIL = 'primaryContactEmail';
+export function primaryGuardian(row = {}) {
+  const sel = text(row?.primaryContact) || 'Parent 1';
+  const which = /2|mother/i.test(sel) ? 2 : /1|father/i.test(sel) ? 1 : 0;
+  const name = which === 1 ? text(row?.parent1Name || row?.fatherName) : which === 2 ? text(row?.parent2Name || row?.motherName) : text(row?.primaryContactName);
+  const relationship = which === 1 ? 'Parent 1 / Father' : which === 2 ? 'Parent 2 / Mother' : 'Other contact';
+  const email = validEmail(row?.[PROFILE_GUARDIAN_EMAIL]) ? normalizeEmail(row[PROFILE_GUARDIAN_EMAIL]) : '';
+  return { selection: sel, name, relationship, email };
+}
+
+// Profile fields first (Swimmer Email; Primary Contact Email), then addresses saved from an
+// invitation, then imported club fields as a suggestion (marked source: 'imported:<field>').
 export function savedContacts(row = {}) {
   const c = row?.[CONTACT_FIELD] && typeof row[CONTACT_FIELD] === 'object' ? row[CONTACT_FIELD] : {};
   const a = validEmail(row?.[PROFILE_ATHLETE_EMAIL]) ? { value: normalizeEmail(row[PROFILE_ATHLETE_EMAIL]), source: 'profile' }
     : validEmail(c.athleteEmail) ? { value: normalizeEmail(c.athleteEmail), source: 'saved' } : (() => { const l = firstValid(row, LEGACY_ATHLETE_EMAIL); return l.value ? { value: l.value, source: `imported:${l.source}` } : l; })();
-  const g = validEmail(c.guardianEmail) ? { value: normalizeEmail(c.guardianEmail), source: 'saved' } : (() => { const l = firstValid(row, LEGACY_GUARDIAN_EMAIL); return l.value ? { value: l.value, source: `imported:${l.source}` } : l; })();
-  return { athleteEmail: a.value, athleteSource: a.source, guardianEmail: g.value, guardianSource: g.source };
+  const pg = primaryGuardian(row);
+  const g = pg.email ? { value: pg.email, source: 'profile' }
+    : validEmail(c.guardianEmail) ? { value: normalizeEmail(c.guardianEmail), source: 'saved' } : (() => { const l = firstValid(row, LEGACY_GUARDIAN_EMAIL); return l.value ? { value: l.value, source: `imported:${l.source}` } : l; })();
+  return { athleteEmail: a.value, athleteSource: a.source, guardianEmail: g.value, guardianSource: g.source, guardianName: pg.name, guardianRelationship: pg.relationship };
 }
 
 // Applies the coach's "save" choices to one swimmer row. A different saved address is replaced only
-// when confirmReplace is set; otherwise a conflict is returned and nothing changes.
+// when confirmReplace is set; otherwise a conflict is returned and nothing changes. An address entered
+// where the profile had none is also written to the profile field (Swimmer Email / Primary Contact Email).
 export function applyContactChoice(row = {}, { athleteEmail = '', guardianEmail = '', saveAthlete = false, saveGuardian = false, confirmReplaceAthlete = false, confirmReplaceGuardian = false, actor = '', now = new Date() } = {}) {
   const c = row?.[CONTACT_FIELD] && typeof row[CONTACT_FIELD] === 'object' ? row[CONTACT_FIELD] : {};
   const next = { ...c }; const history = list(c.history).slice(-49); const conflicts = []; let changed = false;
-  const at = now.toISOString();
+  const at = now.toISOString(); const profileUpdate = {};
   const step = (kind, value, save, confirm) => {
     if (!save) return;
     const v = normalizeEmail(value);
     if (!validEmail(v)) return;
     const key = kind === 'athlete' ? 'athleteEmail' : 'guardianEmail';
-    const profile = kind === 'athlete' && validEmail(row?.[PROFILE_ATHLETE_EMAIL]) ? normalizeEmail(row[PROFILE_ATHLETE_EMAIL]) : '';
+    const profileField = kind === 'athlete' ? PROFILE_ATHLETE_EMAIL : PROFILE_GUARDIAN_EMAIL;
+    const profile = validEmail(row?.[profileField]) ? normalizeEmail(row[profileField]) : '';
     const prev = profile || normalizeEmail(c[key]);
-    if (prev === v) return;
+    if (prev === v) { if (!profile) { profileUpdate[profileField] = v; changed = true; } return; }
     if (prev && !confirm) { conflicts.push({ kind, saved: prev, proposed: v }); return; }
-    next[key] = v;
+    next[key] = v; profileUpdate[profileField] = v;
     history.push({ field: key, from: prev, to: v, at, by: text(actor), action: prev ? 'replaced' : 'saved' });
     changed = true;
   };
@@ -76,7 +93,6 @@ export function applyContactChoice(row = {}, { athleteEmail = '', guardianEmail 
   step('guardian', guardianEmail, saveGuardian, confirmReplaceGuardian);
   if (conflicts.length) return { ok: false, conflicts, row };
   if (!changed) return { ok: true, changed: false, row };
-  const profileUpdate = validEmail(next.athleteEmail) && next.athleteEmail !== normalizeEmail(c.athleteEmail) ? { [PROFILE_ATHLETE_EMAIL]: next.athleteEmail } : {};
   return { ok: true, changed: true, row: { ...row, ...profileUpdate, [CONTACT_FIELD]: { ...next, updatedAt: at, updatedBy: text(actor), history } } };
 }
 
@@ -189,6 +205,41 @@ export function rotateInviteToken(db = {}, inviteId, kind, { now = new Date(), t
   const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id ? { ...inv, ...patch } : inv));
   const prefix = kind === 'athlete' ? 'AXA1' : 'AXG1';
   return { ok: true, invite: { ...invite, ...patch }, token: `${prefix}.${invite.tenantKey}.${invite.id}.${s}`, db: { ...db, [ATHLETE_INVITE_COLLECTION]: invites } };
+}
+
+// Replaces an open link-only invitation (shared by the coach) with a new invitation that AthlyraX emails.
+// The old one is revoked (its links stop working) and kept in the history with supersededBy. Recipients:
+// the address the coach typed, else the swimmer record (Swimmer Email / Primary Contact Email), else the
+// address on the old invitation. Under-18s: the parent/guardian is emailed first, as for a new invitation.
+export function supersedeLinkInvite(db = {}, inviteId, { tenantKey, actor = '', now = new Date(), email = '', save = false, confirmReplace = false, ttlHours = 168 } = {}) {
+  const old = list(db[ATHLETE_INVITE_COLLECTION]).find((i) => text(i.id) === text(inviteId));
+  if (!old) return { ok: false, status: 404, error: 'Invitation not found.' };
+  if (old.delivery === 'email') return { ok: false, status: 409, error: 'This invitation is already sent by email.' };
+  if (!['pending', 'awaiting-guardian'].includes(inviteStatus(old, now.getTime()))) return { ok: false, status: 409, error: `This invitation is ${inviteStatus(old, now.getTime())}.` };
+  const { row, duplicate } = uniqueSwimmerRow(db, old.swimmerId);
+  if (duplicate || !row) return { ok: false, status: 409, error: 'The swimmer record for this invitation is unavailable.' };
+  const guardianRequired = guardianRequiredFor(row, now);
+  const kind = guardianRequired ? 'guardian' : 'athlete';
+  const typed = normalizeEmail(email);
+  if (typed && !validEmail(typed)) return { ok: false, status: 400, error: 'Enter a valid email address.' };
+  let next = db; let current = row;
+  if (save && typed) {
+    const c = applyContactChoice(row, { [kind === 'guardian' ? 'guardianEmail' : 'athleteEmail']: typed, [kind === 'guardian' ? 'saveGuardian' : 'saveAthlete']: true, [kind === 'guardian' ? 'confirmReplaceGuardian' : 'confirmReplaceAthlete']: confirmReplace, actor, now });
+    if (!c.ok) return { ok: false, status: 409, error: 'A different address is already saved for this swimmer. Confirm the replacement or untick Save.', conflict: true };
+    if (c.changed) { current = c.row; next = { ...next, swimmers: list(next.swimmers).map((r) => (text(r?.id) === text(row.id) ? c.row : r)) }; }
+  }
+  const saved = savedContacts(current);
+  const athleteEmail = (kind === 'athlete' && typed) || saved.athleteEmail || normalizeEmail(old.targetEmail);
+  const guardianEmail = guardianRequired ? ((kind === 'guardian' && typed) || saved.guardianEmail || normalizeEmail(old.guardianEmail)) : '';
+  if (kind === 'athlete' && !athleteEmail) return { ok: false, status: 400, error: 'Enter the swimmer email address.' };
+  if (kind === 'guardian' && !guardianEmail) return { ok: false, status: 400, error: 'Enter the parent/guardian email address.' };
+  const created = createAthleteInvite(next, { swimmerId: row.id, tenantKey, actor, targetEmail: athleteEmail === guardianEmail ? '' : athleteEmail, guardianEmail, ttlHours, now });
+  if (!created.ok) return created;
+  const invites = list(created.db[ATHLETE_INVITE_COLLECTION]).map((i) => (text(i.id) === text(old.id) ? { ...i, supersededBy: created.invite.id, revokedBy: `${text(actor)} (replaced by emailed invitation)` } : i));
+  return {
+    ok: true, kind, to: kind === 'guardian' ? guardianEmail : athleteEmail, invite: created.invite, swimmerName: created.swimmerName,
+    token: kind === 'guardian' ? created.guardianToken : created.athleteToken, db: { ...created.db, [ATHLETE_INVITE_COLLECTION]: invites },
+  };
 }
 
 // Resend limits per invitation and kind.

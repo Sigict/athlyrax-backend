@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { savedContacts, applyContactChoice, coachInviteState, buildInviteEmail, applyDeliveryEvent, recordDelivery, updateDelivery, planBulkItem, dedupeBulkItems, rotateInviteToken, markAutoDelivery, resendAllowed } from '../athlete-invite-delivery.mjs';
-import { createAthleteInvite, preserveServerOwnedAthleteData, parseInviteToken, resolveInvite } from '../athlete-account-invites.mjs';
+import { savedContacts, applyContactChoice, coachInviteState, buildInviteEmail, applyDeliveryEvent, recordDelivery, updateDelivery, planBulkItem, dedupeBulkItems, rotateInviteToken, markAutoDelivery, resendAllowed, supersedeLinkInvite, primaryGuardian } from '../athlete-invite-delivery.mjs';
+import { createAthleteInvite, inviteStatus, publicInvite, preserveServerOwnedAthleteData, parseInviteToken, resolveInvite } from '../athlete-account-invites.mjs';
 
 const now = new Date('2026-11-08T12:00:00Z');
 const adult = { id: 'ad1', firstName: 'Ada', lastName: 'Long', dob: '2000-01-01', email: 'Ada@Example.com' };
 const kid = { id: 'kd1', firstName: 'Kit', lastName: 'Young', dob: '2014-01-01', parentEmail: 'parent@example.com' };
 
 test('contacts: imported fields only pre-fill; saved contacts win', () => {
-  assert.deepEqual(savedContacts(adult), { athleteEmail: 'ada@example.com', athleteSource: 'imported:email', guardianEmail: '', guardianSource: '' });
+  assert.deepEqual(savedContacts(adult), { athleteEmail: 'ada@example.com', athleteSource: 'imported:email', guardianEmail: '', guardianSource: '', guardianName: '', guardianRelationship: 'Parent 1 / Father' });
   assert.equal(savedContacts(kid).guardianSource, 'imported:parentEmail');
   assert.equal(savedContacts({ ...kid, athleteContacts: { guardianEmail: 'mum@example.com' } }).guardianEmail, 'mum@example.com');
 });
@@ -136,4 +136,54 @@ test('Swimmer Email from the Edit Swimmer form is used first and kept in step wi
   assert.equal(applyContactChoice(row, { athleteEmail: 'profile@example.com', saveAthlete: true }).changed, false);
   // A guardian save leaves the swimmer email alone.
   assert.equal(applyContactChoice(row, { guardianEmail: 'dad@example.com', saveGuardian: true }).row.swimmerEmail, 'Profile@Example.com');
+});
+
+test('Primary Contact from Edit Swimmer: name, relationship and email pre-fill the guardian; entered once, saved to the profile', () => {
+  const amelia = { id: 'am', firstName: 'Amelia', lastName: 'Foster', dob: '2012-05-01', parent1Name: 'Tom Foster', parent2Name: 'Jane Foster', primaryContact: 'Parent 2', primaryContactEmail: 'Jane@Example.com', parentEmail: 'old@example.com' };
+  assert.deepEqual(primaryGuardian(amelia), { selection: 'Parent 2', name: 'Jane Foster', relationship: 'Parent 2 / Mother', email: 'jane@example.com' });
+  const c = savedContacts({ ...amelia, athleteContacts: { guardianEmail: 'saved@example.com' } });
+  assert.deepEqual([c.guardianEmail, c.guardianSource, c.guardianName, c.guardianRelationship], ['jane@example.com', 'profile', 'Jane Foster', 'Parent 2 / Mother']);
+  assert.equal(savedContacts({ ...amelia, primaryContact: 'Parent 1' }).guardianName, 'Tom Foster');
+  // Valid profile address is not overwritten without confirmation.
+  assert.equal(applyContactChoice(amelia, { guardianEmail: 'other@example.com', saveGuardian: true, now }).ok, false);
+  // Missing address: entered once and saved to Primary Contact Email (and Swimmer Email for the athlete).
+  const blank = { ...amelia, primaryContactEmail: '', parentEmail: '' };
+  const saved = applyContactChoice(blank, { guardianEmail: 'jane@example.com', athleteEmail: 'amelia@example.com', saveGuardian: true, saveAthlete: true, actor: 'coach', now });
+  assert.deepEqual([saved.row.primaryContactEmail, saved.row.swimmerEmail, saved.row.parent2Name], ['jane@example.com', 'amelia@example.com', 'Jane Foster']);
+  // An address saved earlier from an invitation (profile empty) is written to the profile field too.
+  const legacy = applyContactChoice({ ...blank, athleteContacts: { guardianEmail: 'jane@example.com' } }, { guardianEmail: 'jane@example.com', saveGuardian: true, now });
+  assert.equal(legacy.row.primaryContactEmail, 'jane@example.com');
+});
+
+test('a link-only invitation is replaced by an emailed one: old links stop working, history kept', () => {
+  const kidRow = { id: 'k2', firstName: 'Amelia', lastName: 'Foster', dob: '2012-05-01', parent2Name: 'Jane Foster', primaryContact: 'Parent 2', primaryContactEmail: 'jane@example.com', swimmerEmail: 'amelia@example.com' };
+  const linkInv = createAthleteInvite({ swimmers: [kidRow] }, { swimmerId: 'k2', tenantKey: 't1', actor: 'coach', guardianEmail: 'jane@example.com', now });
+  assert.equal(supersedeLinkInvite(linkInv.db, 'nope', { tenantKey: 't1', now }).ok, false);
+  const out = supersedeLinkInvite(linkInv.db, linkInv.invite.id, { tenantKey: 't1', actor: 'coach', now });
+  assert.equal(out.ok, true);
+  assert.deepEqual([out.kind, out.to], ['guardian', 'jane@example.com']);
+  assert.ok(out.token.startsWith('AXG1.t1.'));
+  const old = out.db.athleteAccountInvites.find((i) => i.id === linkInv.invite.id);
+  assert.equal(inviteStatus(old, now.getTime()), 'revoked');
+  assert.equal(old.supersededBy, out.invite.id);
+  assert.equal(publicInvite(old, now.getTime()).supersededBy, out.invite.id);
+  assert.equal(out.db.athleteAccountInvites.length, 2, 'history retained');
+  assert.equal(out.invite.targetEmail, 'amelia@example.com');
+  // The old guardian link no longer resolves to an open invitation.
+  const oldParsed = parseInviteToken(linkInv.guardianToken);
+  const hit = resolveInvite(out.db, oldParsed, 'guardian');
+  assert.ok(!hit || inviteStatus(hit.invite || hit, now.getTime()) === 'revoked');
+  assert.equal(out.db.swimmers.length, 1, 'no swimmer created');
+  // An adult: the swimmer is emailed; an emailed invitation cannot be superseded again this way.
+  const adultRow = { id: 'a2', firstName: 'Ann', lastName: 'Lee', dob: '1990-01-01', swimmerEmail: 'ann@example.com' };
+  const l2 = createAthleteInvite({ swimmers: [adultRow] }, { swimmerId: 'a2', tenantKey: 't1', actor: 'coach', now });
+  const o2 = supersedeLinkInvite(l2.db, l2.invite.id, { tenantKey: 't1', actor: 'coach', now });
+  assert.deepEqual([o2.kind, o2.to], ['athlete', 'ann@example.com']);
+  const emailed = markAutoDelivery(o2.db, o2.invite.id);
+  assert.equal(supersedeLinkInvite(emailed, o2.invite.id, { tenantKey: 't1', now }).ok, false);
+  // Missing address: refused with a clear message until the coach enters it.
+  const l3 = createAthleteInvite({ swimmers: [{ ...adultRow, swimmerEmail: '' }] }, { swimmerId: 'a2', tenantKey: 't1', actor: 'coach', now });
+  assert.match(supersedeLinkInvite(l3.db, l3.invite.id, { tenantKey: 't1', now }).error, /swimmer email/);
+  const o3 = supersedeLinkInvite(l3.db, l3.invite.id, { tenantKey: 't1', now, email: 'ann@example.com', save: true });
+  assert.equal(o3.db.swimmers[0].swimmerEmail, 'ann@example.com');
 });
