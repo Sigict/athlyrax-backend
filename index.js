@@ -13,6 +13,7 @@ import { registerWebsiteAnalytics } from './website-analytics.mjs';
 import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerCpdModule03 } from './cpd-module03.mjs';
 import { registerCpdModule03Uploads } from './cpd-module03-uploads.mjs';
+import { registerPartnerVideo } from './partner-video.mjs';
 import { registerCpdModule03Preview } from './cpd-module03-preview.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
 import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraining, personalTrainingPath } from './athlete-personal-training.mjs';
@@ -3886,6 +3887,8 @@ const cpdModule03 = registerCpdModule03(app, {
 
 // Module 03 private uploads and owner-only course preview remain isolated from learner records.
 registerCpdModule03Uploads(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
+// Public partner video; only owner can upload/replace it.
+registerPartnerVideo(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
 registerCpdModule03Preview(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
 
 // ATHLYRAX_COACH_ROUTES_OUTSIDE_LINK_REGION: these routes live here because the coach-link build
