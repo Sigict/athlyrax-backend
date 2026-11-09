@@ -954,6 +954,28 @@ function hashPasswordResetCode(code) {
 	return crypto.createHash('sha256').update(String(code || ''), 'utf8').digest('hex');
 }
 
+// Email verification for independent swimmer sign-ups (flag set only on accounts created with it).
+const emailVerifyByUser = new Map();
+const EMAIL_NOT_VERIFIED_RESPONSE = Object.freeze({ error: 'Verify your email address first: enter the 6-digit code we emailed you, or request a new code.', needsEmailVerification: true });
+function emailVerificationPending(user) {
+	return Boolean(user && user.emailVerificationRequired === true && !String(user.emailVerifiedAt || '').trim());
+}
+async function sendEmailVerificationCode(user) {
+	const email = String(user?.email || '').trim();
+	if (!AUTH_EMAIL_PATTERN.test(email)) throw new Error('No valid email address.');
+	const code = makePasswordResetCode();
+	const lines = [`Hi ${String(user.fullName || '').split(' ')[0] || 'there'},`, '', `Your AthlyraX verification code is: ${code}`, 'It expires in 30 minutes.', '', 'Enter it on the AthlyraX swimmer sign-in page to finish creating your account. If you did not sign up, ignore this email.'];
+	if (AUTH_PASSWORD_RESET_DELIVERY === 'smtp') {
+		if (!AUTH_SMTP_HOST || !AUTH_SMTP_FROM) throw new Error('SMTP is not configured.');
+		await getAuthResetMailTransport().sendMail({ from: AUTH_SMTP_FROM, to: email, subject: 'AthlyraX: verify your email', text: lines.join('\n') });
+	} else {
+		const outbox = String(process.env.ATHLYRAX_DEV_EMAIL_OUTBOX || '').trim();
+		if (outbox) fs.appendFileSync(outbox, `${JSON.stringify({ to: email, subject: 'AthlyraX: verify your email', text: lines.join('\n'), at: new Date().toISOString() })}\n`);
+		console.log(`[auth] development verification email to ${maskEmail(email)} (code not logged)`);
+	}
+	emailVerifyByUser.set(String(user.username).toLowerCase(), { codeHash: hashPasswordResetCode(code), expiresAtMs: Date.now() + 30 * 60000, sentAtMs: Date.now(), attempts: 0 });
+}
+
 function findAuthUserByIdentifier(identifier) {
 	const normalized = String(identifier || '').trim();
 	if (!normalized) return null;
@@ -1998,6 +2020,10 @@ function normalizeAuthUserRows(rows) {
 				partnerAttributionAt,
 				tenantId,
 				billing,
+				// Independent swimmer email verification (only accounts created with it carry the flag).
+				...(row?.emailVerificationRequired === true ? { emailVerificationRequired: true, emailVerifiedAt: String(row?.emailVerifiedAt || '').trim() } : {}),
+				// Guardian-managed Athlete App logins: the verified parent/guardian receives password resets.
+				...(row?.managedBy && typeof row.managedBy === 'object' ? { managedBy: Object.fromEntries(['guardianEmail', 'guardianName', 'relationship', 'inviteId', 'tenantId', 'consentAt'].map((k) => [k, String(row.managedBy[k] || '').trim()])) } : {}),
 			};
 		})
 		.filter(Boolean);
@@ -5064,6 +5090,11 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		res.status(403).json({ error: 'Your account is pending software-owner approval.' });
 		return;
 	}
+	if (emailVerificationPending(user)) {
+		appendAuthAuditEvent({ action: 'login_blocked', req, status: 'blocked', target: user.username, reason: 'email_not_verified' });
+		res.status(403).json(EMAIL_NOT_VERIFIED_RESPONSE);
+		return;
+	}
 
 	const canonicalTenantId = CANONICAL_TENANT_BY_USERNAME[String(user?.username || '').trim().toLowerCase()];
 	if (canonicalTenantId && normalizeTenantId(user?.tenantId) !== canonicalTenantId) {
@@ -6405,11 +6436,13 @@ app.post('/content/capability/score', requireAuth, (req, res) => {
 	}
 });
 
-app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
+app.post('/snapshot/account/auth', requireLoginRateLimit, async (req, res) => {
 	const identifier = String(req.body?.email || '').trim();
 	const password = String(req.body?.password || '');
 	const fullName = String(req.body?.fullName || '').trim();
 	const createAccount = req.body?.createAccount === true;
+	// Independent swimmer sign-up (swimmer sign-in page) verifies the email before the first sign-in.
+	const requireEmailVerification = req.body?.requireEmailVerification === true;
 
 	if (!identifier || !password) {
 		res.status(400).json({ error: 'Email/username and password are required.' });
@@ -6473,10 +6506,19 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 			isApproved: true,
 			onboardingCompletedAt: '',
 			billing: getDefaultBillingState(),
+			...(requireEmailVerification ? { emailVerificationRequired: true, emailVerifiedAt: '' } : {}),
 		});
 
 		try {
 			persistAuthUsers();
+			if (requireEmailVerification) {
+				// No session until the email is verified: a 6-digit code is emailed to the address.
+				let sent = true;
+				try { await sendEmailVerificationCode(findAuthUser(username)); } catch { sent = false; }
+				appendAuthAuditEvent({ action: 'swimmer_signup', req, status: 'success', target: username, details: { verificationEmailSent: sent } });
+				res.status(201).json({ ok: true, verificationRequired: true, verificationEmailSent: sent, email: maskEmail(normalizedEmail), username });
+				return;
+			}
 			const session = issueAuthToken({ username, role: 'swimmer' });
 			res.status(201).json({
 				ok: true,
@@ -6498,9 +6540,39 @@ app.post('/snapshot/account/auth', requireLoginRateLimit, (req, res) => {
 		res.status(401).json({ error: 'Invalid credentials.' });
 		return;
 	}
+	if (emailVerificationPending(user)) { res.status(403).json(EMAIL_NOT_VERIFIED_RESPONSE); return; }
 
 	const session = issueAuthToken(user);
 	res.status(200).json({ token: session.token, user: buildAuthUserPayload(user) });
+});
+
+// Independent swimmer email verification (code emailed at sign-up; resend allowed once a minute).
+app.post('/snapshot/account/verify-email', requireLoginRateLimit, (req, res) => {
+	const user = findAuthUserByIdentifier(String(req.body?.email || '').trim());
+	const code = String(req.body?.code || '').trim();
+	const entry = user ? emailVerifyByUser.get(String(user.username).toLowerCase()) : null;
+	if (user && !emailVerificationPending(user)) { res.status(200).json({ ok: true, alreadyVerified: true }); return; }
+	if (!user || !entry || entry.expiresAtMs < Date.now() || entry.attempts >= 5 || !/^\d{6}$/.test(code)) {
+		if (entry) entry.attempts += 1;
+		res.status(400).json({ error: 'The code is not valid or has expired. Request a new code.' });
+		return;
+	}
+	if (!safeEqualText(entry.codeHash, hashPasswordResetCode(code))) { entry.attempts += 1; res.status(400).json({ error: 'The code is not valid or has expired. Request a new code.' }); return; }
+	const previous = user.emailVerifiedAt;
+	user.emailVerifiedAt = new Date().toISOString();
+	try { persistAuthUsers(); } catch { user.emailVerifiedAt = previous; res.status(503).json({ error: 'Could not save the verification. Try again.' }); return; }
+	emailVerifyByUser.delete(String(user.username).toLowerCase());
+	appendAuthAuditEvent({ action: 'swimmer_email_verified', req, status: 'success', target: user.username });
+	res.status(200).json({ ok: true, username: user.username });
+});
+app.post('/snapshot/account/verify-email/resend', requireLoginRateLimit, async (req, res) => {
+	const user = findAuthUserByIdentifier(String(req.body?.email || '').trim());
+	const ok = { ok: true, message: 'If the account needs verification, a new code has been sent.' };
+	if (!user || !emailVerificationPending(user)) { res.status(200).json(ok); return; }
+	const last = emailVerifyByUser.get(String(user.username).toLowerCase());
+	if (last && Date.now() - last.sentAtMs < 60000) { res.status(429).json({ error: 'Please wait a minute before requesting another code.' }); return; }
+	try { await sendEmailVerificationCode(user); } catch { res.status(502).json({ error: 'The verification email could not be sent. Try again later.' }); return; }
+	res.status(200).json(ok);
 });
 
 app.post('/snapshot/account/password-reset/request', requireLoginRateLimit, async (req, res) => {

@@ -61,6 +61,9 @@ jobs:
       - name: Whole-club save keeps audit metadata of unchanged rows
         run: node --test tests/ownership-metadata-unchanged-rows.integration.test.mjs
 
+      - name: Independent swimmer sign-up email verification
+        run: node --test tests/independent-swimmer-verify.integration.test.mjs
+
       - name: Automated Athlete App invitations (bulk, guardian first, contacts, delivery)
         run: node --test tests/athlete-invite-delivery.test.mjs tests/athlete-invite-automation.integration.test.mjs
 
