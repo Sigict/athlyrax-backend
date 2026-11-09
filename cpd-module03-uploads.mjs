@@ -14,9 +14,9 @@ export function registerCpdModule03Uploads(app, { storageRoot, requireStrictAuth
   const base = '/cpd/module-03/admin';
   const file = (n) => path.join(root, `lesson-${n}.mp4`);
   const validLesson = (n) => Number.isInteger(n) && n >= 1 && n <= 3;
-  const guards = [requireStrictAuth, requireSoftwareOwnerRole];
+  // Each route explicitly declares its authentication and owner role guards.
 
-  app.get(base + '/videos', ...guards, (_req, res) => {
+  app.get(base + '/videos', requireStrictAuth, requireSoftwareOwnerRole, (_req, res) => {
     const lessons = [1, 2, 3].map((n) => {
       let bytes = 0;
       try { const stat = fs.statSync(file(n)); if (stat.isFile()) bytes = stat.size; } catch {}
@@ -25,7 +25,7 @@ export function registerCpdModule03Uploads(app, { storageRoot, requireStrictAuth
     noStore(res).json({ module: 3, lessons, ready: lessons.every((l) => l.bytes > 1024), salesEnabled: false });
   });
 
-  app.put(base + '/video/:lesson', ...guards,
+  app.put(base + '/video/:lesson', requireStrictAuth, requireSoftwareOwnerRole,
     express.raw({ type: 'application/octet-stream', limit: MAX_CHUNK }),
     (req, res) => {
       const n = Number(req.params.lesson);
