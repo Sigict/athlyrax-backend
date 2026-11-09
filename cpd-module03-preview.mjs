@@ -29,7 +29,7 @@ function ranges(list) {
 function covered(list){return list.reduce((s,[a,b])=>s+b-a+1,0);}
 export function registerCpdModule03Preview(app,{storageRoot,requireStrictAuth,requireSoftwareOwnerRole}) {
   const root=path.join(storageRoot,'cpd',ROOT_NAME);
-  const base='/cpd/module-03/owner';
+  const base = '/cpd/module-03/owner';
   // Guards are written explicitly per route for auditable access rules.
   const bank=JSON.parse(fs.readFileSync(path.join(DIR,'cpd-module03-private-questions.json'),'utf8')).questions;
   if(bank.length!==19||Object.entries(SECTIONS).some(([s])=>bank.filter(q=>q.section===s).length!==(s==='final'?10:3)))
