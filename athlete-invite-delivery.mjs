@@ -37,14 +37,18 @@ export const normalizeEmail = (v) => text(v).toLowerCase();
 export const validEmail = (v) => EMAIL_PATTERN.test(text(v)) && text(v).length <= 254;
 
 // ---------- contacts ----------
-const LEGACY_ATHLETE_EMAIL = ['email', 'swimmerEmail'];
+const LEGACY_ATHLETE_EMAIL = ['email'];
+// The coach-edited Swimmer Email (Edit Swimmer form). It comes first, so the latest edit is what
+// invitations use; saving an address from an invitation also updates it (applyContactChoice).
+const PROFILE_ATHLETE_EMAIL = 'swimmerEmail';
 const LEGACY_GUARDIAN_EMAIL = ['parentGuardianEmail', 'parentEmail', 'guardianEmail', 'parent1Email', 'primaryGuardianEmail'];
 const firstValid = (row, fields) => { for (const f of fields) { const v = normalizeEmail(row?.[f]); if (validEmail(v)) return { value: v, source: f }; } return { value: '', source: '' }; };
 
 // Saved invitation contacts, then imported club fields as a suggestion (marked source: 'imported:<field>').
 export function savedContacts(row = {}) {
   const c = row?.[CONTACT_FIELD] && typeof row[CONTACT_FIELD] === 'object' ? row[CONTACT_FIELD] : {};
-  const a = validEmail(c.athleteEmail) ? { value: normalizeEmail(c.athleteEmail), source: 'saved' } : (() => { const l = firstValid(row, LEGACY_ATHLETE_EMAIL); return l.value ? { value: l.value, source: `imported:${l.source}` } : l; })();
+  const a = validEmail(row?.[PROFILE_ATHLETE_EMAIL]) ? { value: normalizeEmail(row[PROFILE_ATHLETE_EMAIL]), source: 'profile' }
+    : validEmail(c.athleteEmail) ? { value: normalizeEmail(c.athleteEmail), source: 'saved' } : (() => { const l = firstValid(row, LEGACY_ATHLETE_EMAIL); return l.value ? { value: l.value, source: `imported:${l.source}` } : l; })();
   const g = validEmail(c.guardianEmail) ? { value: normalizeEmail(c.guardianEmail), source: 'saved' } : (() => { const l = firstValid(row, LEGACY_GUARDIAN_EMAIL); return l.value ? { value: l.value, source: `imported:${l.source}` } : l; })();
   return { athleteEmail: a.value, athleteSource: a.source, guardianEmail: g.value, guardianSource: g.source };
 }
@@ -60,7 +64,8 @@ export function applyContactChoice(row = {}, { athleteEmail = '', guardianEmail 
     const v = normalizeEmail(value);
     if (!validEmail(v)) return;
     const key = kind === 'athlete' ? 'athleteEmail' : 'guardianEmail';
-    const prev = normalizeEmail(c[key]);
+    const profile = kind === 'athlete' && validEmail(row?.[PROFILE_ATHLETE_EMAIL]) ? normalizeEmail(row[PROFILE_ATHLETE_EMAIL]) : '';
+    const prev = profile || normalizeEmail(c[key]);
     if (prev === v) return;
     if (prev && !confirm) { conflicts.push({ kind, saved: prev, proposed: v }); return; }
     next[key] = v;
@@ -71,7 +76,8 @@ export function applyContactChoice(row = {}, { athleteEmail = '', guardianEmail 
   step('guardian', guardianEmail, saveGuardian, confirmReplaceGuardian);
   if (conflicts.length) return { ok: false, conflicts, row };
   if (!changed) return { ok: true, changed: false, row };
-  return { ok: true, changed: true, row: { ...row, [CONTACT_FIELD]: { ...next, updatedAt: at, updatedBy: text(actor), history } } };
+  const profileUpdate = validEmail(next.athleteEmail) && next.athleteEmail !== normalizeEmail(c.athleteEmail) ? { [PROFILE_ATHLETE_EMAIL]: next.athleteEmail } : {};
+  return { ok: true, changed: true, row: { ...row, ...profileUpdate, [CONTACT_FIELD]: { ...next, updatedAt: at, updatedBy: text(actor), history } } };
 }
 
 // ---------- coach-facing state ----------

@@ -120,3 +120,20 @@ test('email subject never contains line breaks from club data (header injection)
   const m = buildInviteEmail({ kind: 'guardian', clubName: 'Club\r\nBcc: x@evil.test', coachName: 'C\nX', swimmerName: 'Kit\r\nYoung', link: 'https://athlyrax.com/x', expiresAt: '2026-11-15T12:00:00Z' });
   assert.ok(!/[\r\n]/.test(m.subject), m.subject);
 });
+
+test('Swimmer Email from the Edit Swimmer form is used first and kept in step with invitation saves', () => {
+  // Profile email wins over an older invitation-saved address and over imported club fields.
+  const row = { id: 's', email: 'club@example.com', swimmerEmail: 'Profile@Example.com', athleteContacts: { athleteEmail: 'old@example.com' }, parentEmail: 'mum@example.com' };
+  const c = savedContacts(row);
+  assert.deepEqual([c.athleteEmail, c.athleteSource, c.guardianEmail], ['profile@example.com', 'profile', 'mum@example.com']);
+  // Guardian email never comes from the swimmer email.
+  assert.equal(savedContacts({ swimmerEmail: 'kid@example.com' }).guardianEmail, '');
+  // Replacing the profile address from an invitation needs confirmation, then updates both places.
+  assert.equal(applyContactChoice(row, { athleteEmail: 'new@example.com', saveAthlete: true }).ok, false);
+  const done = applyContactChoice(row, { athleteEmail: 'new@example.com', saveAthlete: true, confirmReplaceAthlete: true, actor: 'coach' });
+  assert.deepEqual([done.row.swimmerEmail, done.row.athleteContacts.athleteEmail], ['new@example.com', 'new@example.com']);
+  // Saving the same address as the profile changes nothing.
+  assert.equal(applyContactChoice(row, { athleteEmail: 'profile@example.com', saveAthlete: true }).changed, false);
+  // A guardian save leaves the swimmer email alone.
+  assert.equal(applyContactChoice(row, { guardianEmail: 'dad@example.com', saveGuardian: true }).row.swimmerEmail, 'Profile@Example.com');
+});
