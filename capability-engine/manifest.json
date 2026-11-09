@@ -1,10 +1,10 @@
 {
   "purpose": "Exact copy of the AthlyraX capability engine from the website repository, run on the server for the Athlete App. Do not edit here: change the website source and re-copy.",
   "sourceRepository": "Sigict/athlyrax-v6-private",
-  "sourceCommit": "71281e1339397dbec4b070ef35402eef919b9e32",
+  "sourceCommit": "c8439f7e8b34361bd1da62044a98586964c94e02",
   "files": {
     "src/data/efficiencyReference.js": "4068130d6fba662369be8d9e00b3b445f819b90e3b72c193b9ea6a44ebb400a1",
-    "src/data/worldRecordBaseTimes.js": "4fbaa3714f09fd29a87e2b3c2f6952f5443ac541d24a9e312d381e6a1a2b280d",
+    "src/data/worldRecordBaseTimes.js": "83229db5b6f94739e844b6019930ac4685be376076d0dfc044cf57562a3cc983",
     "src/sports/swimming/swimmingReports.js": "88003e3634299410215cd8be34f189de6dc8423b3a70f95767a7c5c1dc54479c",
     "src/utils/athlyraxCapabilityEngine.js": "8eb301bafcc5ffe9dfe0311ab7346cca94f93f218d5003feeabff78df9850093",
     "src/utils/attendanceIdentity.js": "c5bdc193d2aab06da302624ad87f430f114789085f47c7af766ace0aaaa220a2",
