@@ -14,6 +14,9 @@ import crypto from 'node:crypto';
 
 export const ATHLETE_INVITE_COLLECTION = 'athleteAccountInvites';
 export const ATHLETE_LINK_FIELDS = Object.freeze(['swimmerAccountUsername', 'swimmerAccountEmail', 'accountLinkedAt', 'accountLinkInviteId', 'accountLinkHistory']);
+// Swimmer-row fields only the server writes (kept from the stored row on whole-club saves).
+// athleteContacts: invitation contacts saved with the coach's permission (athlete-invite-delivery.mjs).
+export const SERVER_OWNED_ROW_FIELDS = Object.freeze([...ATHLETE_LINK_FIELDS, 'athleteContacts']);
 export const SERVER_OWNED_COLLECTIONS = Object.freeze([ATHLETE_INVITE_COLLECTION]);
 export const GUARDIAN_CONSENT_VERSION = 'athlete-app-guardian-consent-v2';
 export const GUARDIAN_CODE_TTL_MINUTES = 30;
@@ -27,6 +30,7 @@ const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex'
 const secret = () => crypto.randomBytes(32).toString('base64url');
 // Guardian codes are short (6 digits), so their digest is keyed with a server secret (HMAC): a copy of
 // the database alone does not allow the codes to be recovered by trying all one million values.
+export const guardianCodeDigest = (codeKey, inviteId, code) => codeDigest(codeKey, inviteId, code);
 const codeDigest = (codeKey, inviteId, code) => {
   if (!codeKey || String(codeKey).length < 16) throw new Error('Guardian code key is not configured.');
   return crypto.createHmac('sha256', codeKey).update(`${text(inviteId)}:${text(code)}`).digest('hex');
@@ -303,7 +307,7 @@ export function preserveServerOwnedAthleteData(nextShape = {}, existingShape = {
       const prevRows = storedById.get(text(row.id)) || [];
       const prev = prevRows.length === 1 ? prevRows[0] : null; // several stored copies: none is linked (checked above)
       const next = { ...row };
-      for (const f of ATHLETE_LINK_FIELDS) {
+      for (const f of SERVER_OWNED_ROW_FIELDS) {
         if (prev && prev[f] !== undefined) next[f] = prev[f];
         else delete next[f];
       }
