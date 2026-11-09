@@ -88,5 +88,8 @@ jobs:
       - name: Athlete App S5a (Master v31 import, legacy archive, profile)
         run: node --test tests/athlete-import.test.mjs
 
+      - name: Module 03 owner preview (authorization, lesson checks, assessment, test certificate)
+        run: node --test tests/cpd-module03-preview.test.mjs
+
       - name: Full backend storage and security contract
         run: npm run test:storage-all
