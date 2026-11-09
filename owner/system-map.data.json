@@ -2623,6 +2623,52 @@
   },
   {
    "method": "GET",
+   "path": "/media/partner-video",
+   "guards": [],
+   "file": "partner-video.mjs",
+   "line": 15,
+   "area": "media",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/media/partner-video/admin/status",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "partner-video.mjs",
+   "line": 31,
+   "area": "media",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "PUT",
+   "path": "/media/partner-video/admin/upload",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "partner-video.mjs",
+   "line": 32,
+   "area": "media",
+   "permission": "Primary software owner only",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
+   "path": "/media/partner-video/status",
+   "guards": [],
+   "file": "partner-video.mjs",
+   "line": 14,
+   "area": "media",
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
+  },
+  {
+   "method": "GET",
    "path": "/pilot/me",
    "guards": [
     "requireStrictAuth"
