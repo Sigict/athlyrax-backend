@@ -7284,6 +7284,17 @@ app.post('/coach/poolside/sessions/:sessionId/attendance', requireStrictAuth, re
 	}));
 });
 
+app.post('/coach/poolside/sessions/:sessionId/sets/:setId/results', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
+	await applyCoachPoolsideMutation(req, res, (db) => applyCoachPoolsideCanonicalResult(db, {
+		sessionId: req.params?.sessionId,
+		setId: req.params?.setId,
+		swimmerId: req.body?.swimmerId,
+		reps: req.body?.reps,
+		source: req.body?.source,
+		updatedBy: req.auth?.username,
+	}));
+});
+
 app.post('/coach/poolside/sessions/:sessionId/sets/:setId/executions', requireStrictAuth, requireWriteRole, requireBillingWriteAccess, async (req, res) => {
 	await applyCoachPoolsideMutation(req, res, (db) => applyCoachPoolsideExecution(db, {
 		sessionId: req.params?.sessionId,
