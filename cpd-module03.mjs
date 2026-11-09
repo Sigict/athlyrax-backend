@@ -526,48 +526,7 @@ export function registerCpdModule02(app, deps) {
     return true;
   }
 
-  // ---------- owner tools: private video upload (chunked, through the site proxy), readiness, revoke ----------
-  app.get(base + '/admin/videos', requireStrictAuth, requireSoftwareOwnerRole, async (req, res) => {
-    let free = null; try { const s = fs.statfsSync(storageRoot); free = s.bavail * s.bsize; } catch {}
-    let priceCheck = null;
-    let stripeAccount = null;
-    // The Stripe account identifier is non-secret, and this route is strictly
-    // software-owner authenticated. Never expose API keys or raw errors.
-    if (stripe) {
-      try {
-        const account = await stripe.accounts.retrieve();
-        stripeAccount = { id: String(account.id || ''), livemode: Boolean(account.livemode) };
-      } catch (err) {
-        stripeAccount = { error: err?.statusCode === 401 ? 'Stripe API key rejected' : 'Stripe account lookup unavailable' };
-      }
-    }
-    if (stripe && priceId) {
-      try {
-        const p = await stripe.prices.retrieve(priceId);
-        priceCheck = { active: p.active, oneTime: p.type === 'one_time', gbp: String(p.currency).toLowerCase() === 'gbp', amount: p.unit_amount, product: typeof p.product === 'string' ? p.product : p.product?.id, livemode: p.livemode };
-      } catch (err) {
-        priceCheck = {
-          error: err?.code === 'resource_missing'
-            ? 'Price ID does not exist in this Stripe account'
-            : err?.statusCode === 401 ? 'Stripe key rejected' : 'Price lookup failed',
-        };
-      }
-    }
-    try { await stripeConfigCheck(true); } catch {}
-    noStore(res).json({
-      lessons: LESSONS.map((l) => ({ lesson: l.n, title: l.title, bytes: lessonSize(l.n) })),
-      freeBytes: free, setup: setup(), salesOpen: salesOpen(), stripeMode, stripeAccount,
-      stripeKeySource: keySource,
-      expectedAccount: expectedAccount || null,
-      expectedAccountMatches: expectedAccount && stripeAccount?.id ? stripeAccount.id === expectedAccount : null,
-      verifiedByPrice: configCheck?.verifiedByPrice === true,
-      serverStartedAt,
-      priceId, priceCheck,
-    });
-  });
-  // Owner reporting reflects locally verified course entitlements, not a Stripe
-  // financial ledger. Other products/subscriptions must use their own data source.
-  // Never return these learner details without both authentication guards.
+  // ---------- owner reporting and access revocation; separate Module 03 uploader is already registered ----------
   app.get(base + '/admin/sales', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
     try {
       const folder = path.join(root, 'entitlements');
@@ -607,28 +566,6 @@ export function registerCpdModule02(app, deps) {
         })),
       });
     } catch { fail(res, 500, 'Course sales reporting is temporarily unavailable.'); }
-  });
-  app.put(base + '/admin/video/:lesson', requireStrictAuth, requireSoftwareOwnerRole, express.raw({ type: 'application/octet-stream', limit: UPLOAD_CHUNK_MAX }), (req, res) => {
-    const n = Number(req.params.lesson), offset = Number(req.query.offset), total = Number(req.query.total);
-    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-    if (!Number.isInteger(n) || n < 1 || n > 3 || !Number.isSafeInteger(offset) || !Number.isSafeInteger(total) || total < 1024 || total > UPLOAD_TOTAL_MAX || offset < 0 || !body.length || offset + body.length > total) return fail(res, 400, 'Invalid upload chunk.');
-    const tmp = lessonPath(n) + '.upload';
-    try {
-      fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-      if (offset === 0) {
-        if (body.length < 12 || body.toString('ascii', 4, 8) !== 'ftyp') return fail(res, 400, 'This is not an MP4 video file.');
-        try { const s = fs.statfsSync(storageRoot); if (s.bavail * s.bsize < total + 200 * 1024 * 1024) return fail(res, 507, 'Not enough space on the server disk for this video.'); } catch {}
-        fs.writeFileSync(tmp, body, { mode: 0o600 });
-      } else {
-        let have = 0; try { have = fs.statSync(tmp).size; } catch { return fail(res, 409, 'Upload not started. Start again.', { expectedOffset: 0 }); }
-        if (have !== offset) return fail(res, 409, 'Upload out of order.', { expectedOffset: have });
-        fs.appendFileSync(tmp, body);
-      }
-      const now = fs.statSync(tmp).size;
-      if (now < total) return noStore(res).json({ received: now, total, done: false });
-      fs.renameSync(tmp, lessonPath(n));
-      noStore(res).json({ received: now, total, done: true, lesson: n });
-    } catch { fail(res, 500, 'The video could not be saved.'); }
   });
   app.post(base + '/admin/revoke', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
