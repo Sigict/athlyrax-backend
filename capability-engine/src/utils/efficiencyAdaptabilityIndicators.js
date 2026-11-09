@@ -17,7 +17,7 @@
 import { calculatedStrokeMetrics } from './swimmingStrokeMetrics.js';
 import { parseRecordedSwimSeconds } from './recordedSetAverages.js';
 import { resolveCompetitionCourseKey, isYardCourseKey } from './competitionCourse.js';
-import { PUSH_OFF_ALLOWANCE_METRES_PER_WALL, efficiencyCourse } from '../data/efficiencyReference.js';
+import { PUSH_OFF_ALLOWANCE_METRES_PER_WALL, efficiencyCourse, eliteStrokeRateBasis } from '../data/efficiencyReference.js';
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const text = (value) => String(value ?? '').trim();
@@ -266,7 +266,8 @@ export function buildEfficiencyAdaptabilityIndicators({ tests = [], competitions
       const pctOfElite = elite > 0 ? (row.si / elite) * 100 : null;
       // Relative stroke length (DPC ÷ arm span): descriptive only, no reference or score.
       const relativeStrokeLength = armSpanCm > 0 ? row.dpc / (armSpanCm / 100) : null;
-      return { ...row, eliteSi: elite > 0 ? elite : null, pctOfElite, aboveReference: pctOfElite > 100, relativeStrokeLength };
+      return { ...row, eliteSi: elite > 0 ? elite : null, pctOfElite, aboveReference: pctOfElite > 100, relativeStrokeLength,
+        referenceBasis: elite > 0 ? eliteStrokeRateBasis(row.stroke, row.distance) : null };
     });
   const retests = changesByKey(testPerformanceRows(tests).filter(inWindow), ['seconds'])
     .map((row) => ({ ...row, timeChangePct: row.secondsChangePct }));

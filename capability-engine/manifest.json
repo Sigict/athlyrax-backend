@@ -1,9 +1,9 @@
 {
   "purpose": "Exact copy of the AthlyraX capability engine from the website repository, run on the server for the Athlete App. Do not edit here: change the website source and re-copy.",
   "sourceRepository": "Sigict/athlyrax-v6-private",
-  "sourceCommit": "c8439f7e8b34361bd1da62044a98586964c94e02",
+  "sourceCommit": "392e01e11ccd2ac6cbe2ace9b34cde8968aa3b8f",
   "files": {
-    "src/data/efficiencyReference.js": "4068130d6fba662369be8d9e00b3b445f819b90e3b72c193b9ea6a44ebb400a1",
+    "src/data/efficiencyReference.js": "4040a22a51d9078562f4fe5df8f49656017d835fc2555e8158cbd3ec9199d975",
     "src/data/worldRecordBaseTimes.js": "83229db5b6f94739e844b6019930ac4685be376076d0dfc044cf57562a3cc983",
     "src/sports/swimming/swimmingReports.js": "88003e3634299410215cd8be34f189de6dc8423b3a70f95767a7c5c1dc54479c",
     "src/utils/athlyraxCapabilityEngine.js": "8eb301bafcc5ffe9dfe0311ab7346cca94f93f218d5003feeabff78df9850093",
@@ -15,7 +15,7 @@
     "src/utils/competitionCourse.js": "e98eefcbd64cae03ab7b7f2d98e6eb9d486eb52dac3a9dbea0d237c1d438d251",
     "src/utils/coursePersonalBests.js": "8653b00ace13d9dd54df299626ce410ed30f55b4a2126eafa7a7be76b1c86e68",
     "src/utils/demoCompetitionCourse.js": "4f3a6669a5bda7d70e17124468c24d3bf7418491c3eac989e05832a8ae30cdf6",
-    "src/utils/efficiencyAdaptabilityIndicators.js": "a9451113faf1f59194cd997c2e91a938facab7550053366099812a620fe4adf5",
+    "src/utils/efficiencyAdaptabilityIndicators.js": "8b63cd9b5d681dd412b0f7e28794d77ba6d5fae264d9ff4bf69722a51fc0111d",
     "src/utils/ispPlannerSource.js": "c80c5b99d18e444c5a9e82b9bf495645ca19ddfc61fad558e641a10735897d3a",
     "src/utils/officialCapabilityRadar.js": "67c0e2df4406f1ed7d72ef08183b311459beb47acf86f4c5bbf290ad4f28d9e2",
     "src/utils/olympicCapabilityCalibration.js": "88aaecf0e1bd370774e045033bcce4b3a3d25c0f6a114af95e589be56d9d1c5e",
