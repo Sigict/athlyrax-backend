@@ -15,7 +15,7 @@
   },
   {
    "name": "CPD store (Education)",
-   "description": "Module 02 and Module 03 separately manage verified purchases, lesson progress, completion and valid certificates. Module 03 owner-preview data remains separate from issued credentials."
+   "description": "Course purchases, entitlements, progress, completions and certificates (cpd-module02.mjs)."
   },
   {
    "name": "Athlete personal store",
@@ -1192,6 +1192,7 @@
     "coach-poolside-mutations.mjs",
     "coach-poolside-projection.mjs",
     "cpd-module02.mjs",
+    "cpd-module03.mjs",
     "group-test-results.mjs",
     "index.js",
     "results-inbox.mjs",
@@ -1289,7 +1290,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 4527,
+   "line": 4547,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1303,7 +1304,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 4482,
+   "line": 4502,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1317,7 +1318,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 4508,
+   "line": 4528,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1331,7 +1332,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 4471,
+   "line": 4491,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1346,7 +1347,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 5743,
+   "line": 5763,
    "area": "Accounts & login",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -1358,7 +1359,7 @@
    "path": "/auth/config",
    "guards": [],
    "file": "index.js",
-   "line": 4636,
+   "line": 4656,
    "area": "Accounts & login",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -1370,7 +1371,7 @@
    "path": "/auth/guard",
    "guards": [],
    "file": "index.js",
-   "line": 5290,
+   "line": 5310,
    "area": "Accounts & login",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -1387,7 +1388,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 6191,
+   "line": 6211,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRateLimit)",
    "calledBy": [
@@ -1403,7 +1404,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 5890,
+   "line": 5910,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1417,7 +1418,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 5773,
+   "line": 5793,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": [
@@ -1431,7 +1432,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 4936,
+   "line": 4956,
    "area": "Accounts & login",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1447,7 +1448,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5705,
+   "line": 5725,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1461,7 +1462,7 @@
    "path": "/auth/me",
    "guards": [],
    "file": "index.js",
-   "line": 5262,
+   "line": 5282,
    "area": "Accounts & login",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -1477,7 +1478,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5642,
+   "line": 5662,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1491,7 +1492,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5120,
+   "line": 5140,
    "area": "Accounts & login",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1505,7 +1506,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5057,
+   "line": 5077,
    "area": "Accounts & login",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1518,7 +1519,7 @@
    "path": "/auth/popup-exchange",
    "guards": [],
    "file": "index.js",
-   "line": 5217,
+   "line": 5237,
    "area": "Accounts & login",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -1532,7 +1533,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5196,
+   "line": 5216,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -1544,7 +1545,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5757,
+   "line": 5777,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1559,7 +1560,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 5767,
+   "line": 5787,
    "area": "Accounts & login",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -1573,7 +1574,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 4650,
+   "line": 4670,
    "area": "Accounts & login",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1589,7 +1590,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 5941,
+   "line": 5961,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": [
@@ -1605,7 +1606,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 5952,
+   "line": 5972,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1619,7 +1620,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 6303,
+   "line": 6323,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1633,7 +1634,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 6255,
+   "line": 6275,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1647,7 +1648,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 6059,
+   "line": 6079,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1661,7 +1662,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 6108,
+   "line": 6128,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1674,7 +1675,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 5371,
+   "line": 5391,
    "area": "Billing (Stripe)",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -1689,7 +1690,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 5383,
+   "line": 5403,
    "area": "Billing (Stripe)",
    "permission": "Primary software owner only",
    "calledBy": []
@@ -1701,7 +1702,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5495,
+   "line": 5515,
    "area": "Billing (Stripe)",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1715,7 +1716,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5354,
+   "line": 5374,
    "area": "Billing (Stripe)",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1729,7 +1730,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5608,
+   "line": 5628,
    "area": "Billing (Stripe)",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1743,7 +1744,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5478,
+   "line": 5498,
    "area": "Billing (Stripe)",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1755,7 +1756,7 @@
    "path": "/billing/webhook",
    "guards": [],
    "file": "index.js",
-   "line": 334,
+   "line": 336,
    "area": "Billing (Stripe)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -1768,7 +1769,7 @@
     "requireAthleteInviteManager"
    ],
    "file": "index.js",
-   "line": 4334,
+   "line": 4354,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager)",
    "calledBy": []
@@ -1781,7 +1782,7 @@
     "requireWriteRole"
    ],
    "file": "index.js",
-   "line": 8389,
+   "line": 8409,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole)",
    "calledBy": [
@@ -1796,7 +1797,7 @@
     "requireWriteRole"
    ],
    "file": "index.js",
-   "line": 8403,
+   "line": 8423,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole)",
    "calledBy": []
@@ -1810,7 +1811,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 4178,
+   "line": 4198,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": [
@@ -1824,7 +1825,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 8528,
+   "line": 8548,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1842,7 +1843,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 8613,
+   "line": 8633,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -1856,7 +1857,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 8573,
+   "line": 8593,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -1870,7 +1871,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 4197,
+   "line": 4217,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -1884,7 +1885,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 8603,
+   "line": 8623,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -1898,7 +1899,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 8593,
+   "line": 8613,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -1912,7 +1913,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 8582,
+   "line": 8602,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -1926,7 +1927,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 4186,
+   "line": 4206,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -1939,7 +1940,7 @@
     "requireCoachLinkManagerRole"
    ],
    "file": "index.js",
-   "line": 7831,
+   "line": 7851,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireCoachLinkManagerRole)",
    "calledBy": [
@@ -1955,7 +1956,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 7856,
+   "line": 7876,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -1968,7 +1969,7 @@
     "requireCoachLinkDecisionRole"
    ],
    "file": "index.js",
-   "line": 8007,
+   "line": 8027,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -1981,7 +1982,7 @@
     "requireAthleteInviteManager"
    ],
    "file": "index.js",
-   "line": 4294,
+   "line": 4314,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager)",
    "calledBy": []
@@ -1995,7 +1996,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 4311,
+   "line": 4331,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager, requireAdminRateLimit)",
    "calledBy": []
@@ -2008,7 +2009,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 4345,
+   "line": 4365,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAdminRateLimit)",
    "calledBy": []
@@ -2022,7 +2023,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 8824,
+   "line": 8844,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": [
@@ -2036,7 +2037,7 @@
     "requireAuth"
    ],
    "file": "index.js",
-   "line": 6499,
+   "line": 6519,
    "area": "content",
    "permission": "requireAuth",
    "calledBy": []
@@ -2046,7 +2047,7 @@
    "path": "/content/placeholders",
    "guards": [],
    "file": "index.js",
-   "line": 6406,
+   "line": 6426,
    "area": "content",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -2062,7 +2063,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "cpd-module02.mjs",
-   "line": 686,
+   "line": 690,
    "area": "Education (CPD)",
    "permission": "Primary software owner only",
    "calledBy": []
@@ -2075,7 +2076,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "cpd-module02.mjs",
-   "line": 624,
+   "line": 628,
    "area": "Education (CPD)",
    "permission": "Primary software owner only",
    "calledBy": []
@@ -2088,7 +2089,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "cpd-module02.mjs",
-   "line": 664,
+   "line": 668,
    "area": "Education (CPD)",
    "permission": "Primary software owner only",
    "calledBy": []
@@ -2101,7 +2102,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "cpd-module02.mjs",
-   "line": 583,
+   "line": 587,
    "area": "Education (CPD)",
    "permission": "Primary software owner only",
    "calledBy": []
@@ -2111,7 +2112,7 @@
    "path": "/cpd/module-02/assessment",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 484,
+   "line": 488,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2121,7 +2122,7 @@
    "path": "/cpd/module-02/certificate",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 514,
+   "line": 518,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2131,7 +2132,7 @@
    "path": "/cpd/module-02/checkout",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 332,
+   "line": 336,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2141,7 +2142,7 @@
    "path": "/cpd/module-02/claim",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 381,
+   "line": 385,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2151,7 +2152,7 @@
    "path": "/cpd/module-02/lesson-complete",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 470,
+   "line": 474,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2161,7 +2162,7 @@
    "path": "/cpd/module-02/logout",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 302,
+   "line": 306,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2171,7 +2172,7 @@
    "path": "/cpd/module-02/questions",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 459,
+   "line": 463,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2181,7 +2182,7 @@
    "path": "/cpd/module-02/recover",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 397,
+   "line": 401,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2191,7 +2192,7 @@
    "path": "/cpd/module-02/redeem",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 418,
+   "line": 422,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2201,7 +2202,7 @@
    "path": "/cpd/module-02/status",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 308,
+   "line": 312,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2211,7 +2212,7 @@
    "path": "/cpd/module-02/verify/:id",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 524,
+   "line": 528,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2221,7 +2222,7 @@
    "path": "/cpd/module-02/video/:lesson",
    "guards": [],
    "file": "cpd-module02.mjs",
-   "line": 433,
+   "line": 437,
    "area": "Education (CPD)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -2236,7 +2237,8 @@
    "file": "cpd-module03.mjs",
    "line": 570,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2248,7 +2250,8 @@
    "file": "cpd-module03.mjs",
    "line": 530,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "PUT",
@@ -2283,7 +2286,8 @@
    "file": "cpd-module03.mjs",
    "line": 431,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2292,7 +2296,8 @@
    "file": "cpd-module03.mjs",
    "line": 461,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2301,7 +2306,8 @@
    "file": "cpd-module03.mjs",
    "line": 279,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2310,7 +2316,8 @@
    "file": "cpd-module03.mjs",
    "line": 328,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2319,7 +2326,8 @@
    "file": "cpd-module03.mjs",
    "line": 417,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2328,7 +2336,8 @@
    "file": "cpd-module03.mjs",
    "line": 249,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2340,7 +2349,8 @@
    "file": "cpd-module03-preview.mjs",
    "line": 102,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2352,7 +2362,8 @@
    "file": "cpd-module03-preview.mjs",
    "line": 124,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2364,7 +2375,8 @@
    "file": "cpd-module03-preview.mjs",
    "line": 94,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2376,7 +2388,8 @@
    "file": "cpd-module03-preview.mjs",
    "line": 140,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2388,7 +2401,8 @@
    "file": "cpd-module03-preview.mjs",
    "line": 88,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2400,7 +2414,8 @@
    "file": "cpd-module03-preview.mjs",
    "line": 61,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2412,7 +2427,8 @@
    "file": "cpd-module03-preview.mjs",
    "line": 139,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2424,7 +2440,8 @@
    "file": "cpd-module03-preview.mjs",
    "line": 68,
    "area": "Education (CPD)",
-   "permission": "Primary software owner only"
+   "permission": "Primary software owner only",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2433,7 +2450,8 @@
    "file": "cpd-module03.mjs",
    "line": 406,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2442,7 +2460,8 @@
    "file": "cpd-module03.mjs",
    "line": 344,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "POST",
@@ -2451,7 +2470,8 @@
    "file": "cpd-module03.mjs",
    "line": 365,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2460,7 +2480,8 @@
    "file": "cpd-module03.mjs",
    "line": 255,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2469,7 +2490,8 @@
    "file": "cpd-module03.mjs",
    "line": 471,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2478,7 +2500,8 @@
    "file": "cpd-module03.mjs",
    "line": 380,
    "area": "Education (CPD)",
-   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)"
+   "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
+   "calledBy": []
   },
   {
    "method": "GET",
@@ -2487,7 +2510,7 @@
     "requireAuth"
    ],
    "file": "index.js",
-   "line": 8855,
+   "line": 8875,
    "area": "Club data (whole-club load/save)",
    "permission": "requireAuth",
    "calledBy": [
@@ -2504,7 +2527,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9405,
+   "line": 9425,
    "area": "Club data (whole-club load/save)",
    "permission": "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2518,7 +2541,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9018,
+   "line": 9038,
    "area": "Club data (whole-club load/save)",
    "permission": "Signed in + role check (requireAuth, requireAdminRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2530,7 +2553,7 @@
     "requireAuth"
    ],
    "file": "index.js",
-   "line": 8988,
+   "line": 9008,
    "area": "Club data (whole-club load/save)",
    "permission": "requireAuth",
    "calledBy": []
@@ -2544,7 +2567,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9091,
+   "line": 9111,
    "area": "Club data (whole-club load/save)",
    "permission": "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)",
    "calledBy": [
@@ -2558,7 +2581,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 5602,
+   "line": 5622,
    "area": "entitlements",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2573,7 +2596,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 8686,
+   "line": 8706,
    "area": "feedback",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -2588,7 +2611,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 8703,
+   "line": 8723,
    "area": "feedback",
    "permission": "Signed in + role check (requireAdminRateLimit)",
    "calledBy": []
@@ -2602,7 +2625,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 8746,
+   "line": 8766,
    "area": "feedback",
    "permission": "Primary software owner only",
    "calledBy": []
@@ -2616,7 +2639,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 8794,
+   "line": 8814,
    "area": "fixtures",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2726,7 +2749,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6767,
+   "line": 6787,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2740,7 +2763,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 6514,
+   "line": 6534,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -2755,7 +2778,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6820,
+   "line": 6840,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2769,7 +2792,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6843,
+   "line": 6863,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -2781,7 +2804,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 6667,
+   "line": 6687,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -2795,7 +2818,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 6618,
+   "line": 6638,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -2809,7 +2832,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6878,
+   "line": 6898,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2823,7 +2846,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6886,
+   "line": 6906,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -2835,7 +2858,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 6755,
+   "line": 6775,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -2850,7 +2873,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8242,
+   "line": 8262,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2865,7 +2888,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8309,
+   "line": 8329,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2880,7 +2903,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8464,
+   "line": 8484,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -2893,7 +2916,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 7356,
+   "line": 7376,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2908,7 +2931,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 7325,
+   "line": 7345,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2923,7 +2946,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8063,
+   "line": 8083,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2938,7 +2961,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 7709,
+   "line": 7729,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2953,7 +2976,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 4402,
+   "line": 4422,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2968,7 +2991,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 4408,
+   "line": 4428,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -2981,7 +3004,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 7469,
+   "line": 7489,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2996,7 +3019,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 7387,
+   "line": 7407,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3011,7 +3034,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 4442,
+   "line": 4462,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3026,7 +3049,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 4438,
+   "line": 4458,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3041,7 +3064,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8442,
+   "line": 8462,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3053,7 +3076,7 @@
    "path": "/webhooks/terra",
    "guards": [],
    "file": "index.js",
-   "line": 442,
+   "line": 449,
    "area": "External webhooks",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -3090,6 +3113,7 @@
   {
    "name": "Stripe (payments, subscriptions, CPD purchases)",
    "env": [
+    "CPD_MODULE03_STRIPE_SECRET_KEY",
     "CPD_STRIPE_EXPECTED_ACCOUNT",
     "CPD_STRIPE_SECRET_KEY",
     "STRIPE_PRICE_ANNUAL",
@@ -3202,7 +3226,7 @@
     "swimmer",
     "session"
    ],
-   "status": "Established concept",
+   "status": "Live",
    "verified": {
     "collections": [
      "squads",
@@ -3288,7 +3312,7 @@
     "session",
     "console"
    ],
-   "status": "Established concept",
+   "status": "Live",
    "verified": {
     "collections": [
      "coaches"
@@ -4247,7 +4271,18 @@
      "GET /cpd/module-02/verify/:id",
      "GET /cpd/module-02/admin/videos",
      "GET /cpd/module-02/admin/sales",
-     "GET /cpd/module-03/admin/videos"
+     "GET /cpd/module-03/owner/status",
+     "GET /cpd/module-03/owner/video/:lesson",
+     "GET /cpd/module-03/owner/questions",
+     "GET /cpd/module-03/owner/certificate",
+     "GET /cpd/module-03/owner/verify/:id",
+     "GET /cpd/module-03/admin/videos",
+     "GET /cpd/module-03/status",
+     "GET /cpd/module-03/video/:lesson",
+     "GET /cpd/module-03/questions",
+     "GET /cpd/module-03/certificate",
+     "GET /cpd/module-03/verify/:id",
+     "GET /cpd/module-03/admin/sales"
     ],
     "writes": [
      "POST /cpd/module-02/logout",
@@ -4259,7 +4294,18 @@
      "POST /cpd/module-02/assessment",
      "PUT /cpd/module-02/admin/video/:lesson",
      "POST /cpd/module-02/admin/revoke",
-     "PUT /cpd/module-03/admin/video/:lesson"
+     "POST /cpd/module-03/owner/lesson-complete",
+     "POST /cpd/module-03/owner/assessment",
+     "POST /cpd/module-03/owner/logout",
+     "PUT /cpd/module-03/admin/video/:lesson",
+     "POST /cpd/module-03/logout",
+     "POST /cpd/module-03/checkout",
+     "POST /cpd/module-03/claim",
+     "POST /cpd/module-03/recover",
+     "POST /cpd/module-03/redeem",
+     "POST /cpd/module-03/lesson-complete",
+     "POST /cpd/module-03/assessment",
+     "POST /cpd/module-03/admin/revoke"
     ],
     "permissions": [
      "Public (token/secret or rate limit checked inside the handler where relevant)",
@@ -5234,6 +5280,32 @@
   {
    "name": "Module-02 inputs",
    "file": "public/education/module-02.html",
+   "app": "Education",
+   "fields": [
+    "buyer-email",
+    "buyer-name",
+    "digital-content-consent",
+    "recover-email"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Module-03 inputs",
+   "file": "public/education/module-03.html",
+   "app": "Education",
+   "fields": [
+    "buyer-email",
+    "buyer-name",
+    "digital-content-consent",
+    "recover-email"
+   ],
+   "source": "input elements",
+   "likelyTables": []
+  },
+  {
+   "name": "Module-03-preview inputs",
+   "file": "public/education/module-03-preview.html",
    "app": "Education",
    "fields": [
     "buyer-email",
