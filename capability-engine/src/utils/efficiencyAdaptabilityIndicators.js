@@ -17,7 +17,7 @@
 import { calculatedStrokeMetrics } from './swimmingStrokeMetrics.js';
 import { parseRecordedSwimSeconds } from './recordedSetAverages.js';
 import { resolveCompetitionCourseKey, isYardCourseKey } from './competitionCourse.js';
-import { PUSH_OFF_ALLOWANCE_METRES_PER_WALL } from '../data/efficiencyReference.js';
+import { PUSH_OFF_ALLOWANCE_METRES_PER_WALL, efficiencyCourse } from '../data/efficiencyReference.js';
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const text = (value) => String(value ?? '').trim();
@@ -113,7 +113,9 @@ function testEfficiencyRows(tests) {
     if (!measured || !(distance > 0)) return null;
     const label = text(test?.testName || test?.testType) || `${distance} m ${stroke}`;
     return { source: 'test', id: text(test?.id), date: day(test?.date), label, key: `test|${label}|${distance}|${stroke.toLowerCase()}`,
-      distance, stroke, unit: unitOf(test), ...measured, verified: (test?.strokeMeasurementVerified ?? test?.raw?.strokeMeasurementVerified) === true };
+      distance, stroke, unit: unitOf(test), poolLength: poolLengthOf(test), course: efficiencyCourse({ unit: unitOf(test), poolLength: poolLengthOf(test) }),
+      ...measured, verified: (test?.strokeMeasurementVerified ?? test?.raw?.strokeMeasurementVerified) === true,
+      verifyTarget: { kind: 'test', testId: text(test?.raw?.id || test?.id) } };
   }).filter(Boolean);
 }
 
@@ -142,8 +144,10 @@ function competitionEfficiencyRows(competitions) {
     if (!measured || !(distance > 0)) return null;
     const unit = isYardCourseKey(course) ? 'yd' : 'm';
     return { source: 'competition', id: text(race?.id), date: day(race?.date), label: `${distance} ${unit} ${stroke}${course ? ` (${course === '25y' ? 'SCY' : course === '25' ? 'SC' : 'LC'})` : ''}`,
-      key: `competition|${distance}|${stroke.toLowerCase()}|${course}`, distance, stroke, unit, ...measured, repetitions: 1,
-      verified: (result?.strokeMeasurementVerified ?? race?.raw?.strokeMeasurementVerified) === true };
+      key: `competition|${distance}|${stroke.toLowerCase()}|${course}`, distance, stroke, unit, poolLength: course === '50' ? 50 : 25,
+      course: efficiencyCourse({ unit, poolLength: course === '50' ? 50 : 25 }), ...measured, repetitions: 1,
+      verified: (result?.strokeMeasurementVerified ?? race?.raw?.strokeMeasurementVerified) === true,
+      verifyTarget: { kind: 'competition', fixtureId: text(race?.fixtureId || fixture?.id), eventId: text(race?.eventId || eventItem?.id) } };
   }).filter(Boolean);
 }
 
@@ -165,7 +169,8 @@ function trainingEfficiencyRows(sets) {
       strokeCount: repStrokes(rep), strokeCycles: repCycles(rep), distance, stroke, unit: unitOf(set), poolLength: poolLengthOf(set), underwaterDistance: recordedUnderwaterMetres(rep, distance, poolLengthOf(set)) })));
     if (!measured || !(distance > 0)) return null;
     return { source: 'training', id: text(set?.id), date: day(set?.scheduleDate || set?.date), label: setLabel(set), key: `training|${setSignature(set)}`,
-      distance, stroke, unit: unitOf(set), ...measured, verified: set?.__ispSwimmerResult?.strokeMeasurementVerified === true };
+      distance, stroke, unit: unitOf(set), poolLength: poolLengthOf(set), course: efficiencyCourse({ unit: unitOf(set), poolLength: poolLengthOf(set) }),
+      ...measured, verified: set?.__ispSwimmerResult?.strokeMeasurementVerified === true, verifyTarget: { kind: 'training', setId: text(set?.id) } };
   }).filter(Boolean);
 }
 
@@ -231,8 +236,17 @@ function recoveryResponses(sets) {
   return { sessions, responses };
 }
 
+// Latest recorded arm span (cm) from the swimmer's physical measurements, or null.
+export function latestArmSpanCm(swimmer) {
+  const rows = [...asArray(swimmer?.physicalMeasurements), ...asArray(swimmer?.isp?.physicalMeasurements)]
+    .filter((row) => Number(row?.armSpanCm) >= 100 && Number(row?.armSpanCm) <= 250)
+    .sort((a, b) => text(a?.date).localeCompare(text(b?.date)));
+  return rows.length ? Number(rows[rows.length - 1].armSpanCm) : null;
+}
+
 export function buildEfficiencyAdaptabilityIndicators({ tests = [], competitions = [], sets = [], deliveryBySchedule = null,
-  startDate = '', endDate = '', asOfDate = '', pushOffMetresPerWall = PUSH_OFF_ALLOWANCE_METRES_PER_WALL } = {}) {
+  startDate = '', endDate = '', asOfDate = '', pushOffMetresPerWall = PUSH_OFF_ALLOWANCE_METRES_PER_WALL,
+  eliteReference = null, armSpanCm = null } = {}) {
   const last = [endDate, asOfDate].filter(Boolean).sort()[0] || '';
   const inWindow = (row) => (!startDate || row.date >= startDate) && (!last || row.date <= last);
   const trainingSets = attendedTrainingSets(sets, deliveryBySchedule)
@@ -245,21 +259,30 @@ export function buildEfficiencyAdaptabilityIndicators({ tests = [], competitions
   const efficiencyMeasurements = [
     ...collect('test', () => testEfficiencyRows(tests)), ...collect('competition', () => competitionEfficiencyRows(competitions)),
     ...collect('training', () => trainingEfficiencyRows(trainingSets)),
-  ].filter(inWindow).sort((a, b) => a.date.localeCompare(b.date) || a.source.localeCompare(b.source));
+  ].filter(inWindow).sort((a, b) => a.date.localeCompare(b.date) || a.source.localeCompare(b.source))
+    .map((row) => {
+      // % of the elite reference Stroke Index, kept uncapped (a reference is not a ceiling).
+      const elite = row.course && typeof eliteReference === 'function' ? eliteReference(row) : null;
+      const pctOfElite = elite > 0 ? (row.si / elite) * 100 : null;
+      // Relative stroke length (DPC ÷ arm span): descriptive only, no reference or score.
+      const relativeStrokeLength = armSpanCm > 0 ? row.dpc / (armSpanCm / 100) : null;
+      return { ...row, eliteSi: elite > 0 ? elite : null, pctOfElite, aboveReference: pctOfElite > 100, relativeStrokeLength };
+    });
   const retests = changesByKey(testPerformanceRows(tests).filter(inWindow), ['seconds'])
     .map((row) => ({ ...row, timeChangePct: row.secondsChangePct }));
   const recovery = recoveryResponses(trainingSets);
   return {
     efficiency: {
       measurements: efficiencyMeasurements,
-      changes: changesByKey(efficiencyMeasurements, ['si', 'speed', 'dpc']),
+      changes: changesByKey(efficiencyMeasurements, ['si', 'speed', 'dpc', 'cycles']),
+      armSpanCm: armSpanCm > 0 ? armSpanCm : null,
       // Swims (repetitions) left out because the stroke count is implausible for the whole swim.
       excludedImplausible: Object.fromEntries(Object.entries(implausible).map(([source, rows]) => [source, rows.length])),
       // Swims with no recorded underwater distance: push-off allowance per wall (src/data/efficiencyReference.js).
       pushOffMetresPerWall,
       pushOffEstimatedCount: efficiencyMeasurements.filter((row) => row.pushOffEstimated).length,
       score: null,
-      scoreNote: 'Efficiency score (Capability, Competition, Integrated) = Stroke Index ÷ elite Stroke Index × 100; elite speed from the world-class reference, elite stroke rate from a provisional table pending owner confirmation. Scored only from at least 2 stroke-counted swims; a measurement above the elite reference counts only after coach verification. Below: each swimmer\'s own values and change.',
+      scoreNote: 'Efficiency score (Capability, Competition, Integrated) = Stroke Index ÷ elite Stroke Index × 100; elite speed from the world-class reference, elite stroke rate from a provisional table pending owner confirmation. Scored only from at least 2 stroke-counted swims; a measurement above the elite reference counts only after coach verification and is then shown at its full % of the reference. Stroke Index is a stroke-economy indicator (speed × distance per cycle), not propelling efficiency. Below: each swimmer\'s own values and change.',
     },
     adaptability: {
       retests,
