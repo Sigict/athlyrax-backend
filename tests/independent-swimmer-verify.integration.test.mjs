@@ -166,3 +166,43 @@ test('independent swimmer sign-up verifies the email before the first sign-in; e
     assert.equal((await post(base, '/auth/login', { username: 'coachA', password: 'CoachA!Pass1234' })).status, 200, 'existing accounts unaffected');
   } finally { await server.stop(); }
 });
+
+test('independent athlete joins a club through its invitation and can leave; personal training and club history kept', async () => {
+  const seed = (paths) => writeJson(path.join(paths.storageRoot, 'tenants', 'tenant-a', 'db.json'), {
+    squads: [{ id: 'sq-a', name: 'Squad A' }], swimmers: [{ id: 'rec-1', firstName: 'Ivy', lastName: 'Indie', squadId: 'sq-a', dob: '1999-02-02', swimmerEmail: 'ivy@example.com' }], tests: [{ id: 't1', swimmerId: 'rec-1', time: '1:01.00' }],
+  });
+  const server = await startServer({ AUTH_LOGIN_RATE_MAX_ATTEMPTS: '200', AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS: '400' }, seed);
+  const base = server.baseUrl;
+  const jar = { cookie: '', csrf: '' };
+  const send = async (route, body, method = 'POST') => { const r = await fetch(`${base}${route}`, { method, headers: { 'Content-Type': 'application/json', ...(jar.cookie ? { Cookie: jar.cookie } : {}), ...(jar.csrf && method !== 'GET' ? { 'x-csrf-token': jar.csrf } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }); const c = cookieHeader(r); if (c) jar.cookie = c; const j = await r.json().catch(() => ({})); if (j.csrfToken) jar.csrf = j.csrfToken; return { status: r.status, json: j }; };
+  try {
+    const email = 'ivy@example.com';
+    await post(base, '/snapshot/account/auth', { email, password: 'Ivy!Pass123456', fullName: 'Ivy Indie', createAccount: true, requireEmailVerification: true });
+    await post(base, '/snapshot/account/verify-email', { email, code: (mails(server).map((m) => (m.text.match(/verification code is: (\d{6})/) || [])[1]).filter(Boolean)).pop() });
+    assert.equal((await send('/auth/login', { username: email, password: 'Ivy!Pass123456' })).status, 200);
+    const day = { kind: 'day', id: 'day-1', baseRev: 0, data: { date: '2026-11-01', sessions: [{ id: 'ses-1', label: 'My own swim', pool: 'SCM', sets: [], questionnaire: {} }] } };
+    assert.equal((await send('/swimmer/personal-training/sync', { changes: [day] })).status, 200);
+    // The club invites the athlete (coach session in its own cookie jar).
+    const coachLogin = await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'coachA', password: 'CoachA!Pass1234' }) });
+    const coach = { cookie: cookieHeader(coachLogin), csrf: (await coachLogin.json()).csrfToken };
+    const bulk = await fetch(`${base}/coach/athlete-invites/bulk`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: coach.cookie, 'x-csrf-token': coach.csrf }, body: JSON.stringify({ requestId: 'req-indie-join-1', items: [{ swimmerId: 'rec-1', athleteEmail: email }] }) });
+    assert.equal(bulk.status, 200);
+    const token = decodeURIComponent((mails(server).map((m) => (m.text.match(/#token=([^\s]+)/) || [])[1]).filter(Boolean)).pop());
+    const accepted = await send('/athlete-invites/accept', { token });
+    assert.equal(accepted.status, 200, JSON.stringify(accepted.json));
+    let db = JSON.parse(fs.readFileSync(path.join(server.paths.storageRoot, 'tenants', 'tenant-a', 'db.json'), 'utf8'));
+    assert.equal(db.swimmers.length, 1); assert.ok(db.swimmers[0].swimmerAccountUsername);
+    const stored = JSON.parse(fs.readFileSync(server.paths.authUsersPath, 'utf8')).find((u) => u.email === email);
+    assert.ok(stored.athleteTenantConnections.some((c) => c.tenantId === 'tenant-a' && c.status === 'active'), 'club connection persisted');
+    assert.ok(stored.independentProfile?.tenantId, 'independent profile recorded, not merged');
+    assert.ok(JSON.stringify((await send('/swimmer/personal-training', null, 'GET')).json).includes('My own swim'));
+    // Leave the club.
+    const left = await send('/swimmer/clubs/leave', { tenantId: 'tenant-a' });
+    assert.equal(left.status, 200, JSON.stringify(left.json));
+    db = JSON.parse(fs.readFileSync(path.join(server.paths.storageRoot, 'tenants', 'tenant-a', 'db.json'), 'utf8'));
+    assert.ok(!db.swimmers[0].swimmerAccountUsername); assert.equal(db.tests.length, 1);
+    assert.equal(JSON.parse(fs.readFileSync(server.paths.authUsersPath, 'utf8')).find((u) => u.email === email).athleteTenantConnections.find((c) => c.tenantId === 'tenant-a').status, 'left');
+    assert.ok(JSON.stringify((await send('/swimmer/personal-training', null, 'GET')).json).includes('My own swim'));
+    assert.equal((await send('/swimmer/clubs/leave', { tenantId: 'tenant-a' })).status, 404, 'already left');
+  } finally { await server.stop(); }
+});

@@ -2027,6 +2027,11 @@ function normalizeAuthUserRows(rows) {
 				billing,
 				// Independent swimmer email verification (only accounts created with it carry the flag).
 				...(row?.emailVerificationRequired === true ? { emailVerificationRequired: true, emailVerifiedAt: String(row?.emailVerifiedAt || '').trim() } : {}),
+				// Athlete App club connections (active, left or revoked by the club): kept so a revocation and
+				// an independent athlete's club link hold after a restart.
+				...(Array.isArray(row?.athleteTenantConnections) && row.athleteTenantConnections.length ? { athleteTenantConnections: row.athleteTenantConnections.slice(-50).filter((c) => c && typeof c === 'object').map((c) => Object.fromEntries(['tenantId', 'clubId', 'clubName', 'status', 'source', 'connectedAt', 'revokedAt', 'revokedBy', 'leftAt'].filter((k) => c[k] !== undefined && c[k] !== null && c[k] !== '').map((k) => [k, String(c[k]).slice(0, 200)]))) } : {}),
+				...(row?.athleteInviteManaged === true ? { athleteInviteManaged: true } : {}),
+				...(row?.independentProfile && typeof row.independentProfile === 'object' ? { independentProfile: { tenantId: String(row.independentProfile.tenantId || '').slice(0, 120), swimmerId: String(row.independentProfile.swimmerId || '').slice(0, 120) } } : {}),
 				// Guardian-managed Athlete App logins: the verified parent/guardian receives password resets.
 				...(row?.managedBy && typeof row.managedBy === 'object' ? { managedBy: Object.fromEntries(['guardianEmail', 'guardianName', 'relationship', 'inviteId', 'tenantId', 'consentAt'].map((k) => [k, String(row.managedBy[k] || '').trim()])) } : {}),
 			};
@@ -4686,14 +4691,21 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		account = { username: String(signedIn.username), email: String(signedIn.email || '') };
 		// One athlete identity: an account that already has its own athlete profile in another space cannot
 		// also take over a club record (the two swimmer ids would be two identities).
+		// An independent athlete (own athlete profile in their own space) joins a club through the club's
+		// invitation: the club record becomes the identity the Athlete App shows while connected; the
+		// independent profile is kept unchanged (never merged) and is shown again if they leave the club.
+		// Personal training is stored per account, so it stays available throughout.
 		const primary = normalizeTenantId(signedIn.tenantId);
 		if (primary && primary !== t.key) {
 			const own = athleteTenantPaths(primary);
 			const ownDb = own ? readJsonFile(own.paths.dbPath) || {} : {};
-			if ((Array.isArray(ownDb.swimmers) ? ownDb.swimmers : []).some((r) => String(r?.swimmerAccountUsername || '').toLowerCase() === account.username.toLowerCase())) {
-				res.status(409).json({ error: 'This login already has its own athlete profile. Create a new login from this invitation; joining an existing independent profile to a club record is not supported yet.' });
+			const ownRow = (Array.isArray(ownDb.swimmers) ? ownDb.swimmers : []).find((r) => String(r?.swimmerAccountUsername || '').toLowerCase() === account.username.toLowerCase());
+			const otherClub = (Array.isArray(signedIn.athleteTenantConnections) ? signedIn.athleteTenantConnections : []).some((c) => normalizeTenantId(c?.tenantId) !== t.key && normalizeTenantId(c?.tenantId) !== primary && ['active', 'approved'].includes(String(c?.status || '').toLowerCase()));
+			if (otherClub) {
+				res.status(409).json({ error: 'This login is already connected to another club. Leave that club in the Athlete App first, then accept this invitation.' });
 				return;
 			}
+			if (ownRow) account.independentProfile = { tenantId: primary, swimmerId: String(ownRow.id || '') };
 		}
 	} else {
 		const password = String(req.body?.password || '');
@@ -4739,17 +4751,18 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 	// account cannot be saved, the account changes are rolled back and the link is undone; if even the
 	// undo fails, reconcileOrphanedAthleteLinks reverts it on the next club access.
 	const user = newUser || signedIn;
-	const before = newUser ? null : { athleteInviteManaged: user.athleteInviteManaged, athleteTenantConnections: user.athleteTenantConnections };
+	const before = newUser ? null : { athleteInviteManaged: user.athleteInviteManaged, athleteTenantConnections: user.athleteTenantConnections, independentProfile: user.independentProfile };
 	try {
 		user.athleteInviteManaged = true;
 		// The club connection the Athlete App shows (also for the account's own club).
 		const rows = Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections.filter((c) => normalizeTenantId(c?.tenantId) !== t.key) : [];
 		user.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, clubName: clubDisplayName(t.key) || 'Club', status: 'active', source: 'athlete-invite', connectedAt: new Date().toISOString() }];
+		if (account.independentProfile && !newUser) user.independentProfile = account.independentProfile;
 		if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_AUTH_PERSIST')) throw new Error('test: account save failed');
 		persistAuthUsers();
 	} catch (error) {
 		if (newUser) dropNewUser();
-		else { user.athleteInviteManaged = before.athleteInviteManaged; user.athleteTenantConnections = before.athleteTenantConnections; }
+		else { user.athleteInviteManaged = before.athleteInviteManaged; user.athleteTenantConnections = before.athleteTenantConnections; user.independentProfile = before.independentProfile; }
 		let undone = false;
 		try {
 			if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_LINK_COMPENSATION')) throw new Error('test: undo failed');
@@ -4774,6 +4787,34 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		payload.csrfToken = session.csrf;
 	}
 	res.status(newUser ? 201 : 200).json(payload);
+});
+
+// Athlete leaves a club they joined through an invitation. Only the account link is removed: the club
+// keeps its swimmer record and history; the athlete keeps their personal training and, for an
+// independent athlete, their own profile, which the Athlete App shows again.
+app.post('/swimmer/clubs/leave', requireStrictAuth, requireSwimmerRole, async (req, res) => {
+	const user = findAuthUser(String(req.auth?.username || '').trim());
+	const tenantKey = normalizeTenantId(req.body?.tenantId);
+	if (!user || !tenantKey) { res.status(400).json({ error: 'Choose the club to leave.' }); return; }
+	if (tenantKey === normalizeTenantId(user.tenantId)) { res.status(409).json({ error: 'This login was created by the club. Ask the club to remove the link instead.' }); return; }
+	const conn = (Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).find((c) => normalizeTenantId(c?.tenantId) === tenantKey && ['active', 'approved'].includes(String(c?.status || '').toLowerCase()));
+	const t = athleteTenantPaths(tenantKey);
+	if (!conn || !t) { res.status(404).json({ error: 'You are not connected to that club.' }); return; }
+	const username = String(user.username || '');
+	let out = null;
+	try {
+		out = await mutateAthleteTenantDb(t.paths, (db) => {
+			const row = (Array.isArray(db.swimmers) ? db.swimmers : []).find((r) => String(r?.swimmerAccountUsername || '').toLowerCase() === username.toLowerCase());
+			if (!row) return { ok: true, noLink: true, db };
+			return unlinkAthleteAccount(db, row.id, { actor: username, reason: 'Athlete left the club' });
+		});
+	} catch { out = null; }
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'Could not leave the club safely. Try again.' }); return; }
+	const before = user.athleteTenantConnections;
+	user.athleteTenantConnections = (Array.isArray(before) ? before : []).map((c) => (normalizeTenantId(c?.tenantId) === tenantKey ? { ...c, status: 'left', leftAt: new Date().toISOString() } : c));
+	try { persistAuthUsers(); } catch { user.athleteTenantConnections = before; res.status(503).json({ error: 'Could not save the change. Try again.' }); return; }
+	appendAuthAuditEvent({ action: 'athlete_left_club', req, status: 'success', target: username, details: { tenantId: tenantKey } });
+	res.status(200).json({ ok: true, left: tenantKey });
 });
 
 // Stopwatch / Assistant / Video results sent to the coach's club for review and import.
