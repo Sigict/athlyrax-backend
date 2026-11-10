@@ -1,6 +1,8 @@
-// AthlyraX private investor & strategic partner page.
+// AthlyraX investor & strategic partner presentation.
 //
-// Access is invitation-only and enforced on the server for BOTH the page and the video:
+// Viewing is open to anyone with the public /investor link; owner-only upload is unchanged.
+// Legacy individual invitations remain for backward compatibility, but are not required to view.
+// Previous invitation implementation:
 // - The software owner creates a personal invitation; its secret is shown once (only a SHA-256 hash
 //   is stored) and can be revoked at any time.
 // - The recipient opens /investor#t=<secret>. The secret travels in the URL fragment (never in server
@@ -82,15 +84,13 @@ export function registerInvestorAccess(app, { storageRoot, secret, requireStrict
 
   const denied = (res) => noStore(res).status(401).type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>AthlyraX · Private</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#031525;color:#d8ecf7;font:16px/1.6 Inter,Segoe UI,Arial,sans-serif}main{max-width:520px;padding:24px;text-align:center}img{width:190px}a{color:#65d5ef}</style></head><body><main><img src="/images/site/brand-lockup.png" alt="AthlyraX"><h1 style="font-size:22px">This private page needs a personal invitation</h1><p>Open the invitation link you received by email. If it no longer works, it may have expired or been withdrawn.</p><p><a href="mailto:athlyrax@outlook.com?subject=AthlyraX%20investor%20page%20access">Contact AthlyraX</a></p></main></body></html>`);
 
+  // One reusable investor URL, openable directly from Outlook. Upload remains owner-only.
+  // No visitor account, personal invitation, expiry date or password is required.
   app.get('/investor/page', (req, res) => {
-    const inv = sessionInvite(req);
-    if (!inv) { denied(res); return; }
-    noStore(res).set('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'").type('html').send(investorPageHtml({ name: inv.name, hasVideo: videoBytes() > 0 }));
+    noStore(res).set('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'").type('html').send(investorPageHtml({ hasVideo: videoBytes() > 0 }));
   });
 
   app.get('/investor/video', (req, res) => {
-    const inv = sessionInvite(req);
-    if (!inv) { noStore(res).status(401).json({ error: 'A valid invitation is required.' }); return; }
     const size = videoBytes();
     if (!size) { noStore(res).status(404).json({ error: 'The video is not available yet.' }); return; }
     noStore(res).set({ 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Disposition': 'inline' });
@@ -170,11 +170,11 @@ export function investorPageHtml({ name = '', hasVideo = false } = {}) {
   const card = (t, b, tag) => `<div class="card"><div class="tag ${tag === 'Available' ? 'ok' : 'plan'}">${tag}</div><h3>${t}</h3><p>${b}</p></div>`;
   const axes = ['Technical Control', 'Efficiency', 'Robustness of Efficiency', 'Aerobic Capacity', 'Anaerobic Capacity', 'Power &amp; Speed Expression', 'Adaptability', 'Durability'];
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer">
-<title>AthlyraX · Private investor &amp; partner introduction</title><link rel="icon" href="/favicon.ico">
+<title>AthlyraX · Investor &amp; partner introduction</title><link rel="icon" href="/favicon.ico">
 <style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#031525;color:#edf8ff;font:16px/1.6 Inter,Segoe UI,Arial,sans-serif}a{color:#65d5ef}header,main,footer{max-width:1080px;margin:auto;padding:20px 24px}header{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid #214e65}header img{width:190px;height:auto}.private{font-size:12px;letter-spacing:.12em;color:#67d6f4;font-weight:800;text-transform:uppercase}h1{font-size:clamp(30px,5vw,54px);line-height:1.1;margin:18px 0}h2{font-size:clamp(22px,3vw,28px);margin:44px 0 10px}p{color:#c4dce9}.lead{font-size:clamp(17px,2.2vw,20px);max-width:820px}.video{border:1px solid #34718a;background:#082b42;border-radius:15px;padding:10px;margin-top:26px}video{width:100%;aspect-ratio:16/9;display:block;background:#000;border-radius:9px}.novideo{padding:40px 16px;text-align:center;color:#a9c7d8}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}.card{border:1px solid #265b76;background:#09293d;border-radius:12px;padding:16px}.card h3{margin:4px 0 6px;font-size:17px;color:#fff}.card p{margin:0;font-size:14px}.tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:6px}.tag.ok{background:#0f3d2e;color:#7ef0b8}.tag.plan{background:#3b3413;color:#ffd970}.axis{border:1px solid #265b76;border-radius:10px;padding:10px 12px;background:#072236;font-weight:700;font-size:14px}.axis span{display:block;color:#65d5ef;font-size:12px}.action{display:inline-block;background:#4ed4f2;color:#032131;text-decoration:none;padding:13px 22px;border-radius:9px;font-weight:800;margin-top:8px}.note{font-size:13px;color:#9bbccc}footer{border-top:1px solid #285671;font-size:12px;color:#9bbccc;margin-top:40px}button.leave{background:none;border:1px solid #34718a;color:#c4dce9;border-radius:8px;padding:6px 10px;cursor:pointer}@media(max-width:820px){.grid,.grid.four{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.grid,.grid.two,.grid.four{grid-template-columns:1fr}header img{width:150px}}</style></head>
-<body><header><img src="/images/site/brand-lockup.png" alt="AthlyraX"><span class="private">Private · ${name ? `for ${esc(name)}` : 'by invitation'}</span></header>
+<body><header><img src="/images/site/brand-lockup.png" alt="AthlyraX"><span class="private">Investor &amp; partner presentation</span></header>
 <main>
-<div class="private">For invited investors &amp; strategic partners</div>
+<div class="private">For investors &amp; strategic partners</div>
 <h1>Effortless data collection. One coherent picture of the athlete.</h1>
 <p class="lead">AthlyraX connects training, testing and competition into one evidence-based view of athlete development. It starts in swimming, with a coaching platform, poolside tools, an athlete app, video analysis and coach education already in use.</p>
 <div class="video" id="video">${hasVideo ? '<video controls playsinline preload="metadata" controlslist="nodownload" src="/api/investor/video" data-testid="investor-video">Your browser cannot play this video.</video>' : '<div class="novideo" data-testid="investor-video-missing">The introduction video is being prepared and will appear here.</div>'}</div>
@@ -217,6 +217,6 @@ ${card('Other sports', 'The training–testing–competition method and the capa
 <a class="action" href="mailto:athlyrax@outlook.com?subject=AthlyraX%20investment%20and%20partnership" data-testid="investor-contact">Contact AthlyraX</a>
 <p class="note">Product descriptions reflect what is available today; items marked Planned are not yet available.</p>
 </main>
-<footer><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><span>Private presentation for the invited recipient. Please do not forward. © AthlyraX.</span><button class="leave" type="button" onclick="fetch('/api/investor/leave',{method:'POST',credentials:'same-origin'}).then(()=>location.replace('/'))">Close and sign out</button></div></footer>
+<footer><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><span>AthlyraX investor and partnership introduction. © AthlyraX.</span></div></footer>
 </body></html>`;
 }
