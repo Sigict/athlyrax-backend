@@ -164,7 +164,7 @@ try {
 try {
   const inv = await import(path.join(ROOT, 'athlete-account-invites.mjs'));
   const c = inv.createAthleteInvite({ swimmers: [{ id: 's1', firstName: 'A', dob: '2014-01-01' }] }, { swimmerId: 's1', tenantKey: 't', actor: 'c', targetEmail: 'a@example.com', guardianEmail: 'g@example.com' });
-  const extra = ['guardianCode', 'guardianConsent', 'delivery', 'deliveries', 'bulkRequestId', 'guardianManageCode'].filter((f) => allSrc.includes(f));
+  const extra = ['guardianCode', 'guardianConsent', 'delivery', 'deliveries', 'bulkRequestId', 'guardianManageCode', 'guardianAccountCode'].filter((f) => allSrc.includes(f));
   fieldSources.athleteAccountInvites = { fields: [...new Set([...Object.keys(c.invite), ...extra])].sort(), nested: {}, source: 'athlete-account-invites.mjs createAthleteInvite (+ fields added by later steps)' };
 } catch (e) { console.error('invite fields unavailable:', e.message); }
 for (const c of collectionList) { const f = fieldSources[c.name]; c.fields = f ? f.fields : []; c.nestedFields = f ? f.nested : {}; c.fieldsSource = f ? f.source : 'no record builder found in code; fields are written by the Coaching Software forms'; }
