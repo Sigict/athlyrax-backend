@@ -64,6 +64,9 @@ jobs:
       - name: Independent swimmer sign-up email verification
         run: node --test tests/independent-swimmer-verify.integration.test.mjs
 
+      - name: One account with several roles (coach, swimmer, parent/guardian)
+        run: node --test tests/multi-role-accounts.integration.test.mjs
+
       - name: Private investor page (invitation-only page and video, revocation)
         run: node --test tests/investor-access.test.mjs
 
