@@ -4763,7 +4763,7 @@ app.post('/athlete-invites/preview', requireLoginRateLimit, (req, res) => {
 	const invite = t ? resolveInvite(db, parsed, parsed.kind) : null;
 	if (!invite) { res.status(404).json({ error: 'This invitation link is not valid.' }); return; }
 	const row = (Array.isArray(db.swimmers) ? db.swimmers : []).find((s) => String(s?.id) === String(invite.swimmerId)) || {};
-	res.status(200).json({ ok: true, kind: parsed.kind, status: inviteStatus(invite), club: clubDisplayName(t.key), swimmerFirstName: String(row.firstName || swimmerDisplayName(row).split(' ')[0] || ''), expiresAt: invite.expiresAt, guardianRequired: invite.guardianRequired === true, guardianConsented: Boolean(invite.guardianConsent), emailRestricted: Boolean(invite.targetEmail), consentVersion: GUARDIAN_CONSENT_VERSION });
+	res.status(200).json({ ok: true, kind: parsed.kind, status: inviteStatus(invite), club: clubDisplayName(t.key), swimmerFirstName: String(row.firstName || swimmerDisplayName(row).split(' ')[0] || ''), expiresAt: invite.expiresAt, guardianRequired: invite.guardianRequired === true, guardianConsented: Boolean(invite.guardianConsent), emailRestricted: Boolean(invite.targetEmail), guardianHasLogin: parsed.kind === 'guardian' && authUsers.some((u) => String(u?.email || '').trim().toLowerCase() === String(invite.guardianEmail || '').trim().toLowerCase()), consentVersion: GUARDIAN_CONSENT_VERSION });
 });
 
 // Public: a one-time verification code is emailed to the parent/guardian address the club specified.
@@ -4797,6 +4797,22 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 	const parsed = parseInviteToken(req.body?.token);
 	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
 	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
+	// Existing coach/parent accounts use the same credentials for guardian access.
+	// Only a verified parent with no AthlyraX account may create a first login.
+	const wantsGuardianLogin = req.body?.createGuardianLogin === true;
+	const guardianInvite = resolveInvite(readJsonFile(t.paths.dbPath) || {}, parsed, 'guardian');
+	const guardianAddress = String(guardianInvite?.guardianEmail || '').trim().toLowerCase();
+	if (wantsGuardianLogin) {
+		if (!guardianInvite || guardianInvite.guardianConsent) {
+			res.status(409).json({ error: 'This authorisation has already been completed. Sign in to an existing parent account or contact the club.' }); return;
+		}
+		if (authUsers.some((u) => String(u?.email || '').trim().toLowerCase() === guardianAddress)) {
+			res.status(409).json({ error: 'An AthlyraX account already uses the parent email. Use that account and its existing password, or reset the password; no duplicate parent account is needed.' }); return;
+		}
+		if (String(req.body?.guardianPassword || '').length < 10) {
+			res.status(400).json({ error: 'Choose a parent account password of at least 10 characters.' }); return;
+		}
+	}
 	const out = await mutateAthleteTenantDb(t.paths, (db) => {
 		const r = recordGuardianConsent(db, parsed, { ...req.body, ip: req.ip, codeKey: ATHLETE_GUARDIAN_CODE_KEY });
 		return r.already ? { ...r, db: null } : r;
@@ -4807,6 +4823,39 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 		return;
 	}
 	appendAuthAuditEvent({ action: 'athlete_invite_guardian_consent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key, relationship: out.invite.guardianConsent?.relationship, verifiedBy: 'email-code' } });
+	let guardianLogin = '';
+	if (wantsGuardianLogin && !out.already) {
+		const email = String(out.invite.guardianEmail || '').toLowerCase();
+		if (authUsers.some((u) => String(u?.email || '').trim().toLowerCase() === email)) {
+			guardianLogin = 'existing';
+		} else {
+			const username = `guardian-${crypto.randomBytes(6).toString('hex')}`;
+			const newParent = {
+				username, role: 'guardian', tenantId: 'global-guardian', clubId: 'global-guardian',
+				passwordHash: hashPassword(req.body.guardianPassword), tokenValidAfter: 0,
+				createdVia: 'athlete-guardian-consent', createdAt: new Date().toISOString(),
+				fullName: String(out.invite.guardianConsent?.name || ''), email,
+				guardianVerifiedEmail: email, guardianVerifiedAt: new Date().toISOString(),
+				isApproved: true, onboardingCompletedAt: new Date().toISOString(),
+				billing: getDefaultBillingState(),
+			};
+			authUsers.push(newParent);
+			try {
+				persistAuthUsers();
+				guardianLogin = 'created';
+				if (!req.auth) {
+					const session = issueAuthToken({ username, role: 'guardian' });
+					setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
+				}
+				appendAuthAuditEvent({ action: 'athlete_guardian_login_created', req, status: 'success', target: out.invite.id, details: { tenantId: t.key } });
+			} catch {
+				const ix = authUsers.indexOf(newParent);
+				if (ix >= 0) authUsers.splice(ix, 1);
+				guardianLogin = 'failed';
+				appendAuthAuditEvent({ action: 'athlete_guardian_login_creation_failed', req, status: 'error', target: out.invite.id, details: { tenantId: t.key } });
+			}
+		}
+	}
 	// Automatic invitations: the athlete link is created and emailed only now, after consent.
 	let athleteInvitation = ''; let athleteSentTo = '';
 	if (!out.already && out.invite.delivery === 'email') {
@@ -4830,7 +4879,7 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 			} catch { athleteInvitation = 'failed'; }
 		}
 	}
-	res.status(200).json({ ok: true, already: Boolean(out.already), ...(athleteInvitation ? { athleteInvitation, athleteSentTo } : {}) });
+	res.status(200).json({ ok: true, already: Boolean(out.already), ...(guardianLogin ? { guardianLogin } : {}), ...(athleteInvitation ? { athleteInvitation, athleteSentTo } : {}) });
 });
 
 // ATHLYRAX_GUARDIAN_MANAGED_ACCOUNTS_V1: a verified parent/guardian sets up a login (no email) for an
