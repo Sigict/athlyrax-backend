@@ -466,10 +466,18 @@ test('Send Again on a link-only invitation emails the guardian from the swimmer 
     assert.equal((await post(base, '/athlete-invites/guardian-consent', { token: gTok, name: 'Jane Foster', relationship: 'Parent', consent: true, consentVersion: 'athlete-app-guardian-consent-v2', code })).response.status, 200);
     // The athlete link goes to the Swimmer Email automatically.
     const aTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'amelia.f@example.com')));
-    assert.equal((await post(base, '/athlete-invites/accept', { token: aTok, username: 'amelia.foster', password: 'Athlete!Pass1234', fullName: 'Amelia Foster', email: 'amelia.f@example.com' })).response.status, 201);
+    // Parent-approved emailed invitation: swimmer only chooses a password.
+    // Client-supplied identity is not trusted or required.
+    const activated = await post(base, '/athlete-invites/accept', { token: aTok, activationOnly: true, password: 'Athlete!Pass1234', fullName: 'Wrong Name', email: 'impostor@example.com', username: 'attacker' });
+    assert.equal(activated.response.status, 201, JSON.stringify(activated.payload));
     const db = tenantDb(server);
     assert.equal(db.swimmers.length, 1, 'no duplicate swimmer');
-    assert.equal(db.swimmers[0].swimmerAccountUsername, 'amelia.foster');
+    assert.match(db.swimmers[0].swimmerAccountUsername, /^amelia.f-[a-f0-9]{8}$/);
+    const createdLogin = db.swimmers[0].swimmerAccountUsername;
+    const loginResult = await login(base, 'amelia.f@example.com', 'Athlete!Pass1234');
+    assert.ok(loginResult.cookie, 'swimmer has an independent login with the verified email');
+    assert.equal((await post(base, '/athlete-invites/accept', { token: aTok, activationOnly: true, password: 'Athlete!Pass1234' })).response.status, 409, 'cannot reuse the activation link');
+    assert.equal(tenantDb(server).swimmers[0].swimmerAccountUsername, createdLogin, 'replay does not reassign existing swimmer');
     assert.deepEqual(db.tests.map((t) => [t.id, t.swimmerId, t.time]), [['t-am', 'amelia', '1:05.00']]);
     assert.equal(db.swimmers[0].primaryContactEmail, 'jane.foster@example.com');
   } finally { await server.stop(); }
