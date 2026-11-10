@@ -13,7 +13,9 @@ function target(db, parsed, now) {
   const inv = resolveInvite(db, parsed, 'guardian');
   if (!inv) return { ok: false, status: 404, error: 'Invalid parent link.' };
   const status = inviteStatus(inv, now.getTime());
-  if (status === 'expired' || status === 'revoked') return { ok: false, status: 410, error: 'This parent link has expired or been revoked. Ask the club for a new one.' };
+  if (status === 'expired' || status === 'revoked' || !(Date.parse(inv.expiresAt) > now.getTime())) {
+    return { ok: false, status: 410, error: 'This parent link has expired or been revoked. Ask the club for a new one.' };
+  }
   if (!inv.guardianConsent?.at || inv.guardianConsent?.verifiedBy !== 'email-code') {
     return { ok: false, status: 403, error: 'Verified parental authorisation is required first.' };
   }
