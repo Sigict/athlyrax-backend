@@ -1,4 +1,4 @@
-// Private investor page: invitation-only on the server for the page and the video; revocable.
+// One reusable investor link; owner-only upload and legacy invitation management.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,14 +20,16 @@ async function server({ owner = true } = {}) {
 }
 const j = (r) => r.json();
 
-test('page and video require a valid, non-revoked invitation; owner-only management; video served with ranges', async () => {
+test('investor page and video share one URL; only owner manages uploads; video supports ranges', async () => {
   const s = await server();
   try {
-    // Without an invitation nothing is served.
+    // Everyone can view the presentation without an invitation, expiry or login.
     let r = await fetch(`${s.base}/investor/page`);
-    assert.equal(r.status, 401); assert.match(r.headers.get('x-robots-tag'), /noindex/);
-    assert.ok(!(await r.text()).includes('Eight capability axes'));
-    assert.equal((await fetch(`${s.base}/investor/video`)).status, 401);
+    assert.equal(r.status, 200); assert.match(r.headers.get('x-robots-tag'), /noindex/);
+    const publicHtml = await r.text();
+    assert.match(publicHtml, /Eight capability axes/);
+    assert.doesNotMatch(publicHtml, /for Pat Investor|needs a personal invitation|Close and sign out/);
+    assert.equal((await fetch(`${s.base}/investor/video`)).status, 404, 'video is not uploaded yet');
     // Only the software owner manages invitations and the video.
     assert.equal((await fetch(`${s.base}/owner/investor/invites`)).status, 401);
     assert.equal((await fetch(`${s.base}/owner/investor/invites`, { headers: { 'x-test-user': 'coach', 'x-test-role': 'head-coach' } })).status, 403);
@@ -39,8 +41,10 @@ test('page and video require a valid, non-revoked invitation; owner-only managem
     assert.ok(!stored.includes(token.split('.').pop()), 'only a hash of the secret is stored');
     // Wrong or tampered tokens are refused.
     assert.equal((await fetch(`${s.base}/investor/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token.slice(0, -2) + 'AA' }) })).status, 404);
-    // A forged cookie is refused.
-    assert.equal((await fetch(`${s.base}/investor/page`, { headers: { cookie: `athlyrax_investor=${created.invite.id}.1700000000000.${'A'.repeat(43)}` } })).status, 401);
+    // Even a forged cookie does not change the public presentation heading.
+    const forged = await fetch(`${s.base}/investor/page`, { headers: { cookie: `athlyrax_investor=${created.invite.id}.1700000000000.${'A'.repeat(43)}` } });
+    assert.equal(forged.status, 200);
+    assert.doesNotMatch(await forged.text(), /for Pat Investor/);
     r = await fetch(`${s.base}/investor/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
     assert.equal(r.status, 200);
     const set = r.headers.get('set-cookie'); assert.match(set, /athlyrax_investor=/); assert.match(set, /HttpOnly/i);
@@ -48,7 +52,7 @@ test('page and video require a valid, non-revoked invitation; owner-only managem
     r = await fetch(`${s.base}/investor/page`, { headers: { cookie } });
     assert.equal(r.status, 200);
     const html = await r.text();
-    assert.ok(html.includes('Eight capability axes') && html.includes('Pat Investor') && html.includes('mailto:athlyrax@outlook.com'));
+    assert.ok(html.includes('Eight capability axes') && !html.includes('Pat Investor') && html.includes('mailto:athlyrax@outlook.com'));
     assert.ok(html.includes('investor-video-missing'), 'no video yet');
     assert.equal((await fetch(`${s.base}/investor/video`, { headers: { cookie } })).status, 404);
     // Owner uploads the MP4 in chunks; non-MP4 refused.
@@ -59,20 +63,21 @@ test('page and video require a valid, non-revoked invitation; owner-only managem
     assert.ok((await (await fetch(`${s.base}/investor/page`, { headers: { cookie } })).text()).includes('src="/api/investor/video"'));
     r = await fetch(`${s.base}/investor/video`, { headers: { cookie, range: 'bytes=0-99' } });
     assert.equal(r.status, 206); assert.equal(r.headers.get('content-range'), 'bytes 0-99/3000'); assert.equal((await r.arrayBuffer()).byteLength, 100);
-    assert.equal((await fetch(`${s.base}/investor/video`)).status, 401, 'video still needs the invitation');
-    // The owner sees who opened it; revoking stops the page and video at once for that browser.
+    assert.equal((await fetch(`${s.base}/investor/video`)).status, 200, 'all recipients can view the same uploaded video');
+    // Legacy invitation records can still be revoked, but no longer gate the public presentation.
     const list = await j(await fetch(`${s.base}/owner/investor/invites`, { headers: s.ownerH }));
     assert.equal(list.invites[0].opens, 1); assert.equal(list.video.bytes, 3000); assert.ok(!JSON.stringify(list).includes('tokenHash'));
     assert.equal((await fetch(`${s.base}/owner/investor/invites/${created.invite.id}/revoke`, { method: 'POST', headers: s.ownerH })).status, 200);
-    assert.equal((await fetch(`${s.base}/investor/page`, { headers: { cookie } })).status, 401);
-    assert.equal((await fetch(`${s.base}/investor/video`, { headers: { cookie, range: 'bytes=0-9' } })).status, 401);
+    assert.equal((await fetch(`${s.base}/investor/page`, { headers: { cookie } })).status, 200);
+    assert.equal((await fetch(`${s.base}/investor/video`, { headers: { cookie, range: 'bytes=0-9' } })).status, 206);
     assert.equal((await fetch(`${s.base}/investor/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })).status, 404);
   } finally { await s.stop(); }
 });
 
-test('page content marks planned items and invents no figures', () => {
+test('page content has no personalised name, marks planned items and invents no figures', () => {
   const html = investorPageHtml({ name: '<b>x</b>', hasVideo: true });
-  assert.ok(!html.includes('<b>x</b>'), 'recipient name is escaped');
+  assert.ok(!html.includes('<b>x</b>'), 'recipient name does not appear');
+  assert.doesNotMatch(html, /private presentation for the invited recipient|Close and sign out/i);
   for (const t of ['Technical Control', 'Durability', 'Coaching Software', 'Athlete App', 'Video Analysis', 'Athlyra Education', 'Wearable integration', 'Other sports', 'Investment', 'Strategic partnership', 'Sergio Catania']) assert.ok(html.includes(t), t);
   assert.match(html, /tag plan">Planned<\/div><h3>Parent Portal/);
   assert.doesNotMatch(html, /\b\d{2,}\s*(clubs|customers|users)\b|revenue of|forecast of/i);
