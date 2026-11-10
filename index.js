@@ -22,6 +22,7 @@ import { buildClubResults, buildSelfReportedProgress, testProtocols } from './at
 import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
 import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
 import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
+import { issueGuardianAccountCode, verifyGuardianAccountCode } from './athlete-guardian-account-activation.mjs';
 import { savedContacts, applyContactChoice, supersedeLinkInvite, clubOverview, COACH_STATE_LABELS, buildInviteEmail, markAutoDelivery, rotateInviteToken, resendAllowed, recordDelivery, updateDelivery, newDeliveryId, applyDeliveryEvent, planBulkItem, dedupeBulkItems, BULK_MAX_ITEMS } from './athlete-invite-delivery.mjs';
 import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES, DuplicateSwimmerIdError, duplicateSwimmerIds, uniqueSwimmerRow } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
@@ -4880,6 +4881,73 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 		}
 	}
 	res.status(200).json({ ok: true, already: Boolean(out.already), ...(guardianLogin ? { guardianLogin } : {}), ...(athleteInvitation ? { athleteInvitation, athleteSentTo } : {}) });
+});
+
+// An already-authorised parent without an account can safely set a password later.
+// The original consent code has been consumed, so require a *fresh* email code.
+app.post('/athlete-invites/guardian-account-code', requireLoginRateLimit, async (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
+	const t = parsed?.kind === 'guardian' ? athleteTenantPaths(parsed.tenantKey) : null;
+	if (!t) { res.status(404).json({ error: 'Invalid parent invitation.' }); return; }
+	const db = readJsonFile(t.paths.dbPath) || {};
+	const inv = resolveInvite(db, parsed, 'guardian');
+	const email = String(inv?.guardianEmail || '').trim().toLowerCase();
+	if (!inv || !inv.guardianConsent?.at) { res.status(403).json({ error: 'Parent authorisation must be completed first.' }); return; }
+	if (authUsers.some((u) => String(u?.email || '').trim().toLowerCase() === email)) {
+		res.status(409).json({ error: 'An AthlyraX login already exists for this email. Use its existing password or the password-reset process.' }); return;
+	}
+	if (!guardianDeliveryMode()) { res.status(503).json({ error: 'Email verification is unavailable.' }); return; }
+	const out = await mutateAthleteTenantDb(t.paths, (db0) => issueGuardianAccountCode(db0, parsed, { codeKey: ATHLETE_GUARDIAN_CODE_KEY })).catch(() => null);
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'Unable to issue a code.' }); return; }
+	try {
+		await sendAthleteGuardianEmail(out.email, 'AthlyraX: set up your Parent / Guardian password', [
+			`Your code to activate your Parent / Guardian login is: ${out.code}`,
+			`It expires in ${GUARDIAN_CODE_TTL_MINUTES} minutes. If you did not request it, ignore this email.`,
+		]);
+	} catch { res.status(503).json({ error: 'The parent account code could not be emailed. Ask the club for help.' }); return; }
+	appendAuthAuditEvent({ action: 'athlete_guardian_account_code_sent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key } });
+	res.status(200).json({ ok: true, sentTo: maskEmail(out.email), expiresInMinutes: GUARDIAN_CODE_TTL_MINUTES });
+});
+app.post('/athlete-invites/guardian-account-activate', requireLoginRateLimit, async (req, res) => {
+	const parsed = parseInviteToken(req.body?.token);
+	const t = parsed?.kind === 'guardian' ? athleteTenantPaths(parsed.tenantKey) : null;
+	if (!t) { res.status(404).json({ error: 'Invalid parent invitation.' }); return; }
+	const password = String(req.body?.password || '');
+	if (password.length < 10) { res.status(400).json({ error: 'Choose a password of at least 10 characters.' }); return; }
+	const db = readJsonFile(t.paths.dbPath) || {};
+	const inv = resolveInvite(db, parsed, 'guardian');
+	const email = String(inv?.guardianEmail || '').trim().toLowerCase();
+	if (!inv || !inv.guardianConsent?.at) { res.status(403).json({ error: 'Verified parental authorisation is required.' }); return; }
+	if (authUsers.some((u) => String(u?.email || '').trim().toLowerCase() === email)) {
+		res.status(409).json({ error: 'An AthlyraX login already exists for this email. Use its existing password.' }); return;
+	}
+	const out = await mutateAthleteTenantDb(t.paths, (db0) => verifyGuardianAccountCode(db0, parsed, req.body?.code, { codeKey: ATHLETE_GUARDIAN_CODE_KEY })).catch(() => null);
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'Could not verify parent account code.' }); return; }
+	if (authUsers.some((u) => String(u?.email || '').trim().toLowerCase() === email)) {
+		res.status(409).json({ error: 'An account was already created for this email. Sign in instead.' }); return;
+	}
+	const username = `guardian-${crypto.randomBytes(6).toString('hex')}`;
+	const newParent = {
+		username, role: 'guardian', tenantId: 'global-guardian', clubId: 'global-guardian',
+		passwordHash: hashPassword(password), tokenValidAfter: 0,
+		createdVia: 'athlete-guardian-consent', createdAt: new Date().toISOString(),
+		fullName: String(out.invite.guardianConsent?.name || ''), email,
+		guardianVerifiedEmail: email, guardianVerifiedAt: new Date().toISOString(),
+		isApproved: true, onboardingCompletedAt: new Date().toISOString(),
+		billing: getDefaultBillingState(),
+	};
+	authUsers.push(newParent);
+	try { persistAuthUsers(); }
+	catch {
+		const ix = authUsers.indexOf(newParent); if (ix >= 0) authUsers.splice(ix, 1);
+		res.status(503).json({ error: 'Your parent account could not be saved. Request a fresh code and try again.' }); return;
+	}
+	if (!req.auth) {
+		const session = issueAuthToken({ username, role: 'guardian' });
+		setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
+	}
+	appendAuthAuditEvent({ action: 'athlete_guardian_login_created_after_consent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key } });
+	res.status(201).json({ ok: true, guardianLogin: 'created' });
 });
 
 // ATHLYRAX_GUARDIAN_MANAGED_ACCOUNTS_V1: a verified parent/guardian sets up a login (no email) for an

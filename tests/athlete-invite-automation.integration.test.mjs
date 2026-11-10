@@ -496,3 +496,47 @@ test('Send Again on a link-only invitation emails the guardian from the swimmer 
     assert.equal(db.swimmers[0].primaryContactEmail, 'jane.foster@example.com');
   } finally { await server.stop(); }
 });
+
+test('a guardian who already consented can securely set their password later without another swimmer', async () => {
+  const server = await startServer({ AUTH_LOGIN_RATE_MAX_ATTEMPTS: '200', AUTH_LOGIN_RATE_IP_MAX_ATTEMPTS: '400' }, seedSquad);
+  const base = server.baseUrl;
+  try {
+    const coach = await login(base, 'coachA', 'CoachA!Pass1234');
+    const invite = await post(base, '/coach/athlete-invites/bulk', {
+      requestId: 'late-parent-login-001',
+      items: [{ swimmerId: 'kid1', athleteEmail: 'kit@example.com', guardianEmail: 'kit.parent@example.com' }]
+    }, coach);
+    assert.equal(invite.response.status, 200, JSON.stringify(invite.payload));
+    const gTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'kit.parent@example.com')));
+    assert.equal((await post(base, '/athlete-invites/guardian-code', { token: gTok })).response.status, 200);
+    const firstCode = await waitFor(() => (mails(server).filter((m) => m.to === 'kit.parent@example.com')
+      .map((m) => (m.text.match(/verification code is: (\d{6})/) || [])[1]).filter(Boolean))[0]);
+    const consent = await post(base, '/athlete-invites/guardian-consent', {
+      token: gTok, name: 'Kit Parent', relationship: 'Father', code: firstCode,
+      consent: true, consentVersion: 'athlete-app-guardian-consent-v2'
+    });
+    assert.equal(consent.response.status, 200, JSON.stringify(consent.payload));
+    assert.equal(consent.payload.athleteInvitation, 'sent');
+    const before = tenantDb(server);
+    const consentAt = before.athleteAccountInvites.at(-1).guardianConsent.at;
+    assert.equal((await post(base, '/athlete-invites/preview', { token: gTok })).payload.guardianHasLogin, false);
+    const sent = await post(base, '/athlete-invites/guardian-account-code', { token: gTok });
+    assert.equal(sent.response.status, 200, JSON.stringify(sent.payload));
+    const secondCode = await waitFor(() => (mails(server).filter((m) => m.to === 'kit.parent@example.com')
+      .map((m) => (m.text.match(/Parent \/ Guardian login is: (\d{6})/) || [])[1]).filter(Boolean))[0]);
+    const wrong = await post(base, '/athlete-invites/guardian-account-activate', {
+      token: gTok, code: secondCode === '000000' ? '111111' : '000000', password: 'Parent!Pass1234'
+    });
+    assert.equal(wrong.response.status, 403);
+    const activated = await post(base, '/athlete-invites/guardian-account-activate', { token: gTok, code: secondCode, password: 'Parent!Pass1234' });
+    assert.equal(activated.response.status, 201, JSON.stringify(activated.payload));
+    const parent = await login(base, 'kit.parent@example.com', 'Parent!Pass1234');
+    assert.equal((await request(base, '/guardian/children', parent)).response.status, 200);
+    assert.equal((await post(base, '/athlete-invites/guardian-account-code', { token: gTok })).response.status, 409, 'cannot duplicate parent login');
+    const after = tenantDb(server);
+    assert.equal(after.swimmers.length, before.swimmers.length);
+    assert.equal(after.athleteAccountInvites.at(-1).guardianConsent.at, consentAt, 'original consent evidence preserved');
+    assert.deepEqual(after.tests, before.tests, 'training results untouched');
+    assert.equal(mails(server).filter((m) => m.to === 'kit@example.com').length, 1, 'swimmer not invited twice');
+  } finally { await server.stop(); }
+});
