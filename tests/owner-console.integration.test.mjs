@@ -141,7 +141,7 @@ test('Owner Console: owner only; reports from stored records; health checks run;
   const seed = (paths) => writeJson(path.join(paths.storageRoot, 'tenants', 'tenant-a', 'db.json'), { swimmers: [{ id: 'ad1', firstName: 'Ada', lastName: 'Long', dob: '1990-01-01' }] });
   const off = await startServer({}, seed);
   try { assert.equal((await fetch(`${off.baseUrl}/webhooks/resend/athlete-invites`, { method: 'POST', body: '{}' })).status, 404, 'webhook off without a secret'); } finally { await off.stop(); }
-  const server = await startServer({ RESEND_WEBHOOK_SECRET: secret }, seed);
+  const server = await startServer({ RESEND_WEBHOOK_SECRET: secret, ATHLYRAX_OPS_INTEGRITY_DELAY_MS: '300' }, seed);
   const base = server.baseUrl;
   try {
     const owner = await loginAs(base, 'softwareowner', 'Owner!Pass1234'); const coach = await loginAs(base, 'coachA', 'CoachA!Pass1234');
@@ -170,11 +170,47 @@ test('Owner Console: owner only; reports from stored records; health checks run;
     assert.equal(ok.status, 200); assert.equal((await ok.json()).matched, true);
     sum = await getAs(base, '/owner/console/summary?days=7', owner);
     assert.equal(sum.j.invitations.deliveries.delivered, 1); assert.equal(sum.j.webhooks.resend.received, 2);
+    // A later event for the same Resend email (2 hours after sending) matches by the stored email id.
+    const sendLater = async (type, createdAt) => {
+      const b = JSON.stringify({ type, created_at: createdAt, data: { to: ['ada@example.com'], email_id: 'x' } });
+      const i = 'msg_' + crypto.randomBytes(6).toString('hex'); const t = String(Math.floor(Date.now() / 1000));
+      const sg = crypto.createHmac('sha256', Buffer.from(secret.slice(6), 'base64')).update(`${i}.${t}.${b}`).digest('base64');
+      return (await fetch(`${base}/webhooks/resend/athlete-invites`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'svix-id': i, 'svix-timestamp': t, 'svix-signature': 'v1,' + sg }, body: b })).json();
+    };
+    assert.equal((await sendLater('email.bounced', new Date(Date.now() + 2 * 3600000).toISOString())).matched, true, 'late event matched by Resend email id');
+    // A wrong password is a rejected sign-in, not a software error.
+    await post(base, '/auth/login', { username: 'coachA', password: 'wrong-password-1' });
+    sum = await getAs(base, '/owner/console/summary?days=7', owner);
+    assert.ok(sum.j.failures.userRejections >= 1); assert.equal(sum.j.failures.systemFailures, 0);
+    assert.ok(sum.j.failures.items.every((x) => !('ip' in x) && !('actor' in x)));
+    assert.equal(sum.j.clubData.available, true); assert.equal(sum.j.clubData.failing, 0);
+    assert.ok(sum.j.invitations.checks && typeof sum.j.invitations.checks.duplicateOpenInvitations === 'number');
+    assert.ok(sum.j.stripeModes && sum.j.stripeModes.coaching.mode === 'unknown');
     const health = await getAs(base, '/owner/console/health', owner);
     assert.equal(health.status, 200);
     const check = (name) => health.j.checks.find((c) => c.system.startsWith(name));
-    assert.equal(check('Database storage').status, 'ok'); assert.equal(check('Club data').status, 'ok'); assert.equal(check('Email delivery confirmation').status, 'ok');
+    assert.equal(check('Storage').status, 'healthy'); assert.equal(check('Club databases').status, 'healthy'); assert.ok(['healthy', 'attention'].includes(check('Email delivery monitoring').status));
+    assert.equal(check('Recorded software errors').status, 'healthy', 'rejected sign-ins do not make the system unhealthy');
+    assert.equal(check('Stripe API (coaching').status, 'unavailable');
+    for (const c of health.j.checks) { assert.ok(health.j.statuses[c.status], `status ${c.status} explained`); assert.ok(c.detail && c.checkedAt); }
     const sales = await getAs(base, '/owner/console/sales?days=30', owner);
     assert.equal(sales.status, 200); assert.equal(sales.j.coaching.available, false, 'no Stripe in tests: unavailable, not zero');
+    // A club folder without a saved database is reported as such; an invalid database makes the check fail and names the club.
+    const clubsDir = path.join(server.paths.storageRoot, 'tenants');
+    // The preserved pre-migration container tenants/clubs is listed separately, never as a failing club.
+    fs.mkdirSync(path.join(clubsDir, 'clubs', 'old-club'), { recursive: true }); fs.writeFileSync(path.join(clubsDir, 'clubs', 'old-club', 'db.json'), '{}');
+    fs.mkdirSync(path.join(clubsDir, 'tenant-folder-only'), { recursive: true });
+    let h2 = await getAs(base, '/owner/console/health', owner);
+    let cd = h2.j.checks.find((c) => c.system === 'Club databases');
+    assert.equal(cd.status, 'healthy'); assert.match(cd.detail, /no saved data yet/); assert.match(cd.detail, /Not counted: tenants\/clubs \(preserved pre-migration copy, 1 club folder\)/); assert.ok(!cd.clubs.some((c) => c.id === 'clubs'));
+    fs.mkdirSync(path.join(clubsDir, 'tenant-broken'), { recursive: true }); fs.writeFileSync(path.join(clubsDir, 'tenant-broken', 'db.json'), '{"swimmers":[{"name":"Hidden"}');
+    h2 = await getAs(base, '/owner/console/health', owner); cd = h2.j.checks.find((c) => c.system === 'Club databases');
+    assert.equal(cd.status, 'failing'); assert.match(cd.detail, /tenant-broken/); assert.ok(!JSON.stringify(h2.j).includes('Hidden'));
+    assert.equal(fs.readFileSync(path.join(clubsDir, 'tenant-broken', 'db.json'), 'utf8'), '{"swimmers":[{"name":"Hidden"}', 'not modified');
+    // The start-up integrity log names states and counts only (no names, emails or file content).
+    for (let i = 0; i < 50 && !/\[ops-integrity\] stripe/.test(server.output()); i += 1) await new Promise((r) => setTimeout(r, 200));
+    const log = server.output();
+    assert.match(log, /\[ops-integrity\] club-data folders=\d+ readable=\d+/); assert.match(log, /\[ops-integrity\] audit-7d software=\d+/); assert.match(log, /\[ops-integrity\] stripe coaching=unavailable/);
+    assert.ok(!/ada@example\.com|Hidden|tenant-a=|coachA/.test(log.split('\n').filter((l) => l.includes('[ops-integrity]')).join('\n')), 'no personal data or raw club ids in the integrity log');
   } finally { await server.stop(); }
 });
