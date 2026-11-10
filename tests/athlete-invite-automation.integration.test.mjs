@@ -463,7 +463,21 @@ test('Send Again on a link-only invitation emails the guardian from the swimmer 
     const gTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'jane.foster@example.com')));
     assert.equal((await post(base, '/athlete-invites/guardian-code', { token: gTok })).response.status, 200);
     const code = await waitFor(() => (mails(server).filter((x) => x.to === 'jane.foster@example.com').map((x) => (x.text.match(/verification code is: (\d{6})/) || [])[1]).filter(Boolean))[0]);
-    assert.equal((await post(base, '/athlete-invites/guardian-consent', { token: gTok, name: 'Jane Foster', relationship: 'Parent', consent: true, consentVersion: 'athlete-app-guardian-consent-v2', code })).response.status, 200);
+    const parentPreview = await post(base, '/athlete-invites/preview', { token: gTok });
+    assert.equal(parentPreview.response.status, 200);
+    assert.equal(parentPreview.payload.guardianHasLogin, false);
+    const consentResult = await post(base, '/athlete-invites/guardian-consent', {
+      token: gTok, name: 'Jane Foster', relationship: 'Parent',
+      consent: true, consentVersion: 'athlete-app-guardian-consent-v2', code,
+      createGuardianLogin: true, guardianPassword: 'Guardian!Pass1234',
+    });
+    assert.equal(consentResult.response.status, 200, JSON.stringify(consentResult.payload));
+    assert.equal(consentResult.payload.guardianLogin, 'created');
+    assert.equal(consentResult.payload.athleteInvitation, 'sent', 'parent sees truthful activation-email confirmation');
+    const parentLogin = await login(base, 'jane.foster@example.com', 'Guardian!Pass1234');
+    const children = await request(base, '/guardian/children', parentLogin);
+    assert.equal(children.response.status, 200, JSON.stringify(children.payload));
+    assert.deepEqual(children.payload.children.map((c) => c.swimmerFirstName), ['Amelia']);
     // The athlete link goes to the Swimmer Email automatically.
     const aTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'amelia.f@example.com')));
     // Parent-approved emailed invitation: swimmer only chooses a password.
