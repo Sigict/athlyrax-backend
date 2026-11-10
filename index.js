@@ -14,6 +14,7 @@ import { registerCpdModule02 } from './cpd-module02.mjs';
 import { registerCpdModule03 } from './cpd-module03.mjs';
 import { registerCpdModule03Uploads } from './cpd-module03-uploads.mjs';
 import { registerInvestorAccess } from './investor-access.mjs';
+import { accountsReport, invitationsReport, auditFailures, stripeSalesReport, priceCheck, createWebhookLog, webhookSummary, DELIVERY_BUCKETS, PERIODS } from './owner-console.mjs';
 import { registerCpdModule03Preview } from './cpd-module03-preview.mjs';
 import { registerResultsInbox } from './results-inbox.mjs';
 import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraining, personalTrainingPath } from './athlete-personal-training.mjs';
@@ -285,6 +286,9 @@ if (stripeClient && BILLING_ENFORCED) {
 	console.info('[billing] Subscription enforcement is enabled for write operations.');
 }
 
+// Receipt log of payment and email-provider webhooks (type, live/test, outcome, time; no payloads).
+const opsWebhookLog = createWebhookLog(STORAGE_ROOT);
+
 app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
 	if (!stripeClient) {
 		res.status(200).json({ ok: true, skipped: 'stripe_not_configured' });
@@ -302,6 +306,7 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 			event = JSON.parse(rawBody);
 		}
 	} catch (error) {
+		opsWebhookLog.record('stripe', { type: 'invalid-signature-or-payload', ok: false });
 		res.status(400).json({ error: 'Invalid webhook payload.', details: error instanceof Error ? error.message : 'Unknown error' });
 		return;
 	}
@@ -367,10 +372,57 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 				break;
 		}
 
+		opsWebhookLog.record('stripe', { type: String(event?.type || '').slice(0, 80), livemode: event?.livemode === true, ok: true });
 		res.status(200).json({ received: true });
 	} catch (error) {
+		opsWebhookLog.record('stripe', { type: String(event?.type || '').slice(0, 80), livemode: event?.livemode === true, ok: false });
 		res.status(500).json({ error: 'Webhook handling failed.', details: error instanceof Error ? error.message : 'Unknown error' });
 	}
+});
+
+// Resend delivery events for invitation emails (Svix-signed). Off (404) until RESEND_WEBHOOK_SECRET is
+// set. Resend's SMTP send does not return its email id to us, so an event is matched to the most
+// recent invitation email to the same recipient within 30 minutes before the event; anything that
+// cannot be matched is recorded as unmatched, never guessed.
+const RESEND_WEBHOOK_SECRET = String(process.env.RESEND_WEBHOOK_SECRET || '').trim();
+function verifySvixSignature(rawBody, headers, secret) {
+	const id = String(headers['svix-id'] || ''); const ts = String(headers['svix-timestamp'] || ''); const sigs = String(headers['svix-signature'] || '');
+	if (!id || !/^\d+$/.test(ts) || !sigs || !secret.startsWith('whsec_')) return false;
+	if (Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+	const key = Buffer.from(secret.slice(6), 'base64');
+	const expected = crypto.createHmac('sha256', key).update(`${id}.${ts}.${rawBody}`).digest('base64');
+	return sigs.split(' ').some((part) => { const v = part.split(',')[1] || ''; return v.length === expected.length && crypto.timingSafeEqual(Buffer.from(v), Buffer.from(expected)); });
+}
+const RESEND_EVENT_STATUS = { 'email.sent': 'sent', 'email.delivered': 'delivered', 'email.delivery_delayed': 'deferred', 'email.bounced': 'bounced', 'email.complained': 'failed', 'email.failed': 'failed' };
+app.post('/webhooks/resend/athlete-invites', express.raw({ type: '*/*', limit: '256kb' }), async (req, res) => {
+	if (!RESEND_WEBHOOK_SECRET) { res.status(404).end(); return; }
+	const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
+	if (!verifySvixSignature(raw, req.headers || {}, RESEND_WEBHOOK_SECRET)) { opsWebhookLog.record('resend', { type: 'invalid-signature', ok: false }); res.status(401).end(); return; }
+	let evt; try { evt = JSON.parse(raw); } catch { res.status(400).end(); return; }
+	const status = RESEND_EVENT_STATUS[String(evt?.type || '')];
+	const to = String((Array.isArray(evt?.data?.to) ? evt.data.to[0] : evt?.data?.to) || '').trim().toLowerCase();
+	const at = Date.parse(evt?.created_at || evt?.data?.created_at || '') || Date.now();
+	let matched = false;
+	if (status && to) {
+		for (const key of tenantKeysOnDisk()) {
+			const t = athleteTenantPaths(key); if (!t) continue;
+			try {
+				const out = await mutateAthleteTenantDb(t.paths, (db) => {
+					let best = null;
+					for (const inv of (db[ATHLETE_INVITE_COLLECTION] || [])) for (const d of (inv.deliveries || [])) {
+						if (String(d.to || '').toLowerCase() !== to) continue;
+						const sentAt = Date.parse(d.at || ''); if (!Number.isFinite(sentAt) || sentAt > at + 60000 || at - sentAt > 30 * 60000) continue;
+						if (!best || sentAt > best.sentAt) best = { inviteId: inv.id, deliveryId: d.id, sentAt };
+					}
+					if (!best) return { ok: false };
+					return { ok: true, db: updateDelivery(db, best.inviteId, best.deliveryId, { provider: 'smtp', status, error: status === 'bounced' || status === 'failed' ? String(evt?.data?.bounce?.message || evt?.type || '') : '' }) };
+				});
+				if (out?.ok) { matched = true; break; }
+			} catch {}
+		}
+	}
+	opsWebhookLog.record('resend', { type: String(evt?.type || '').slice(0, 60), ok: true, matched });
+	res.status(200).json({ ok: true, matched });
 });
 
 // This anonymous collection route must never inherit the larger application JSON body allowance.
@@ -3967,6 +4019,70 @@ registerInvestorAccess(app, {
 	isProduction: IS_PRODUCTION, siteUrl: String(process.env.ATHLYRAX_PUBLIC_SITE_URL || 'https://athlyrax.com').replace(/\/+$/, ''),
 });
 
+// ---------- Owner Console (read only, primary software owner) ----------
+const OWNER_CONSOLE_STARTED_AT = new Date().toISOString();
+const cpdStripeKey = String(process.env.CPD_STRIPE_SECRET_KEY || '').trim();
+const cpdStripeReadClient = cpdStripeKey && cpdStripeKey !== BILLING_STRIPE_SECRET_KEY ? new Stripe(cpdStripeKey) : null;
+const consoleDays = (req) => { const d = Number(req.query?.days); return Object.prototype.hasOwnProperty.call(PERIODS, String(d)) ? d : 30; };
+function consoleTenants() {
+	return tenantKeysOnDisk().map((key) => { const t = athleteTenantPaths(key); const db = t ? readJsonFile(t.paths.dbPath) : null; return db && typeof db === 'object' ? { tenantId: key, db } : null; }).filter(Boolean);
+}
+app.get('/owner/console/summary', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	const days = consoleDays(req);
+	let accounts; let invitations; let failures; let webhooks;
+	try { accounts = accountsReport(authUsers, { days, coachingRoles: COACHING_ROLES, isPrimarySwimmer: isPrimarySwimmerAccount, hasAthleteRole: hasSecondaryAthleteRole, guardianVerified }); } catch { accounts = { available: false, reason: 'Account store could not be read.' }; }
+	try { invitations = invitationsReport(consoleTenants(), { days, inviteStatus, maskEmail, clubName: (k) => clubDisplayName(k) || k, emailTenants: ATHLETE_INVITE_EMAIL_TENANTS, duplicateIdsOf: (db) => duplicateSwimmerIds(Array.isArray(db?.swimmers) ? db.swimmers : []) }); } catch { invitations = { available: false, reason: 'Club data could not be read.' }; }
+	try { failures = { available: true, ...auditFailures(readAuthAuditEvents(AUTH_AUDIT_FETCH_MAX_ROWS, {}), { days }) }; } catch { failures = { available: false, reason: 'Audit log could not be read.' }; }
+	const hooks = opsWebhookLog.read();
+	webhooks = { stripe: webhookSummary(hooks, 'stripe', { days }), resend: RESEND_WEBHOOK_SECRET ? webhookSummary(hooks, 'resend', { days }) : { available: false, reason: 'Resend delivery webhook not configured: email outcomes stop at "accepted by provider".' } };
+	let presence = null; try { presence = getAuthPresenceSummary(); } catch {}
+	res.status(200).json({
+		ok: true, days, periodLabel: PERIODS[days], generatedAt: new Date().toISOString(),
+		backend: { commit: String(process.env.RENDER_GIT_COMMIT || '').slice(0, 12) || null, startedAt: OWNER_CONSOLE_STARTED_AT },
+		connectedNow: presence ? { available: true, users: presence.connectedUsers?.length ?? null, byRole: presence.connectedByRole || {} } : { available: false, reason: 'Presence summary unavailable.' },
+		accounts, invitations, failures, webhooks,
+		email: { provider: AUTH_SMTP_HOST ? `SMTP (${AUTH_SMTP_HOST})` : (BREVO_API_KEY ? 'Brevo API' : 'not configured'), invitationSender: ATHLETE_INVITE_SENDER?.email || null, securitySender: String(AUTH_SMTP_FROM || '').replace(/^.*<|>.*$/g, '') || null, automaticInvitationClubs: ATHLETE_INVITE_EMAIL_TENANTS.length ? ATHLETE_INVITE_EMAIL_TENANTS : 'all', deliveryEventsConfigured: Boolean(RESEND_WEBHOOK_SECRET || BREVO_WEBHOOK_SECRET), buckets: DELIVERY_BUCKETS },
+	});
+});
+// Live checks; each result says what was checked and when. Nothing is written except a probe file.
+app.get('/owner/console/health', requireStrictAuth, requireSoftwareOwnerRole, async (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	const at = new Date().toISOString(); const checks = [];
+	const add = (system, status, detail, extra = {}) => checks.push({ system, status, detail, checkedAt: at, ...extra });
+	try { const probe = path.join(STORAGE_ROOT, 'ops', `.probe-${process.pid}`); fs.mkdirSync(path.dirname(probe), { recursive: true }); fs.writeFileSync(probe, at); fs.readFileSync(probe, 'utf8'); fs.unlinkSync(probe); add('Database storage (write/read)', 'ok', 'Probe file written, read back and removed.'); } catch { add('Database storage (write/read)', 'fail', 'Storage write/read probe failed.'); }
+	try { const tenants = consoleTenants(); const total = tenantKeysOnDisk().length; add('Club data (all clubs readable)', tenants.length === total ? 'ok' : 'fail', `${tenants.length} of ${total} club databases parsed.`); } catch { add('Club data (all clubs readable)', 'fail', 'Club databases could not be listed.'); }
+	add('Authentication (account store)', authUsers.length > 0 ? 'ok' : 'fail', `${authUsers.length} accounts loaded.`);
+	if (AUTH_SMTP_HOST && AUTH_SMTP_FROM) {
+		try { await Promise.race([getAuthResetMailTransport().verify(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))]); add('Transactional email (SMTP login)', 'ok', `Signed in to ${AUTH_SMTP_HOST}. Inbox delivery is only confirmed by delivery events.`); } catch { add('Transactional email (SMTP login)', 'fail', `Could not sign in to ${AUTH_SMTP_HOST}.`); }
+	} else add('Transactional email (SMTP login)', 'unavailable', 'SMTP is not configured.');
+	add('Email delivery confirmation', RESEND_WEBHOOK_SECRET || BREVO_WEBHOOK_SECRET ? 'ok' : 'unmonitored', RESEND_WEBHOOK_SECRET || BREVO_WEBHOOK_SECRET ? 'Provider delivery webhook configured.' : 'No provider webhook: delivered/bounced cannot be confirmed; "sent" means accepted by the provider only.');
+	add('Automatic invitation emails', ATHLETE_INVITE_EMAIL_TENANTS.length ? 'limited' : 'ok', ATHLETE_INVITE_EMAIL_TENANTS.length ? `Only for: ${ATHLETE_INVITE_EMAIL_TENANTS.join(', ')} (staged rollout). Other clubs get link invitations.` : 'Enabled for all clubs.');
+	if (stripeClient) { try { const acct = await stripeClient.accounts.retrieve(); add('Stripe API (subscriptions key)', 'ok', `Reachable; account ${String(acct.id || '').slice(0, 8)}…`); } catch (e) { add('Stripe API (subscriptions key)', 'fail', e?.statusCode === 401 ? 'Key rejected.' : 'Not reachable.'); } } else add('Stripe API (subscriptions key)', 'unavailable', 'Not configured.');
+	const hooks = opsWebhookLog.read(); const sh = webhookSummary(hooks, 'stripe', { days: 30 });
+	add('Stripe webhooks', sh.lastAt ? (sh.failed ? 'attention' : 'ok') : 'unmonitored', sh.lastAt ? `${sh.received} received in 30 days (${sh.failed} failed); last ${sh.lastType} at ${sh.lastAt}.` : 'No webhook received since receipt logging was added.', { lastSuccessAt: sh.lastAt, lastFailureAt: sh.lastFailureAt });
+	for (const mod of ['02', '03']) add(`CPD Module ${mod} sales`, String(process.env[`CPD_MODULE${mod}_SALES_ENABLED`] || '').toLowerCase() === 'true' ? 'ok' : 'off', String(process.env[`CPD_MODULE${mod}_SALES_ENABLED`] || '').toLowerCase() === 'true' ? 'Sales switch on; price configured: ' + (process.env[`CPD_MODULE${mod}_PRICE_ID`] ? 'yes' : 'no') + '.' : 'Sales switch off.');
+	let failures = null; try { failures = auditFailures(readAuthAuditEvents(AUTH_AUDIT_FETCH_MAX_ROWS, {}), { days: 7 }); } catch {}
+	add('Recorded errors (7 days)', failures ? (failures.total ? 'attention' : 'ok') : 'unavailable', failures ? `${failures.total} error outcomes in the audit log.` : 'Audit log unreadable.', failures ? { byCategory: failures.byAction, latest: failures.latest } : {});
+	add('Backend deployment', 'ok', `Commit ${String(process.env.RENDER_GIT_COMMIT || 'unknown').slice(0, 12)}; running since ${OWNER_CONSOLE_STARTED_AT}.`);
+	res.status(200).json({ ok: true, checkedAt: at, checks, notMonitoredHere: ['Website (Netlify) deploys: see the deploy workflow and the uptime workflow in GitHub Actions.', 'Coach Pool Console, Assistant and Athlete App front ends run in browsers: their saves appear in the audit and data checks above.'] });
+});
+// Payments: Stripe read only, live and test separate; configured prices compared with the code.
+app.get('/owner/console/sales', requireStrictAuth, requireSoftwareOwnerRole, async (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	const days = consoleDays(req);
+	const [coaching, cpd, prices] = await Promise.all([
+		stripeSalesReport(stripeClient, { days, label: 'subscriptions' }),
+		cpdStripeReadClient ? stripeSalesReport(cpdStripeReadClient, { days, label: 'CPD course' }) : Promise.resolve({ available: false, reason: 'CPD payments use the same Stripe key as subscriptions (included above).' }),
+		priceCheck(stripeClient, [
+			...Object.entries(COACHING_PLAN_RULES).map(([key, r]) => ({ product: r.label, key, expectedMinor: r.amountMinor, interval: 'month', priceId: process.env[`STRIPE_PRICE_${key.toUpperCase().replace('-', '_')}`] })),
+			...Object.entries(CAPACITY_ADDON_RULES).map(([key, r]) => ({ product: r.label, key, expectedMinor: r.amountMinor, interval: 'month', priceId: process.env[r.priceEnv] })),
+		]),
+	]);
+	const cpdPrices = await priceCheck(cpdStripeReadClient || stripeClient, ['02', '03'].map((m) => ({ product: `CPD 01 Module ${m}`, key: `cpd-module-${m}`, interval: 'one-time', salesEnabled: String(process.env[`CPD_MODULE${m}_SALES_ENABLED`] || '').toLowerCase() === 'true', priceId: process.env[`CPD_MODULE${m}_PRICE_ID`] })));
+	res.status(200).json({ ok: true, days, periodLabel: PERIODS[days], generatedAt: new Date().toISOString(), coaching, cpd, prices: [...prices, ...cpdPrices] });
+});
+
 // Module 03 private uploads and owner-only course preview remain isolated from learner records.
 registerCpdModule03Uploads(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
 registerCpdModule03Preview(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole });
@@ -4221,7 +4337,9 @@ function inviteMailProvider(tenantKey = '') {
 }
 function inviteMailStatus(tenantKey = '') {
 	const provider = inviteMailProvider(tenantKey);
-	return { available: Boolean(provider), provider, sender: ATHLETE_INVITE_SENDER?.email || (provider === 'console' ? 'development outbox' : ''), deliveryEvents: Boolean(BREVO_WEBHOOK_SECRET) };
+	// Delivery events exist only when the sending provider's webhook is configured.
+	const deliveryEvents = provider === 'brevo-api' ? Boolean(BREVO_WEBHOOK_SECRET) : provider === 'smtp' ? Boolean(RESEND_WEBHOOK_SECRET) : false;
+	return { available: Boolean(provider), provider, sender: ATHLETE_INVITE_SENDER?.email || (provider === 'console' ? 'development outbox' : ''), deliveryEvents };
 }
 // Sends one service email. Returns { provider, messageId }. Throws on failure (message has no secrets).
 async function sendInviteMail({ to, toName = '', replyTo = null, subject, text, html, tag = '', tenantKey = '' }) {

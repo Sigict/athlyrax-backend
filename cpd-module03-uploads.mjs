@@ -22,7 +22,8 @@ export function registerCpdModule03Uploads(app, { storageRoot, requireStrictAuth
       try { const stat = fs.statSync(file(n)); if (stat.isFile()) bytes = stat.size; } catch {}
       return { lesson: n, bytes };
     });
-    noStore(res).json({ module: 3, lessons, ready: lessons.every((l) => l.bytes > 1024), salesEnabled: false });
+    // Report the real sales switch (it was always reported as false, which contradicted production).
+    noStore(res).json({ module: 3, lessons, ready: lessons.every((l) => l.bytes > 1024), salesEnabled: String(process.env.CPD_MODULE03_SALES_ENABLED || '').trim().toLowerCase() === 'true' });
   });
 
   app.put(base + '/video/:lesson', requireStrictAuth, requireSoftwareOwnerRole,
