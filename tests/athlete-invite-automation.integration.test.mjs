@@ -358,7 +358,9 @@ test('guardian-managed login for an athlete without email: verified consent, sep
     assert.equal((await make(kitTok, 'kit.managed')).response.status, 409, 'athlete with own email accepts their own invitation');
     const athleteTok = linkIn(mails(server).find((x) => x.to === 'kit@example.com'));
     assert.equal((await make(athleteTok)).response.status, 404, 'an athlete link cannot create a managed login');
-    assert.equal((await make(louTok, 'lou.small', {}, coach)).response.status, 403, 'not while signed in to another account');
+    // A parent/guardian who is signed in (e.g. to their coaching account) is no longer turned away: the
+    // request reaches the normal checks, and the child's login is always a separate new account.
+    assert.equal((await make(louTok, 'lou.small', { password: 'short' }, coach)).response.status, 400, 'signed-in guardian reaches validation');
     assert.equal((await make(louTok, 'lou.small', { password: 'short' })).response.status, 400);
     const created = await make(louTok);
     assert.equal(created.response.status, 201, JSON.stringify(created.payload));

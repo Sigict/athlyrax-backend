@@ -1181,7 +1181,7 @@ function resolveStoragePathsForAuth(auth) {
 	}
 
 	const user = findAuthUser(String(auth?.username || '').trim()) || auth || {};
-	const tenantKey = resolveTenantKeyFromUser(user);
+	const tenantKey = auth?.athleteMode === true ? athleteHomeTenantOf(user) : resolveTenantKeyFromUser(user);
 	return resolveStoragePathsForTenantKey(tenantKey);
 }
 
@@ -1256,6 +1256,7 @@ function resolveStoragePathsForRequest(req) {
 
 function resolveAuthTenantId(auth) {
 	const user = findAuthUser(String(auth?.username || '').trim()) || auth || {};
+	if (auth?.athleteMode === true) return athleteHomeTenantOf(user);
 	return resolveTenantKeyFromUser(user);
 }
 
@@ -1743,6 +1744,26 @@ function resolveEffectiveAuthRole(user) {
 	return String(user?.role || 'viewer').trim() || 'viewer';
 }
 
+// ATHLYRAX_MULTI_ROLE_ACCOUNTS: one account (one email) can be a coach, an athlete and a parent/guardian.
+// - The account keeps its primary role. A coach can add an athlete role: their own swimmer identity in
+//   an athlete space (never one of the swimmers they coach). The session says which mode is active;
+//   athlete mode has exactly the swimmer permissions and reads only the athlete space.
+// - Guardian access is not a session role: it comes from parent/guardian consents given for the
+//   account's own (verified) email address.
+const ATHLETE_SPACE_TENANT = 'snapshot-public';
+const COACHING_ROLES = new Set(['software-owner', 'head-coach', 'assistant-coach', 'coach', 'viewer']);
+function isPrimarySwimmerAccount(user) {
+	return String(user?.role || '').trim().toLowerCase() === 'swimmer';
+}
+function hasSecondaryAthleteRole(user) {
+	return !isPrimarySwimmerAccount(user) && user?.athleteRole?.enabled === true && Boolean(normalizeTenantId(user?.athleteRole?.tenantId));
+}
+// The space that holds the account's own athlete identity (the primary space for swimmer accounts).
+function athleteHomeTenantOf(user) {
+	if (isPrimarySwimmerAccount(user)) return normalizeTenantId(user?.tenantId) || resolveTenantKeyFromUser(user);
+	return hasSecondaryAthleteRole(user) ? normalizeTenantId(user.athleteRole.tenantId) : '';
+}
+
 function buildAuthUserPayload(user) {
 	const normalizedUser = user && typeof user === 'object' ? user : {};
 	const access = buildBillingAccessForUser(normalizedUser);
@@ -2032,6 +2053,8 @@ function normalizeAuthUserRows(rows) {
 				...(Array.isArray(row?.athleteTenantConnections) && row.athleteTenantConnections.length ? { athleteTenantConnections: row.athleteTenantConnections.slice(-50).filter((c) => c && typeof c === 'object').map((c) => Object.fromEntries(['tenantId', 'clubId', 'clubName', 'status', 'source', 'connectedAt', 'revokedAt', 'revokedBy', 'leftAt'].filter((k) => c[k] !== undefined && c[k] !== null && c[k] !== '').map((k) => [k, String(c[k]).slice(0, 200)]))) } : {}),
 				...(row?.athleteInviteManaged === true ? { athleteInviteManaged: true } : {}),
 				...(row?.independentProfile && typeof row.independentProfile === 'object' ? { independentProfile: { tenantId: String(row.independentProfile.tenantId || '').slice(0, 120), swimmerId: String(row.independentProfile.swimmerId || '').slice(0, 120) } } : {}),
+				...(row?.athleteRole && typeof row.athleteRole === 'object' && row.athleteRole.enabled === true ? { athleteRole: { enabled: true, tenantId: String(row.athleteRole.tenantId || '').slice(0, 120), swimmerId: String(row.athleteRole.swimmerId || '').slice(0, 120), createdAt: String(row.athleteRole.createdAt || ''), source: String(row.athleteRole.source || '').slice(0, 40) } } : {}),
+				...(row?.guardianVerifiedEmail ? { guardianVerifiedEmail: String(row.guardianVerifiedEmail).slice(0, 254), guardianVerifiedAt: String(row.guardianVerifiedAt || '') } : {}),
 				// Guardian-managed Athlete App logins: the verified parent/guardian receives password resets.
 				...(row?.managedBy && typeof row.managedBy === 'object' ? { managedBy: Object.fromEntries(['guardianEmail', 'guardianName', 'relationship', 'inviteId', 'tenantId', 'consentAt'].map((k) => [k, String(row.managedBy[k] || '').trim()])) } : {}),
 			};
@@ -2231,6 +2254,7 @@ function issueAuthToken(user, options = {}) {
 	const payload = {
 		sub: String(user?.username || ''),
 		role: String(user?.role || 'viewer'),
+		...(options?.mode === 'athlete' ? { mode: 'athlete' } : {}),
 		csrf,
 		iat: issuedAt,
 		exp: issuedAt + AUTH_TOKEN_TTL_SECONDS,
@@ -2260,9 +2284,12 @@ function verifyAuthToken(token) {
 		const user = findAuthUser(payload.sub);
 		if (!user) return null;
 		if (payload.iat < getTokenValidAfter(user)) return null;
+		// Athlete mode of a coach account: swimmer permissions only, and only while the athlete role exists.
+		const athleteMode = payload.mode === 'athlete' && hasSecondaryAthleteRole(user);
 		return {
 			username: String(user.username),
-			role: resolveEffectiveAuthRole(user),
+			role: athleteMode ? 'swimmer' : resolveEffectiveAuthRole(user),
+			...(athleteMode ? { athleteMode: true, primaryRole: resolveEffectiveAuthRole(user) } : {}),
 			csrf: String(payload.csrf),
 			iat: Number(payload.iat),
 			exp: Number(payload.exp),
@@ -4590,7 +4617,8 @@ app.post('/athlete-invites/guardian-managed-account', requireLoginRateLimit, asy
 	const parsed = parseInviteToken(req.body?.token);
 	const t = parsed && parsed.kind === 'guardian' ? athleteTenantPaths(parsed.tenantKey) : null;
 	if (!t) { res.status(404).json({ error: 'This parent/guardian link is not valid.' }); return; }
-	if (req.auth) { res.status(403).json({ error: 'Sign out first: the athlete\'s login is created separately from any account you use.' }); return; }
+	// A parent/guardian who is signed in (for example to their coaching account) can create the child's
+	// login here: it is always a new, separate swimmer login and the guardian's own session is unchanged.
 	const username = String(req.body?.username || '').trim().toLowerCase();
 	const password = String(req.body?.password || '');
 	const fullName = String(req.body?.fullName || '').trim();
@@ -4685,7 +4713,17 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 	const t = parsed ? athleteTenantPaths(parsed.tenantKey) : null;
 	if (!t || parsed.kind !== 'athlete') { res.status(404).json({ error: 'This invitation link is not valid.' }); return; }
 	const signedIn = req.auth ? findAuthUser(String(req.auth.username || '').trim()) : null;
-	if (signedIn && String(signedIn.role || '').trim().toLowerCase() !== 'swimmer') { res.status(403).json({ error: 'Sign out of the coach account first: invitations link athlete accounts.' }); return; }
+	const signedInRole = String(signedIn?.role || '').trim().toLowerCase();
+	if (signedIn && signedInRole !== 'swimmer' && !COACHING_ROLES.has(signedInRole)) { res.status(403).json({ error: 'This account type cannot accept Athlete App invitations.' }); return; }
+	// A swimmer under 18 (guardian consent required) always gets their own login: their invitation can
+	// never become the personal athlete record of an adult account (a coach, or the parent/guardian).
+	const inviteRow = (readJsonFile(t.paths.dbPath)?.[ATHLETE_INVITE_COLLECTION] || []).find((i) => String(i?.id || '') === String(parsed.inviteId || '')) || null;
+	const childInvite = inviteRow?.guardianRequired === true;
+	const childNotice = 'This invitation is for a swimmer under 18, so it cannot be linked to your own account. Sign out, then create the swimmer\'s own login from this link; or, as the parent/guardian, create a login without email from your parent/guardian link.';
+	if (signedIn && childInvite && (signedInRole !== 'swimmer' || String(signedIn.email || '').trim().toLowerCase() === String(inviteRow.guardianEmail || '').trim().toLowerCase())) {
+		res.status(409).json({ error: childNotice, code: 'child-invitation-adult-account' });
+		return;
+	}
 	let account; let newUser = null;
 	if (signedIn) {
 		account = { username: String(signedIn.username), email: String(signedIn.email || '') };
@@ -4695,7 +4733,9 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		// invitation: the club record becomes the identity the Athlete App shows while connected; the
 		// independent profile is kept unchanged (never merged) and is shown again if they leave the club.
 		// Personal training is stored per account, so it stays available throughout.
-		const primary = normalizeTenantId(signedIn.tenantId);
+		// The account's own athlete space: the primary space for swimmer accounts, the athlete role's space
+		// for coaches (never the club they coach).
+		const primary = athleteHomeTenantOf(signedIn);
 		if (primary && primary !== t.key) {
 			const own = athleteTenantPaths(primary);
 			const ownDb = own ? readJsonFile(own.paths.dbPath) || {} : {};
@@ -4716,7 +4756,13 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		if (password.length < 10) { res.status(400).json({ error: 'Password must be at least 10 characters.' }); return; }
 		if (!fullName || !AUTH_EMAIL_PATTERN.test(email)) { res.status(400).json({ error: 'Full name and a valid email are required.' }); return; }
 		if (authUsers.some((u) => String(u?.username || '').toLowerCase() === username)) { res.status(409).json({ error: 'That username is taken.' }); return; }
-		if (authUsers.some((u) => String(u?.email || '').toLowerCase() === email.toLowerCase())) { res.status(409).json({ error: 'That email already has an account. Sign in first, then open the invitation again.' }); return; }
+		if (childInvite && email.toLowerCase() === String(inviteRow?.guardianEmail || '').trim().toLowerCase()) { res.status(400).json({ error: 'Use the swimmer\'s own email address, not the parent/guardian\'s. A swimmer without an email can get a login created by the parent/guardian from the parent/guardian link.', code: 'guardian-email-for-child' }); return; }
+		if (authUsers.some((u) => String(u?.email || '').toLowerCase() === email.toLowerCase())) {
+			res.status(409).json(childInvite
+				? { error: 'That email already belongs to an AthlyraX account. A swimmer under 18 needs their own email, or a login created by the parent/guardian from the parent/guardian link.', code: 'email-has-account-child' }
+				: { error: 'That email already has an AthlyraX account (for example a coaching account). Choose "I already have a login" and sign in: the invitation is added to that same account, no second account is needed.', code: 'email-has-account' });
+			return;
+		}
 		account = { username, email };
 		newUser = {
 			username, role: 'swimmer', tenantId: t.key, passwordHash: hashPassword(password), tokenValidAfter: 0,
@@ -4751,18 +4797,20 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 	// account cannot be saved, the account changes are rolled back and the link is undone; if even the
 	// undo fails, reconcileOrphanedAthleteLinks reverts it on the next club access.
 	const user = newUser || signedIn;
-	const before = newUser ? null : { athleteInviteManaged: user.athleteInviteManaged, athleteTenantConnections: user.athleteTenantConnections, independentProfile: user.independentProfile };
+	const before = newUser ? null : { athleteInviteManaged: user.athleteInviteManaged, athleteTenantConnections: user.athleteTenantConnections, independentProfile: user.independentProfile, athleteRole: user.athleteRole };
 	try {
 		user.athleteInviteManaged = true;
 		// The club connection the Athlete App shows (also for the account's own club).
 		const rows = Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections.filter((c) => normalizeTenantId(c?.tenantId) !== t.key) : [];
 		user.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, clubName: clubDisplayName(t.key) || 'Club', status: 'active', source: 'athlete-invite', connectedAt: new Date().toISOString() }];
 		if (account.independentProfile && !newUser) user.independentProfile = account.independentProfile;
+		// A coach accepting their own (adult) invitation gains the athlete role on the same account.
+		if (!newUser && !isPrimarySwimmerAccount(user) && !hasSecondaryAthleteRole(user)) user.athleteRole = { enabled: true, tenantId: t.key, createdAt: new Date().toISOString(), source: 'athlete-invite' };
 		if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_AUTH_PERSIST')) throw new Error('test: account save failed');
 		persistAuthUsers();
 	} catch (error) {
 		if (newUser) dropNewUser();
-		else { user.athleteInviteManaged = before.athleteInviteManaged; user.athleteTenantConnections = before.athleteTenantConnections; user.independentProfile = before.independentProfile; }
+		else { user.athleteInviteManaged = before.athleteInviteManaged; user.athleteTenantConnections = before.athleteTenantConnections; user.independentProfile = before.independentProfile; user.athleteRole = before.athleteRole; }
 		let undone = false;
 		try {
 			if (athleteInviteTestFailure('ATHLYRAX_TEST_FAIL_ATHLETE_LINK_COMPENSATION')) throw new Error('test: undo failed');
@@ -4796,7 +4844,7 @@ app.post('/swimmer/clubs/leave', requireStrictAuth, requireSwimmerRole, async (r
 	const user = findAuthUser(String(req.auth?.username || '').trim());
 	const tenantKey = normalizeTenantId(req.body?.tenantId);
 	if (!user || !tenantKey) { res.status(400).json({ error: 'Choose the club to leave.' }); return; }
-	if (tenantKey === normalizeTenantId(user.tenantId)) { res.status(409).json({ error: 'This login was created by the club. Ask the club to remove the link instead.' }); return; }
+	if (isPrimarySwimmerAccount(user) && tenantKey === normalizeTenantId(user.tenantId)) { res.status(409).json({ error: 'This login was created by the club. Ask the club to remove the link instead.' }); return; }
 	const conn = (Array.isArray(user.athleteTenantConnections) ? user.athleteTenantConnections : []).find((c) => normalizeTenantId(c?.tenantId) === tenantKey && ['active', 'approved'].includes(String(c?.status || '').toLowerCase()));
 	const t = athleteTenantPaths(tenantKey);
 	if (!conn || !t) { res.status(404).json({ error: 'You are not connected to that club.' }); return; }
@@ -4810,9 +4858,11 @@ app.post('/swimmer/clubs/leave', requireStrictAuth, requireSwimmerRole, async (r
 		});
 	} catch { out = null; }
 	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'Could not leave the club safely. Try again.' }); return; }
-	const before = user.athleteTenantConnections;
+	const before = user.athleteTenantConnections; const beforeRole = user.athleteRole;
 	user.athleteTenantConnections = (Array.isArray(before) ? before : []).map((c) => (normalizeTenantId(c?.tenantId) === tenantKey ? { ...c, status: 'left', leftAt: new Date().toISOString() } : c));
-	try { persistAuthUsers(); } catch { user.athleteTenantConnections = before; res.status(503).json({ error: 'Could not save the change. Try again.' }); return; }
+	// A coach whose athlete role came only from this club's invitation has no athlete identity left.
+	if (hasSecondaryAthleteRole(user) && normalizeTenantId(user.athleteRole.tenantId) === tenantKey) user.athleteRole = { ...user.athleteRole, enabled: false };
+	try { persistAuthUsers(); } catch { user.athleteTenantConnections = before; user.athleteRole = beforeRole; res.status(503).json({ error: 'Could not save the change. Try again.' }); return; }
 	appendAuthAuditEvent({ action: 'athlete_left_club', req, status: 'success', target: username, details: { tenantId: tenantKey } });
 	res.status(200).json({ ok: true, left: tenantKey });
 });
@@ -5173,11 +5223,18 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		}
 	}
 
+	// Swimmer sign-in (Athlete App) with a coaching account: opens the account's athlete role.
+	const loginAsAthlete = String(req.body?.as || '').trim().toLowerCase() === 'athlete' && !isPrimarySwimmerAccount(user);
+	if (loginAsAthlete && !hasSecondaryAthleteRole(user)) {
+		res.status(403).json({ error: 'This account has no swimmer profile yet. Sign in to the Coaching Software and choose "Add my swimmer profile", or accept your club\'s Athlete App invitation while signed in.', needsAthleteRole: true });
+		return;
+	}
+
 	const canonicalLoginUsername = String(user?.username || '').trim().toLowerCase();
 	const effectiveLoginUser = canonicalLoginUsername === 'demo.coach'
 		? { ...user, role: 'head-coach' }
 		: user;
-	const session = issueAuthToken(effectiveLoginUser);
+	const session = issueAuthToken(effectiveLoginUser, loginAsAthlete ? { mode: 'athlete' } : {});
 	setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
 	appendAuthAuditEvent({
 		action: 'login_success',
@@ -5197,7 +5254,8 @@ app.post('/auth/login', requireLoginRateLimit, (req, res) => {
 		token: session.token,
 		csrfToken: session.csrf,
 		csrfHeaderName: AUTH_CSRF_HEADER_NAME,
-		user: buildAuthUserPayload(effectiveLoginUser),
+		user: { ...buildAuthUserPayload(effectiveLoginUser), ...(loginAsAthlete ? { role: 'swimmer', activeRole: 'athlete', primaryRole: resolveEffectiveAuthRole(effectiveLoginUser), tenantId: athleteHomeTenantOf(user) } : {}) },
+		roles: accountRolesFor(user, { athleteMode: loginAsAthlete }),
 	});
 });
 
@@ -5424,9 +5482,177 @@ app.get('/auth/me', (req, res) => {
 		authenticated: true,
 		user: {
 			...buildAuthUserPayload(findAuthUser(req.auth.username) || req.auth),
+			...(req.auth.athleteMode ? { role: 'swimmer', activeRole: 'athlete', primaryRole: req.auth.primaryRole, tenantId: athleteHomeTenantOf(findAuthUser(req.auth.username)) } : {}),
 			expiresAt: req.auth.exp,
 		},
 	});
+});
+
+// ---------- multi-role accounts: roles, switching, own athlete profile, parent/guardian view ----------
+function tenantKeysOnDisk() {
+	const root = path.dirname(path.dirname(resolveStoragePathsForTenantKey('tenant-probe').dbPath));
+	try { return fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => normalizeTenantId(d.name)).filter((k) => k && k !== 'global-owner'); } catch { return []; }
+}
+// Parent/guardian consents and requests addressed to this email, across clubs (latest per swimmer).
+function guardianRecordsForEmail(email) {
+	const e = String(email || '').trim().toLowerCase();
+	if (!AUTH_EMAIL_PATTERN.test(e)) return [];
+	const bySwimmer = new Map();
+	for (const key of tenantKeysOnDisk()) {
+		const t = athleteTenantPaths(key);
+		const db = t ? readJsonFile(t.paths.dbPath) : null;
+		const invites = Array.isArray(db?.[ATHLETE_INVITE_COLLECTION]) ? db[ATHLETE_INVITE_COLLECTION] : [];
+		for (const inv of invites) {
+			if (inv?.guardianRequired !== true || String(inv.guardianEmail || '').trim().toLowerCase() !== e) continue;
+			const k = `${key}:${inv.swimmerId}`;
+			const prev = bySwimmer.get(k);
+			if (prev && String(prev.invite.createdAt) > String(inv.createdAt)) continue;
+			bySwimmer.set(k, { tenantId: key, invite: inv, db });
+		}
+	}
+	return [...bySwimmer.values()].map(({ tenantId, invite, db }) => {
+		const row = (Array.isArray(db?.swimmers) ? db.swimmers : []).find((r) => String(r?.id) === String(invite.swimmerId)) || {};
+		const linked = linkedAccountOf(row);
+		return {
+			tenantId, inviteId: String(invite.id), club: clubDisplayName(tenantId) || 'Club', swimmerFirstName: String(swimmerDisplayName(row) || '').split(' ')[0] || 'Swimmer',
+			status: inviteStatus(invite), consentAt: String(invite.guardianConsent?.at || ''), linkedUsername: linked.username || '',
+		};
+	});
+}
+function guardianVerified(user) {
+	return Boolean(user && String(user.guardianVerifiedEmail || '').toLowerCase() === String(user.email || '').trim().toLowerCase() && String(user.email || '').trim());
+}
+function accountRolesFor(user, { athleteMode = false } = {}) {
+	if (!user) return { active: '', roles: [], canAddAthlete: false };
+	const role = String(user.role || '').trim().toLowerCase();
+	const roles = [];
+	if (COACHING_ROLES.has(role)) roles.push({ role: 'coach', label: 'Coaching Software', href: '/app' });
+	if (isPrimarySwimmerAccount(user) || hasSecondaryAthleteRole(user)) roles.push({ role: 'athlete', label: 'My Athlete App', href: '/athlete-app/' });
+	const guardianCount = guardianRecordsForEmail(user.email).length;
+	if (guardianCount) roles.push({ role: 'guardian', label: 'Parent / Guardian', href: '/guardian', verified: guardianVerified(user), children: guardianCount });
+	return {
+		active: athleteMode || isPrimarySwimmerAccount(user) ? 'athlete' : 'coach',
+		roles,
+		canAddAthlete: COACHING_ROLES.has(role) && role !== 'software-owner' && !hasSecondaryAthleteRole(user),
+	};
+}
+app.get('/auth/roles', requireStrictAuth, (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	res.status(200).json({ ok: true, username: String(req.auth.username), ...accountRolesFor(findAuthUser(String(req.auth.username || '').trim()), { athleteMode: req.auth.athleteMode === true }) });
+});
+// Switch the active role of this session (same account, new session cookie; nothing else changes).
+app.post('/auth/switch-role', requireStrictAuth, (req, res) => {
+	const user = findAuthUser(String(req.auth.username || '').trim());
+	const target = String(req.body?.role || '').trim().toLowerCase();
+	if (!user || !['athlete', 'coach'].includes(target)) { res.status(400).json({ error: 'Choose Coaching Software or My Athlete App.' }); return; }
+	if (target === 'athlete' && !isPrimarySwimmerAccount(user) && !hasSecondaryAthleteRole(user)) { res.status(403).json({ error: 'This account has no swimmer profile yet.', needsAthleteRole: true }); return; }
+	if (target === 'coach' && !COACHING_ROLES.has(String(user.role || '').trim().toLowerCase())) { res.status(403).json({ error: 'This account has no coaching access.' }); return; }
+	// Same account and same CSRF token: pages that already hold the token keep working after the switch.
+	const session = issueAuthToken(user, { csrf: req.auth.csrf, ...(target === 'athlete' && !isPrimarySwimmerAccount(user) ? { mode: 'athlete' } : {}) });
+	setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
+	appendAuthAuditEvent({ action: 'role_switched', req, status: 'success', target: user.username, details: { to: target } });
+	res.status(200).json({ ok: true, activeRole: target, csrfToken: session.csrf, csrfHeaderName: AUTH_CSRF_HEADER_NAME, redirect: target === 'athlete' ? '/athlete-app/' : '/app' });
+});
+// A coach adds their own swimmer identity (a new athlete record in the athlete space, linked only to
+// this account; never one of the swimmers they coach).
+app.post('/auth/roles/athlete/enable', requireStrictAuth, async (req, res) => {
+	const user = findAuthUser(String(req.auth.username || '').trim());
+	const role = String(user?.role || '').trim().toLowerCase();
+	if (!user || req.auth.athleteMode || !COACHING_ROLES.has(role) || role === 'software-owner') { res.status(403).json({ error: 'Only a coaching account can add its own swimmer profile here.' }); return; }
+	if (hasSecondaryAthleteRole(user)) { res.status(200).json({ ok: true, already: true, ...accountRolesFor(user) }); return; }
+	const paths = resolveStoragePathsForTenantKey(ATHLETE_SPACE_TENANT);
+	try { if (!fs.existsSync(paths.dbPath)) { fs.mkdirSync(path.dirname(paths.dbPath), { recursive: true }); writeAtomicJsonFile(paths.dbPath, { swimmers: [] }); } } catch { res.status(503).json({ error: 'The swimmer profile could not be created safely.' }); return; }
+	const swimmerId = `athlete-${crypto.randomBytes(8).toString('hex')}`;
+	const name = splitFullName(String(user.fullName || user.username || '').trim());
+	const dob = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.dob || '')) ? String(req.body.dob) : '';
+	const at = new Date().toISOString();
+	let out = null;
+	try {
+		out = await mutateAthleteTenantDb(paths, (db) => {
+			const swimmers = Array.isArray(db.swimmers) ? db.swimmers : [];
+			if (swimmers.some((r) => String(r?.swimmerAccountUsername || '').toLowerCase() === String(user.username).toLowerCase())) return { ok: false, status: 409, error: 'A swimmer profile is already linked to this account.' };
+			return { ok: true, db: { ...db, swimmers: [...swimmers, { id: swimmerId, firstName: name.firstName, lastName: name.lastName, displayName: String(user.fullName || user.username), ...(dob ? { dob } : {}), swimmerAccountUsername: String(user.username), swimmerAccountEmail: String(user.email || ''), accountLinkedAt: at, createdVia: 'account-athlete-role' }] } };
+		});
+	} catch { out = null; }
+	if (!out?.ok) { res.status(out?.status || 503).json({ error: out?.error || 'The swimmer profile could not be created safely.' }); return; }
+	const before = { athleteRole: user.athleteRole, athleteInviteManaged: user.athleteInviteManaged };
+	user.athleteRole = { enabled: true, tenantId: ATHLETE_SPACE_TENANT, swimmerId, createdAt: at, source: 'own-profile' };
+	user.athleteInviteManaged = true; // identity only through the explicit link, never by name/email matching
+	try { persistAuthUsers(); } catch {
+		Object.assign(user, before);
+		try { await mutateAthleteTenantDb(paths, (db) => ({ ok: true, db: { ...db, swimmers: (db.swimmers || []).filter((r) => String(r?.id) !== swimmerId) } })); } catch {}
+		res.status(503).json({ error: 'The swimmer profile could not be saved. Try again.' });
+		return;
+	}
+	appendAuthAuditEvent({ action: 'athlete_role_added', req, status: 'success', target: user.username, details: { tenantId: ATHLETE_SPACE_TENANT, swimmerId } });
+	res.status(201).json({ ok: true, ...accountRolesFor(user) });
+});
+// Parent/guardian view for a signed-in account: needs the account email confirmed by a code once.
+const guardianVerifyByUser = new Map();
+app.post('/guardian/verify-email/start', requireStrictAuth, async (req, res) => {
+	const user = findAuthUser(String(req.auth.username || '').trim());
+	const email = String(user?.email || '').trim();
+	if (!AUTH_EMAIL_PATTERN.test(email)) { res.status(400).json({ error: 'This account has no email address.' }); return; }
+	const last = guardianVerifyByUser.get(String(user.username).toLowerCase());
+	if (last && Date.now() - last.sentAtMs < 60000) { res.status(429).json({ error: 'Please wait a minute before requesting another code.' }); return; }
+	const code = makePasswordResetCode();
+	try {
+		await sendAthleteGuardianEmail(email, 'AthlyraX: confirm your parent/guardian access', [
+			`Your AthlyraX code to open the parent/guardian view is: ${code}`, 'It expires in 30 minutes. If you did not ask for it, ignore this email.',
+		]);
+	} catch { res.status(502).json({ error: 'The code could not be emailed. Try again later.' }); return; }
+	guardianVerifyByUser.set(String(user.username).toLowerCase(), { codeHash: hashPasswordResetCode(code), expiresAtMs: Date.now() + 30 * 60000, sentAtMs: Date.now(), attempts: 0 });
+	res.status(200).json({ ok: true, sentTo: maskEmail(email) });
+});
+app.post('/guardian/verify-email/confirm', requireStrictAuth, (req, res) => {
+	const user = findAuthUser(String(req.auth.username || '').trim());
+	const entry = user ? guardianVerifyByUser.get(String(user.username).toLowerCase()) : null;
+	const code = String(req.body?.code || '').trim();
+	if (!entry || entry.expiresAtMs < Date.now() || entry.attempts >= 5 || !/^\d{6}$/.test(code) || !safeEqualText(entry.codeHash, hashPasswordResetCode(code))) {
+		if (entry) entry.attempts += 1;
+		res.status(400).json({ error: 'The code is not valid or has expired. Request a new code.' });
+		return;
+	}
+	const before = { guardianVerifiedEmail: user.guardianVerifiedEmail, guardianVerifiedAt: user.guardianVerifiedAt };
+	user.guardianVerifiedEmail = String(user.email || '').trim().toLowerCase(); user.guardianVerifiedAt = new Date().toISOString();
+	try { persistAuthUsers(); } catch { Object.assign(user, before); res.status(503).json({ error: 'Could not save. Try again.' }); return; }
+	guardianVerifyByUser.delete(String(user.username).toLowerCase());
+	res.status(200).json({ ok: true });
+});
+app.get('/guardian/children', requireStrictAuth, (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	const user = findAuthUser(String(req.auth.username || '').trim());
+	if (!guardianVerified(user)) { res.status(403).json({ error: 'Confirm your email address first.', needsVerification: true }); return; }
+	res.status(200).json({ ok: true, email: maskEmail(user.email), children: guardianRecordsForEmail(user.email) });
+});
+// The verified parent/guardian removes a child's Athlete App access (same steps as the emailed
+// parent/guardian link: the child's login loses this club, then the link is removed; records stay).
+app.post('/guardian/children/revoke', requireStrictAuth, async (req, res) => {
+	const user = findAuthUser(String(req.auth.username || '').trim());
+	if (!guardianVerified(user)) { res.status(403).json({ error: 'Confirm your email address first.', needsVerification: true }); return; }
+	const rec = guardianRecordsForEmail(user.email).find((r) => r.tenantId === normalizeTenantId(req.body?.tenantId) && r.inviteId === String(req.body?.inviteId || ''));
+	const t = rec ? athleteTenantPaths(rec.tenantId) : null;
+	if (!rec || !t) { res.status(404).json({ error: 'Not found among the swimmers you authorised.' }); return; }
+	const db = readJsonFile(t.paths.dbPath) || {};
+	const invite = (db[ATHLETE_INVITE_COLLECTION] || []).find((i) => String(i?.id) === rec.inviteId);
+	if (!rec.linkedUsername) {
+		const r = await mutateAthleteTenantDb(t.paths, (d) => revokeInvite(d, rec.inviteId, 'parent/guardian')).catch(() => null);
+		res.status(r?.ok ? 200 : 503).json(r?.ok ? { ok: true, invitationWithdrawn: true } : { error: 'Could not withdraw safely.' });
+		return;
+	}
+	const child = findAthleteAccount(rec.linkedUsername);
+	if (child && !isPrimarySwimmerAccount(child)) { res.status(409).json({ error: 'That login is not a swimmer login. Ask the club to correct the link.' }); return; }
+	if (child) {
+		const snapshot = { tokenValidAfter: child.tokenValidAfter, athleteTenantConnections: child.athleteTenantConnections };
+		const rows = (Array.isArray(child.athleteTenantConnections) ? child.athleteTenantConnections : []).filter((c) => normalizeTenantId(c?.tenantId) !== t.key);
+		child.athleteTenantConnections = [...rows, { tenantId: t.key, clubId: t.key, status: 'revoked', source: 'guardian-revocation', revokedAt: new Date().toISOString(), revokedBy: 'parent/guardian' }];
+		child.tokenValidAfter = Math.max(getNowEpochSeconds() + 1, getTokenValidAfter(child) + 2);
+		try { persistAuthUsers(); } catch { Object.assign(child, snapshot); res.status(503).json({ error: 'Access could not be removed safely. Please try again.' }); return; }
+	}
+	let out = null;
+	try { out = await mutateAthleteTenantDb(t.paths, (d) => unlinkAthleteAccount(d, invite?.swimmerId, { actor: 'parent/guardian', reason: 'Revoked by parent/guardian' })); } catch { out = null; }
+	appendAuthAuditEvent({ action: 'athlete_guardian_revoked', req, status: out?.ok ? 'success' : 'error', target: String(invite?.swimmerId || ''), details: { tenantId: t.key, via: 'guardian-account' } });
+	res.status(200).json({ ok: true, linkRemoved: Boolean(out?.ok) });
 });
 
 app.get('/auth/guard', (req, res) => {
@@ -5460,7 +5686,8 @@ app.get('/auth/guard', (req, res) => {
 	}
 
 	const user = findAuthUser(req.auth.username) || req.auth;
-	const role = String(user?.role || req.auth.role || '').trim().toLowerCase();
+	// The session's active role (athlete mode of a coaching account counts as swimmer only).
+	const role = String(req.auth.role || user?.role || '').trim().toLowerCase();
 	const coachRoles = new Set(['software-owner', 'head-coach', 'assistant-coach', 'coach', 'viewer']);
 	const isAllowed = audience === 'coach' ? coachRoles.has(role) : role === 'swimmer';
 
@@ -5488,6 +5715,7 @@ app.get('/auth/guard', (req, res) => {
 		allowed: true,
 		user: {
 			...buildAuthUserPayload(user),
+			...(req.auth.athleteMode ? { role: 'swimmer', activeRole: 'athlete', primaryRole: req.auth.primaryRole, tenantId: athleteHomeTenantOf(findAuthUser(req.auth.username)) } : {}),
 			expiresAt: req.auth.exp,
 		},
 	});
