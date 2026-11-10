@@ -4972,9 +4972,28 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		}
 	} else {
 		const password = String(req.body?.password || '');
-		const fullName = String(req.body?.fullName || '').trim();
-		const email = String(req.body?.email || '').trim();
-		const username = String(req.body?.username || '').trim().toLowerCase();
+		// For an approved under-18 emailed invitation, the swimmer already has a
+		// club profile. The secure, single-use invitation supplies the verified
+		// email and canonical name; the child only chooses a password.
+		const activationOnly = req.body?.activationOnly === true;
+		const approvedChildActivation = activationOnly && childInvite && Boolean(inviteRow?.guardianConsent?.at) && AUTH_EMAIL_PATTERN.test(String(inviteRow?.targetEmail || ''));
+		if (activationOnly && !approvedChildActivation) {
+			res.status(403).json({ error: 'This password-only activation is not authorised for the invitation.' });
+			return;
+		}
+		const swimmerRow = approvedChildActivation
+			? (Array.isArray(readJsonFile(t.paths.dbPath)?.swimmers) ? readJsonFile(t.paths.dbPath).swimmers : []).find((r) => String(r?.id) === String(inviteRow.swimmerId))
+			: null;
+		if (approvedChildActivation && (!swimmerRow || String(swimmerRow.status || '').toLowerCase() === 'deleted' || swimmerRow.deletedAt)) {
+			res.status(409).json({ error: 'The linked swimmer record is not available. Ask your club to correct it.' });
+			return;
+		}
+		const fullName = approvedChildActivation ? swimmerDisplayName(swimmerRow) : String(req.body?.fullName || '').trim();
+		const email = approvedChildActivation ? String(inviteRow.targetEmail).trim().toLowerCase() : String(req.body?.email || '').trim();
+		const suggestedBase = approvedChildActivation ? String(email.split('@')[0] || 'swimmer').toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 23) : '';
+		const username = approvedChildActivation
+			? `${suggestedBase.length >= 3 ? suggestedBase : 'swimmer'}-${crypto.randomBytes(4).toString('hex')}`
+			: String(req.body?.username || '').trim().toLowerCase();
 		if (!AUTH_USERNAME_PATTERN.test(username)) { res.status(400).json({ error: 'Username must be 3-32 letters, numbers, dot, underscore or dash.' }); return; }
 		if (password.length < 10) { res.status(400).json({ error: 'Password must be at least 10 characters.' }); return; }
 		if (!fullName || !AUTH_EMAIL_PATTERN.test(email)) { res.status(400).json({ error: 'Full name and a valid email are required.' }); return; }
