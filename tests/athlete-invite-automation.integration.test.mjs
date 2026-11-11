@@ -460,24 +460,34 @@ test('Send Again on a link-only invitation emails the guardian from the swimmer 
     assert.deepEqual(st.payload.invites.map((i) => [i.status, i.delivery]).sort(), [['awaiting-guardian', 'email'], ['revoked', 'link']]);
     // Old guardian link refused; the emailed one works.
     assert.notEqual((await post(base, '/athlete-invites/guardian-code', { token: link.payload.guardianToken })).response.status, 200);
+    const notMailed = await post(base, '/athlete-invites/guardian-consent', {
+      token: link.payload.guardianToken, emailLinkApproval: true,
+      consent: true, consentVersion: 'athlete-app-guardian-consent-v2',
+    });
+    assert.notEqual(notMailed.response.status, 200, 'revoked manually shared link never bypasses verification');
     const gTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'jane.foster@example.com')));
-    assert.equal((await post(base, '/athlete-invites/guardian-code', { token: gTok })).response.status, 200);
-    const code = await waitFor(() => (mails(server).filter((x) => x.to === 'jane.foster@example.com').map((x) => (x.text.match(/verification code is: (\d{6})/) || [])[1]).filter(Boolean))[0]);
     const parentPreview = await post(base, '/athlete-invites/preview', { token: gTok });
     assert.equal(parentPreview.response.status, 200);
     assert.equal(parentPreview.payload.guardianHasLogin, false);
+    assert.equal(parentPreview.payload.guardianEmailLinkReady, true, 'emailed link needs no extra code');
+    assert.equal(parentPreview.payload.guardianName, 'Jane Foster');
+    // Simply opening the email is NOT consent: explicit checkbox acknowledgement is required.
+    const noConsent = await post(base, '/athlete-invites/guardian-consent', {
+      token: gTok, emailLinkApproval: true, consent: false,
+      consentVersion: 'athlete-app-guardian-consent-v2',
+    });
+    assert.equal(noConsent.response.status, 400);
+    // This signed, emailed, time-limited secret verifies the recorded guardian email itself.
+    // No parent password or second verification email/code.
     const consentResult = await post(base, '/athlete-invites/guardian-consent', {
-      token: gTok, name: 'Jane Foster', relationship: 'Parent',
-      consent: true, consentVersion: 'athlete-app-guardian-consent-v2', code,
-      createGuardianLogin: true, guardianPassword: 'Guardian!Pass1234',
+      token: gTok, emailLinkApproval: true, name: 'Jane Foster', relationship: 'Mother',
+      consent: true, consentVersion: 'athlete-app-guardian-consent-v2',
+      createGuardianLogin: false,
     });
     assert.equal(consentResult.response.status, 200, JSON.stringify(consentResult.payload));
-    assert.equal(consentResult.payload.guardianLogin, 'created');
-    assert.equal(consentResult.payload.athleteInvitation, 'sent', 'parent sees truthful activation-email confirmation');
-    const parentLogin = await login(base, 'jane.foster@example.com', 'Guardian!Pass1234');
-    const children = await request(base, '/guardian/children', parentLogin);
-    assert.equal(children.response.status, 200, JSON.stringify(children.payload));
-    assert.deepEqual(children.payload.children.map((c) => c.swimmerFirstName), ['Amelia']);
+    assert.equal(consentResult.payload.athleteInvitation, 'sent', 'athlete email sent after explicit parent approval');
+    assert.equal(tenantDb(server).athleteAccountInvites.at(-1).guardianConsent.verifiedBy, 'emailed-invitation-link');
+    assert.equal(mails(server).filter((x) => x.to === 'jane.foster@example.com').length, 1, 'no extra code email needed');
     // The athlete link goes to the Swimmer Email automatically.
     const aTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'amelia.f@example.com')));
     // Parent-approved emailed invitation: swimmer only chooses a password.
