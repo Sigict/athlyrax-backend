@@ -161,7 +161,7 @@ export function buildInviteEmail({ kind, clubName, coachName, swimmerName, link,
     : `${club} has invited you to the AthlyraX Athlete App`;
   const purpose = isGuardian
     ? [`${coach} at ${club} has invited ${swimmer} to the AthlyraX Athlete App, where ${first} can see their club training, tests and progress.`,
-      `Because ${first} is under 18 (or no date of birth is recorded), a parent or guardian must authorise this first. Open the secure link, confirm a one-time code that we email to this address, and give consent. Nothing is shared with ${first} until you do.`]
+      `Because ${first} is under 18 (or no date of birth is recorded), a parent or guardian must authorise this first. Open the secure email link and confirm parental consent directly. You will not need to copy a verification code. Nothing is shared with ${first} until you do.`]
     : [`${coach} at ${club} has invited you (${swimmer}) to the AthlyraX Athlete App. It links your login to your existing club swimmer record, so you can see your club sessions, tests and progress.`,
       'Your private diary and personal notes are never shared with the club automatically.'];
   const lines = [

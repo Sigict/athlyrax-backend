@@ -24,7 +24,7 @@ import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
 import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
 import { issueGuardianAccountCode, verifyGuardianAccountCode } from './athlete-guardian-account-activation.mjs';
 import { savedContacts, applyContactChoice, supersedeLinkInvite, clubOverview, COACH_STATE_LABELS, buildInviteEmail, markAutoDelivery, rotateInviteToken, resendAllowed, recordDelivery, updateDelivery, newDeliveryId, applyDeliveryEvent, planBulkItem, dedupeBulkItems, BULK_MAX_ITEMS } from './athlete-invite-delivery.mjs';
-import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES, DuplicateSwimmerIdError, duplicateSwimmerIds, uniqueSwimmerRow } from './athlete-account-invites.mjs';
+import { ATHLETE_INVITE_COLLECTION, parseInviteToken, createAthleteInvite, resolveInvite, recordGuardianConsent, checkAcceptance, applyAcceptance, revokeInvite, unlinkAthleteAccount, preserveServerOwnedAthleteData, publicInvite, inviteStatus, swimmerDisplayName, linkedAccountOf, GUARDIAN_CONSENT_VERSION, issueGuardianCode, guardianEmailLinkReady, maskEmail, revertAcceptance, reconcileOrphanedAthleteLinks, GUARDIAN_CODE_TTL_MINUTES, DuplicateSwimmerIdError, duplicateSwimmerIds, uniqueSwimmerRow } from './athlete-account-invites.mjs';
 import { installOperationalPilotRoutes } from './operational-pilot-endpoints.mjs';
 import { buildCoachPoolsideProjection } from './coach-poolside-projection.mjs';
 import { applyCoachPoolsideAttendance, applyCoachPoolsideSetChange, applyCoachPoolsideExecution, applyCoachPoolsideCanonicalResult, applyCoachPoolsideCompetitionEvidence } from './coach-poolside-mutations.mjs';
@@ -4764,7 +4764,7 @@ app.post('/athlete-invites/preview', requireLoginRateLimit, (req, res) => {
 	const invite = t ? resolveInvite(db, parsed, parsed.kind) : null;
 	if (!invite) { res.status(404).json({ error: 'This invitation link is not valid.' }); return; }
 	const row = (Array.isArray(db.swimmers) ? db.swimmers : []).find((s) => String(s?.id) === String(invite.swimmerId)) || {};
-	res.status(200).json({ ok: true, kind: parsed.kind, status: inviteStatus(invite), club: clubDisplayName(t.key), swimmerFirstName: String(row.firstName || swimmerDisplayName(row).split(' ')[0] || ''), expiresAt: invite.expiresAt, guardianRequired: invite.guardianRequired === true, guardianConsented: Boolean(invite.guardianConsent), emailRestricted: Boolean(invite.targetEmail), guardianHasLogin: parsed.kind === 'guardian' && authUsers.some((u) => String(u?.email || '').trim().toLowerCase() === String(invite.guardianEmail || '').trim().toLowerCase()), consentVersion: GUARDIAN_CONSENT_VERSION });
+	res.status(200).json({ ok: true, kind: parsed.kind, status: inviteStatus(invite), club: clubDisplayName(t.key), swimmerFirstName: String(row.firstName || swimmerDisplayName(row).split(' ')[0] || ''), expiresAt: invite.expiresAt, guardianRequired: invite.guardianRequired === true, guardianConsented: Boolean(invite.guardianConsent), guardianEmailLinkReady: guardianEmailLinkReady(invite), guardianName: parsed.kind === 'guardian' && guardianEmailLinkReady(invite) ? savedContacts(row).guardianName : '', guardianRelationship: parsed.kind === 'guardian' && guardianEmailLinkReady(invite) ? savedContacts(row).guardianRelationship : '', emailRestricted: Boolean(invite.targetEmail), guardianHasLogin: parsed.kind === 'guardian' && authUsers.some((u) => String(u?.email || '').trim().toLowerCase() === String(invite.guardianEmail || '').trim().toLowerCase()), consentVersion: GUARDIAN_CONSENT_VERSION });
 });
 
 // Public: a one-time verification code is emailed to the parent/guardian address the club specified.
@@ -4815,7 +4815,7 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 		}
 	}
 	const out = await mutateAthleteTenantDb(t.paths, (db) => {
-		const r = recordGuardianConsent(db, parsed, { ...req.body, ip: req.ip, codeKey: ATHLETE_GUARDIAN_CODE_KEY });
+		const r = recordGuardianConsent(db, parsed, { ...req.body, emailLinkApproval: req.body?.emailLinkApproval === true, ip: req.ip, codeKey: ATHLETE_GUARDIAN_CODE_KEY });
 		return r.already ? { ...r, db: null } : r;
 	}).catch(() => null);
 	if (!out?.ok) {
@@ -4823,7 +4823,7 @@ app.post('/athlete-invites/guardian-consent', requireLoginRateLimit, async (req,
 		res.status(out?.status || 503).json({ error: out?.error || 'Consent could not be saved safely.' });
 		return;
 	}
-	appendAuthAuditEvent({ action: 'athlete_invite_guardian_consent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key, relationship: out.invite.guardianConsent?.relationship, verifiedBy: 'email-code' } });
+	appendAuthAuditEvent({ action: 'athlete_invite_guardian_consent', req, status: 'success', target: out.invite.id, details: { tenantId: t.key, relationship: out.invite.guardianConsent?.relationship, verifiedBy: out.invite.guardianConsent?.verifiedBy || 'email-code' } });
 	let guardianLogin = '';
 	if (wantsGuardianLogin && !out.already) {
 		const email = String(out.invite.guardianEmail || '').toLowerCase();

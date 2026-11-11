@@ -179,14 +179,37 @@ export function maskEmail(email) {
   return `${user.slice(0, 1)}${'*'.repeat(Math.max(2, user.length - 1))}@${domain}`;
 }
 
-export function recordGuardianConsent(db = {}, parsed, { name, relationship, code, consent, consentVersion, now = new Date(), ip = '', codeKey } = {}) {
+// A token delivered to the club's recorded guardian email is an email-verification link.
+// Only server-tracked successful guardian deliveries qualify; manually copied links still require a code.
+export function guardianEmailLinkReady(invite = {}) {
+  const last = [...list(invite.deliveries)].reverse().find((d) => text(d.kind) === 'guardian');
+  return invite.delivery === 'email'
+    && Boolean(invite.guardianEmail)
+    && text(last?.to).toLowerCase() === text(invite.guardianEmail).toLowerCase()
+    && ['sent', 'delivered'].includes(text(last?.status).toLowerCase());
+}
+
+export function recordGuardianConsent(db = {}, parsed, { name, relationship, code, consent, consentVersion, emailLinkApproval = false, now = new Date(), ip = '', codeKey } = {}) {
   const invite = resolveInvite(db, parsed, 'guardian');
   if (!invite) return { ok: false, status: 404, error: 'This parent/guardian link is not valid.' };
   const status = inviteStatus(invite, now.getTime());
   if (['revoked', 'accepted', 'expired'].includes(status)) return { ok: false, status: 410, error: `This invitation is ${status}.` };
   if (invite.guardianConsent) return { ok: true, already: true, invite };
   if (consent !== true || consentVersion !== GUARDIAN_CONSENT_VERSION) return { ok: false, status: 400, error: 'Parent/guardian consent must be confirmed.' };
-  if (!text(name) || !text(relationship)) return { ok: false, status: 400, error: 'Enter the parent/guardian name and relationship.' };
+  const linkVerified = emailLinkApproval === true && guardianEmailLinkReady(invite);
+  // Legacy/manual guardian links do not prove control of the recorded email address.
+  // The delivered-email link is itself the 256-bit one-use secret. Consent still requires
+  // the parent to explicitly tick the permission checkbox and submit.
+  if (emailLinkApproval === true && !linkVerified) return { ok: false, status: 403, error: 'Use the guardian link emailed by AthlyraX, or verify the parent email with a code.' };
+  if (!linkVerified && (!text(name) || !text(relationship))) return { ok: false, status: 400, error: 'Enter the parent/guardian name and relationship.' };
+  if (linkVerified) {
+    const row = uniqueSwimmerRow(db, invite.swimmerId).row || {};
+    const primaryName = text(row.athleteContacts?.guardianName) || text(row.parent1Name) || text(row.parent2Name);
+    const verifiedName = text(name) || primaryName || 'Verified guardian email holder';
+    const guardianConsent = { at: now.toISOString(), name: verifiedName, relationship: text(relationship) || 'Parent or legal guardian', email: invite.guardianEmail, verifiedBy: 'emailed-invitation-link', version: GUARDIAN_CONSENT_VERSION, ip: text(ip) };
+    const invites = list(db[ATHLETE_INVITE_COLLECTION]).map((inv) => (inv.id === invite.id ? { ...inv, guardianConsent } : inv));
+    return { ok: true, invite: { ...invite, guardianConsent }, db: { ...db, [ATHLETE_INVITE_COLLECTION]: invites } };
+  }
   const gc = invite.guardianCode || null;
   if (!gc?.hash) return { ok: false, status: 403, error: `Request a verification code first: it is sent to ${maskEmail(invite.guardianEmail)}.` };
   if (Number(gc.attempts || 0) >= GUARDIAN_CODE_MAX_ATTEMPTS) return { ok: false, status: 429, error: 'Too many wrong codes. Request a new code.' };
