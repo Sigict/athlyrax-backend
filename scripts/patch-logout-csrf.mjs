@@ -40,18 +40,18 @@ let meRoute = source.slice(meRouteStart, nextRouteStart);
 // /auth/me can already return csrfToken (e.g. athlete activation branch).
 // Patch only the missing response fields; don't depend on one exact block
 // layout or double-insert tokens. The route remains authenticated-only.
-if (!/\\bauthRequired:\\s*true,\\s*authenticated:\\s*true,/.test(meRoute)) {
+if (!/\bauthRequired:\s*true,\s*authenticated:\s*true,/.test(meRoute)) {
   throw new Error('Authenticated /auth/me response block not found.');
 }
-const authenticatedAt = meRoute.indexOf('\\tauthenticated: true,');
+const authenticatedAt = meRoute.indexOf('\tauthenticated: true,');
 if (authenticatedAt < 0) {
   throw new Error('Authenticated /auth/me response marker not found.');
 }
-const insertAt = authenticatedAt + '\\tauthenticated: true,'.length;
+const insertAt = authenticatedAt + '\tauthenticated: true,'.length;
 const authenticatedResponse = meRoute.slice(insertAt);
 const missingFields = [
-  ...(authenticatedResponse.includes('csrfToken:') ? [] : ["\\n\\t\\tcsrfToken: String(req.auth?.csrf || ''),"]),
-  ...(authenticatedResponse.includes('csrfHeaderName:') ? [] : ['\\n\\t\\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,']),
+  ...(authenticatedResponse.includes('csrfToken:') ? [] : ["\n\t\tcsrfToken: String(req.auth?.csrf || ''),"]),
+  ...(authenticatedResponse.includes('csrfHeaderName:') ? [] : ['\n\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,']),
 ];
 if (missingFields.length) {
   meRoute = meRoute.slice(0, insertAt) + missingFields.join('') + meRoute.slice(insertAt);
@@ -63,7 +63,7 @@ for (const token of [
   `if (requestPath === '/auth/logout') return next();`,
   `app.post('/auth/logout', requireStrictAuth`,
   `app.get('/auth/me', (req, res) => {`,
-  `csrfToken: String(req.auth?.csrf || '')`,
+  `csrfToken:`,
   `csrfHeaderName: AUTH_CSRF_HEADER_NAME`,
 ]) {
   if (!source.includes(token)) {
