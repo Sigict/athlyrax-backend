@@ -490,16 +490,24 @@ test('Send Again on a link-only invitation emails the guardian from the swimmer 
     assert.equal(mails(server).filter((x) => x.to === 'jane.foster@example.com').length, 1, 'no extra code email needed');
     // The athlete link goes to the Swimmer Email automatically.
     const aTok = linkIn(await waitFor(() => mails(server).find((x) => x.to === 'amelia.f@example.com')));
-    // Parent-approved emailed invitation: swimmer only chooses a password.
-    // Client-supplied identity is not trusted or required.
+    // Parent-approved emailed invitation: swimmer chooses username and password.
+    // Supplied fullName and email must not replace the verified swimmer identity.
     const activated = await post(base, '/athlete-invites/accept', { token: aTok, activationOnly: true, password: 'Athlete!Pass1234', fullName: 'Wrong Name', email: 'impostor@example.com', username: 'attacker' });
     assert.equal(activated.response.status, 201, JSON.stringify(activated.payload));
     const db = tenantDb(server);
     assert.equal(db.swimmers.length, 1, 'no duplicate swimmer');
-    assert.match(db.swimmers[0].swimmerAccountUsername, /^amelia.f-[a-f0-9]{8}$/);
+    assert.equal(db.swimmers[0].swimmerAccountUsername, 'attacker', 'chosen username is permitted for the verified invitation holder');
+    assert.equal(db.swimmers[0].firstName, 'Amelia', 'untrusted supplied fullName cannot rename the existing swimmer');
+    assert.equal(db.swimmers[0].lastName, 'Foster', 'swimmer identity remains linked to the original record');
     const createdLogin = db.swimmers[0].swimmerAccountUsername;
     const loginResult = await login(base, 'amelia.f@example.com', 'Athlete!Pass1234');
     assert.ok(loginResult.cookie, 'swimmer has an independent login with the verified email');
+    // End-to-end proof: the activated swimmer must actually see the original
+    // club swimmer profile in the Athlete App, not an empty new identity.
+    const athleteHomeResult = await request(base, '/swimmer/athlete-home', loginResult);
+    assert.equal(athleteHomeResult.response.status, 200, JSON.stringify(athleteHomeResult.payload));
+    assert.equal(athleteHomeResult.payload?.athlete?.id, 'amelia', 'Athlete App links to the saved swimmer row');
+    assert.equal(tenantDb(server).swimmers.length, 1, 'opening Athlete App does not create another swimmer');
     assert.equal((await post(base, '/athlete-invites/accept', { token: aTok, activationOnly: true, password: 'Athlete!Pass1234' })).response.status, 409, 'cannot reuse the activation link');
     assert.equal(tenantDb(server).swimmers[0].swimmerAccountUsername, createdLogin, 'replay does not reassign existing swimmer');
     assert.deepEqual(db.tests.map((t) => [t.id, t.swimmerId, t.time]), [['t-am', 'amelia', '1:05.00']]);
