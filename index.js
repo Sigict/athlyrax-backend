@@ -5108,9 +5108,10 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		const fullName = approvedChildActivation ? swimmerDisplayName(swimmerRow) : String(req.body?.fullName || '').trim();
 		const email = approvedChildActivation ? String(inviteRow.targetEmail).trim().toLowerCase() : String(req.body?.email || '').trim();
 		const suggestedBase = approvedChildActivation ? String(email.split('@')[0] || 'swimmer').toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 23) : '';
+		const chosenUsername = String(req.body?.username || '').trim().toLowerCase();
 		const username = approvedChildActivation
-			? `${suggestedBase.length >= 3 ? suggestedBase : 'swimmer'}-${crypto.randomBytes(4).toString('hex')}`
-			: String(req.body?.username || '').trim().toLowerCase();
+			? (chosenUsername || `${suggestedBase.length >= 3 ? suggestedBase : 'swimmer'}-${crypto.randomBytes(4).toString('hex')}`)
+			: chosenUsername;
 		if (!AUTH_USERNAME_PATTERN.test(username)) { res.status(400).json({ error: 'Username must be 3-32 letters, numbers, dot, underscore or dash.' }); return; }
 		if (password.length < 10) { res.status(400).json({ error: 'Password must be at least 10 characters.' }); return; }
 		if (!fullName || !AUTH_EMAIL_PATTERN.test(email)) { res.status(400).json({ error: 'Full name and a valid email are required.' }); return; }
@@ -5187,7 +5188,7 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		]).catch(() => {});
 	}
 	appendAuthAuditEvent({ action: 'athlete_invite_accepted', req, status: 'success', target: out.invite.swimmerId, details: { inviteId: out.invite.id, tenantId: t.key, username: account.username, newAccount: Boolean(newUser) } });
-	const payload = { ok: true, linked: true, newAccount: Boolean(newUser) };
+	const payload = { ok: true, linked: true, newAccount: Boolean(newUser), username: account.username };
 	if (newUser) {
 		const session = issueAuthToken({ username: newUser.username, role: 'swimmer' });
 		setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
