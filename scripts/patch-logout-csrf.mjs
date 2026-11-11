@@ -37,22 +37,24 @@ if (nextRouteStart < 0) {
 }
 let meRoute = source.slice(meRouteStart, nextRouteStart);
 
-const meAuthenticatedOld = `\tres.status(200).json({
-\t\tauthRequired: true,
-\t\tauthenticated: true,
-\t\tuser: {`;
-const meAuthenticatedNew = `\tres.status(200).json({
-\t\tauthRequired: true,
-\t\tauthenticated: true,
-\t\tcsrfToken: String(req.auth?.csrf || ''),
-\t\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,
-\t\tuser: {`;
-
-if (!meRoute.includes(meAuthenticatedNew)) {
-  if (!meRoute.includes(meAuthenticatedOld)) {
-    throw new Error('Authenticated /auth/me response block not found.');
-  }
-  meRoute = meRoute.replace(meAuthenticatedOld, meAuthenticatedNew);
+// /auth/me can already return csrfToken (e.g. athlete activation branch).
+// Patch only the missing response fields; don't depend on one exact block
+// layout or double-insert tokens. The route remains authenticated-only.
+if (!/\\bauthRequired:\\s*true,\\s*authenticated:\\s*true,/.test(meRoute)) {
+  throw new Error('Authenticated /auth/me response block not found.');
+}
+const authenticatedAt = meRoute.indexOf('\\tauthenticated: true,');
+if (authenticatedAt < 0) {
+  throw new Error('Authenticated /auth/me response marker not found.');
+}
+const insertAt = authenticatedAt + '\\tauthenticated: true,'.length;
+const authenticatedResponse = meRoute.slice(insertAt);
+const missingFields = [
+  ...(authenticatedResponse.includes('csrfToken:') ? [] : ["\\n\\t\\tcsrfToken: String(req.auth?.csrf || ''),"]),
+  ...(authenticatedResponse.includes('csrfHeaderName:') ? [] : ['\\n\\t\\tcsrfHeaderName: AUTH_CSRF_HEADER_NAME,']),
+];
+if (missingFields.length) {
+  meRoute = meRoute.slice(0, insertAt) + missingFields.join('') + meRoute.slice(insertAt);
   source = `${source.slice(0, meRouteStart)}${meRoute}${source.slice(nextRouteStart)}`;
 }
 
