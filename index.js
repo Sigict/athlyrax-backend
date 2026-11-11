@@ -5840,6 +5840,9 @@ app.get('/auth/me', (req, res) => {
 	res.status(200).json({
 		authRequired: true,
 		authenticated: true,
+		// Return the current session's CSRF token so a sign-in switch can submit
+		// a valid authenticated POST without reusing a stale local token.
+		csrfToken: String(req.auth.csrf || ''),
 		user: {
 			...buildAuthUserPayload(findAuthUser(req.auth.username) || req.auth),
 			...(req.auth.athleteMode ? { role: 'swimmer', activeRole: 'athlete', primaryRole: req.auth.primaryRole, tenantId: athleteHomeTenantOf(findAuthUser(req.auth.username)) } : {}),
