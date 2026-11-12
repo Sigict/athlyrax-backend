@@ -58,7 +58,11 @@ test('bulk planning: linked, open, missing and invalid addresses are skipped; du
   assert.equal(planBulkItem(db, { swimmerId: 'kd1', athleteEmail: 'kit@example.com' }, now).code, 'missing-guardian-email');
   const k = planBulkItem(db, { swimmerId: 'kd1', athleteEmail: 'kit@example.com', guardianEmail: 'parent@example.com' }, now);
   assert.deepEqual([k.sendTo, k.athleteEmail, k.guardianEmail], ['guardian', 'kit@example.com', 'parent@example.com']);
-  assert.equal(planBulkItem(db, { swimmerId: 'kd1', athleteEmail: 'p@example.com', guardianEmail: 'p@example.com' }, now).code, 'same-email');
+  const sharedEmail = planBulkItem(db, { swimmerId: 'kd1', athleteEmail: 'p@example.com', guardianEmail: 'p@example.com' }, now);
+  assert.deepEqual([sharedEmail.ok, sharedEmail.athleteEmail, sharedEmail.guardianEmail, sharedEmail.sendTo], [true, '', 'p@example.com', 'guardian'], 'parent email is recovery/contact, not a child mailbox');
+  const sharedInvite = createAthleteInvite({ swimmers: [kid] }, { swimmerId: 'kd1', tenantKey: 't', actor: 'coach', targetEmail: 'P@example.com', guardianEmail: 'p@example.com', now });
+  assert.equal(sharedInvite.ok, true);
+  assert.equal(sharedInvite.invite.targetEmail, '', 'no independent athlete email when contact is the parent');
   assert.equal(planBulkItem(db, { swimmerId: 'nd', guardianEmail: 'g@example.com' }, now).guardianRequired, true, 'no date of birth needs a guardian');
   assert.equal(planBulkItem(db, { swimmerId: 'lk1', athleteEmail: 'l@example.com' }, now).code, 'already-linked');
   assert.equal(planBulkItem(db, { swimmerId: 'zz' }, now).code, 'not-found');
