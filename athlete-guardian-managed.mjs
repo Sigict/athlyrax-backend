@@ -7,7 +7,7 @@
 //   the athlete's account. Password-reset codes go to the guardian's verified email.
 // - The guardian can revoke access at any time with their link plus a fresh emailed code.
 import crypto from 'node:crypto';
-import { ATHLETE_INVITE_COLLECTION, resolveInvite, inviteStatus, uniqueSwimmerRow, linkedAccountOf, guardianCodeDigest, sameHash, maskEmail, GUARDIAN_CODE_TTL_MINUTES, GUARDIAN_CODE_MAX_ATTEMPTS, GUARDIAN_CODE_MAX_SENDS, GUARDIAN_CODE_RESEND_SECONDS } from './athlete-account-invites.mjs';
+import { ATHLETE_INVITE_COLLECTION, resolveInvite, inviteStatus, uniqueSwimmerRow, linkedAccountOf, independentAthleteInviteEmail, guardianCodeDigest, sameHash, maskEmail, GUARDIAN_CODE_TTL_MINUTES, GUARDIAN_CODE_MAX_ATTEMPTS, GUARDIAN_CODE_MAX_SENDS, GUARDIAN_CODE_RESEND_SECONDS } from './athlete-account-invites.mjs';
 
 const text = (v) => String(v ?? '').trim();
 const list = (v) => (Array.isArray(v) ? v : []);
@@ -31,7 +31,7 @@ export function checkManagedAcceptance(db = {}, parsed, account = {}, now = new 
   // The verified emailed guardian link is also proof of mailbox control: recordGuardianConsent
   // validates its one-use secret and delivery before marking it emailed-invitation-link.
   if (!invite.guardianRequired || !['email-code', 'emailed-invitation-link'].includes(invite.guardianConsent?.verifiedBy)) return { ok: false, status: 403, error: 'Verified parent/guardian consent is required first.' };
-  if (invite.targetEmail) return { ok: false, status: 409, error: 'This invitation is for the athlete\'s own email address; the athlete accepts it from their own invitation email.' };
+  if (independentAthleteInviteEmail(invite)) return { ok: false, status: 409, error: 'This invitation is for the athlete\'s own email address; the athlete accepts it from their own invitation email.' };
   const { row, duplicate } = uniqueSwimmerRow(db, invite.swimmerId);
   if (duplicate) return { ok: false, status: 409, error: 'The swimmer record for this invitation is ambiguous. Ask the club to correct it.' };
   if (!row || text(row.status).toLowerCase() === 'deleted' || row.deletedAt) return { ok: false, status: 409, error: 'The swimmer record for this invitation is no longer available.' };
