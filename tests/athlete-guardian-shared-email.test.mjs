@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAthleteInvite, parseInviteToken, independentAthleteInviteEmail } from '../athlete-account-invites.mjs';
+import { createAthleteInvite, parseInviteToken, independentAthleteInviteEmail, recordGuardianConsent, GUARDIAN_CONSENT_VERSION } from '../athlete-account-invites.mjs';
 import { planBulkItem } from '../athlete-invite-delivery.mjs';
 import { checkManagedAcceptance } from '../athlete-guardian-managed.mjs';
 
@@ -55,4 +55,25 @@ test('legacy guardian-shared target email can use guardian-managed flow', () => 
   const stored = { ...made.db, athleteAccountInvites: [legacy] };
   assert.equal(checkManagedAcceptance(stored, parseInviteToken(made.guardianToken), { username: 'child.legacy' }, now).ok, true);
   assert.equal(stored.swimmers.length, 1);
+});
+
+test('an emailed guardian approval is verified before managed child activation', () => {
+  const now = new Date('2026-11-12T12:00:00Z');
+  const made = createAthleteInvite({ swimmers: [{ id: 'child-mail', dob: '2012-01-01' }] }, {
+    swimmerId: 'child-mail', tenantKey: 'demo-club', actor: 'coach', guardianEmail: 'parent@example.com', now,
+  });
+  const guardianToken = parseInviteToken(made.guardianToken);
+  const delivered = { ...made.db, athleteAccountInvites: made.db.athleteAccountInvites.map((invite) => ({
+    ...invite, delivery: 'email', deliveries: [{ kind: 'guardian', to: 'parent@example.com', status: 'sent', at: now.toISOString() }],
+  })) };
+  const bad = recordGuardianConsent(made.db, guardianToken, {
+    emailLinkApproval: true, consent: true, consentVersion: GUARDIAN_CONSENT_VERSION, now,
+  });
+  assert.equal(bad.status, 403, 'a manually copied guardian link is not automatically email verified');
+  const approved = recordGuardianConsent(delivered, guardianToken, {
+    emailLinkApproval: true, consent: true, consentVersion: GUARDIAN_CONSENT_VERSION, now,
+  });
+  assert.equal(approved.ok, true);
+  assert.equal(approved.invite.guardianConsent.verifiedBy, 'emailed-invitation-link');
+  assert.equal(checkManagedAcceptance(approved.db, guardianToken, { username: 'child.mail' }, now).ok, true);
 });
