@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAthleteInvite, parseInviteToken } from '../athlete-account-invites.mjs';
+import { createAthleteInvite, parseInviteToken, independentAthleteInviteEmail } from '../athlete-account-invites.mjs';
 import { planBulkItem } from '../athlete-invite-delivery.mjs';
 import { checkManagedAcceptance } from '../athlete-guardian-managed.mjs';
 
@@ -17,6 +17,7 @@ test('under-18 swimmer sharing guardian email routes to guardian-managed account
   const made = createAthleteInvite(db, { swimmerId: 'child-1', tenantKey: 'demo-club', actor: 'demo.coach', guardianEmail: plan.guardianEmail, targetEmail: 'father@example.com', now });
   assert.equal(made.ok, true);
   assert.equal(made.invite.targetEmail, '');
+  assert.equal(independentAthleteInviteEmail(made.invite), '');
   assert.equal(made.db.swimmers.length, 1, 'do not duplicate existing swimmer');
   const token = parseInviteToken(made.guardianToken);
   assert.ok(token);
@@ -40,4 +41,18 @@ test('distinct swimmer email remains independently restricted', () => {
     athleteAccountInvites: made.db.athleteAccountInvites.map((inv) => ({ ...inv, guardianConsent: { at: now.toISOString(), verifiedBy: 'emailed-invitation-link' } })),
   };
   assert.equal(checkManagedAcceptance(withConsent, parseInviteToken(made.guardianToken), { username: 'child.demo2' }, now).status, 409, 'own-email invitation cannot use managed-account route');
+});
+
+// A previously generated invitation may already contain the parent's email as targetEmail.
+// It should remain bound to the same child, but its guardian route must be recoverable.
+test('legacy guardian-shared target email can use guardian-managed flow', () => {
+  const now = new Date('2026-11-12T12:00:00Z');
+  const db = { swimmers: [{ id: 'child-legacy', dob: '2010-04-01' }] };
+  const made = createAthleteInvite(db, { swimmerId: 'child-legacy', tenantKey: 'demo-club', actor: 'coach', guardianEmail: 'father@example.com', now });
+  assert.equal(made.ok, true);
+  const legacy = { ...made.invite, targetEmail: 'FATHER@EXAMPLE.COM', guardianConsent: { at: now.toISOString(), verifiedBy: 'emailed-invitation-link' } };
+  assert.equal(independentAthleteInviteEmail(legacy), '');
+  const stored = { ...made.db, athleteAccountInvites: [legacy] };
+  assert.equal(checkManagedAcceptance(stored, parseInviteToken(made.guardianToken), { username: 'child.legacy' }, now).ok, true);
+  assert.equal(stored.swimmers.length, 1);
 });
