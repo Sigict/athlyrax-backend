@@ -28,7 +28,9 @@ export function checkManagedAcceptance(db = {}, parsed, account = {}, now = new 
   }
   if (status === 'revoked') return { ok: false, status: 410, error: 'This invitation was withdrawn by the club.' };
   if (status === 'expired') return { ok: false, status: 410, error: 'This invitation has expired. Ask the club for a new one.' };
-  if (!invite.guardianRequired || !invite.guardianConsent || invite.guardianConsent.verifiedBy !== 'email-code') return { ok: false, status: 403, error: 'Verified parent/guardian consent is required first.' };
+  // The verified emailed guardian link is also proof of mailbox control: recordGuardianConsent
+  // validates its one-use secret and delivery before marking it emailed-invitation-link.
+  if (!invite.guardianRequired || !['email-code', 'emailed-invitation-link'].includes(invite.guardianConsent?.verifiedBy)) return { ok: false, status: 403, error: 'Verified parent/guardian consent is required first.' };
   if (invite.targetEmail) return { ok: false, status: 409, error: 'This invitation is for the athlete\'s own email address; the athlete accepts it from their own invitation email.' };
   const { row, duplicate } = uniqueSwimmerRow(db, invite.swimmerId);
   if (duplicate) return { ok: false, status: 409, error: 'The swimmer record for this invitation is ambiguous. Ask the club to correct it.' };
