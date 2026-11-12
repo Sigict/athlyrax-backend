@@ -87,6 +87,13 @@ export function linkedAccountOf(row = {}) {
   return { username: text(row.swimmerAccountUsername), email: text(row.swimmerAccountEmail) };
 }
 
+// For legacy invitations that copied the guardian's address into the swimmer email,
+// that address never establishes an independently controlled child mailbox.
+export function independentAthleteInviteEmail(invite = {}) {
+  const email = text(invite.targetEmail).toLowerCase();
+  return invite.guardianRequired && email && email === text(invite.guardianEmail).toLowerCase() ? '' : email;
+}
+
 export function inviteStatus(invite = {}, now = Date.now()) {
   if (invite.revokedAt) return 'revoked';
   if (invite.acceptedAt) return 'accepted';
