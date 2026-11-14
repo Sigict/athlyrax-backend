@@ -64,6 +64,9 @@ jobs:
       - name: Independent swimmer sign-up email verification
         run: node --test tests/independent-swimmer-verify.integration.test.mjs
 
+      - name: Swimmer username change (record, history and personal training kept; reserved names)
+        run: node --test tests/swimmer-username-change.integration.test.mjs
+
       - name: Athlete App results sent to the club Results inbox (identity server-side, coach review)
         run: node --test tests/athlete-results-to-club.integration.test.mjs
 

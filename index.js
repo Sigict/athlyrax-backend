@@ -22,6 +22,7 @@ import { buildClubResults, buildSelfReportedProgress, testProtocols } from './at
 import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
 import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
 import * as athleteHomeProjectionModule from './athlete-home-projection.mjs';
+import { usernameProblem, normalizeUsername, renameSwimmerLinks, hasActiveWearable } from './account-username.mjs';
 import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
 import { issueGuardianAccountCode, verifyGuardianAccountCode } from './athlete-guardian-account-activation.mjs';
 import { savedContacts, applyContactChoice, supersedeLinkInvite, clubOverview, COACH_STATE_LABELS, buildInviteEmail, markAutoDelivery, rotateInviteToken, resendAllowed, recordDelivery, updateDelivery, newDeliveryId, applyDeliveryEvent, planBulkItem, dedupeBulkItems, BULK_MAX_ITEMS } from './athlete-invite-delivery.mjs';
@@ -5116,7 +5117,7 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		if (!AUTH_USERNAME_PATTERN.test(username)) { res.status(400).json({ error: 'Username must be 3-32 letters, numbers, dot, underscore or dash.' }); return; }
 		if (password.length < 10) { res.status(400).json({ error: 'Password must be at least 10 characters.' }); return; }
 		if (!fullName || !AUTH_EMAIL_PATTERN.test(email)) { res.status(400).json({ error: 'Full name and a valid email are required.' }); return; }
-		if (authUsers.some((u) => String(u?.username || '').toLowerCase() === username)) { res.status(409).json({ error: 'That username is taken.' }); return; }
+		{ const problem = chosenUsername ? usernameProblem(username, { users: authUsers }) : (authUsers.some((u) => String(u?.username || '').toLowerCase() === username) ? 'That username is taken.' : ''); if (problem) { res.status(problem === 'That username is taken.' ? 409 : 400).json({ error: problem }); return; } }
 		if (childInvite && email.toLowerCase() === String(inviteRow?.guardianEmail || '').trim().toLowerCase()) { res.status(400).json({ error: 'Use the swimmer\'s own email address, not the parent/guardian\'s. A swimmer without an email can get a login created by the parent/guardian from the parent/guardian link.', code: 'guardian-email-for-child' }); return; }
 		if (authUsers.some((u) => String(u?.email || '').toLowerCase() === email.toLowerCase())) {
 			res.status(409).json(childInvite
@@ -5287,6 +5288,52 @@ app.post('/swimmer/club-session-results', requireStrictAuth, requireSwimmerRole,
 	catch { res.status(503).json({ error: 'Your results could not be sent to the club now. They stay saved on this device; try again.' }); return; }
 	if (out.status < 300) appendAuthAuditEvent({ action: 'athlete_results_sent_to_club', req, status: 'success', target: target.athlete.id, details: { sessionId, results: results.length, duplicate: out.body.duplicate === true } });
 	res.status(out.status).json(out.body.ok ? { ok: true, duplicate: out.body.duplicate, sent: results.length, inboxItemId: out.body.item?.id } : out.body);
+});
+
+// ATHLYRAX_SWIMMER_USERNAME_CHANGE: a swimmer changes their own username after activation (password
+// required). The account link on their swimmer record in every club, and their personal training
+// file, move to the new name in one guarded step; swimmer ids, results, attendance and history do not
+// change. The old name stays reserved. Coaching accounts are not renamed here.
+app.post('/auth/username', requireStrictAuth, requireAdminRateLimit, async (req, res) => {
+	const user = findAuthUser(String(req.auth?.username || '').trim());
+	if (!user || String(user.role || '').toLowerCase() !== 'swimmer' || req.auth?.athleteMode) { res.status(403).json({ error: 'Only a swimmer account can change its username here.' }); return; }
+	if (!verifyPassword(String(req.body?.currentPassword || ''), user.passwordHash)) { res.status(401).json({ error: 'Your current password is not correct.' }); return; }
+	const oldName = String(user.username); const newName = normalizeUsername(req.body?.username);
+	if (newName === normalizeUsername(oldName)) { res.status(400).json({ error: 'That is already your username.' }); return; }
+	const problem = usernameProblem(newName, { users: authUsers, self: oldName });
+	if (problem) { res.status(problem === 'That username is taken.' ? 409 : 400).json({ error: problem }); return; }
+	const clubs = tenantKeysOnDisk().map((key) => athleteTenantPaths(key)).filter(Boolean);
+	for (const t of clubs) { const db = readJsonFile(t.paths.dbPath); if (db && hasActiveWearable(db, oldName)) { res.status(409).json({ error: 'Disconnect your wearable first, then reconnect it after changing your username.' }); return; } }
+	const oldPersonal = personalTrainingPath(STORAGE_ROOT, normalizeUsername(oldName)); const newPersonal = personalTrainingPath(STORAGE_ROOT, newName);
+	const renamed = [];
+	try {
+		await enqueueWrite(async () => {
+			if (fs.existsSync(newPersonal)) throw new Error('target personal store exists');
+			if (fs.existsSync(oldPersonal)) { fs.mkdirSync(path.dirname(newPersonal), { recursive: true }); fs.copyFileSync(oldPersonal, newPersonal); }
+			for (const t of clubs) {
+				const db = readJsonFile(t.paths.dbPath); if (!db || typeof db !== 'object' || Array.isArray(db)) continue;
+				const out = renameSwimmerLinks(db, oldName, newName);
+				if (!out.changed) continue;
+				writeDbSnapshotIfPossible(t.paths.dbPath, t.paths.snapshotDir);
+				writeAtomicJsonFile(t.paths.dbPath, out.db); renamed.push(t);
+			}
+			const previous = Array.isArray(user.previousUsernames) ? user.previousUsernames : [];
+			const snapshot = { username: user.username, previousUsernames: user.previousUsernames };
+			user.username = newName; user.previousUsernames = [...previous, { username: normalizeUsername(oldName), changedAt: new Date().toISOString() }].slice(-10);
+			try { persistAuthUsers(); } catch (error) { Object.assign(user, snapshot); throw error; }
+		});
+	} catch {
+		// Undo: club links back to the old name; the copied personal store is removed. The account is unchanged.
+		for (const t of renamed) { try { const db = readJsonFile(t.paths.dbPath); if (db) writeAtomicJsonFile(t.paths.dbPath, renameSwimmerLinks(db, newName, oldName).db); } catch {} }
+		try { if (fs.existsSync(oldPersonal) && fs.existsSync(newPersonal)) fs.unlinkSync(newPersonal); } catch {}
+		res.status(503).json({ error: 'Your username could not be changed safely. Nothing was changed; please try again.' });
+		return;
+	}
+	try { if (fs.existsSync(oldPersonal)) fs.unlinkSync(oldPersonal); } catch {}
+	const session = issueAuthToken(user, { csrf: req.auth.csrf });
+	setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
+	appendAuthAuditEvent({ action: 'username_changed', req, status: 'success', actor: newName, target: newName, details: { previousUsername: normalizeUsername(oldName), clubsUpdated: renamed.length } });
+	res.status(200).json({ ok: true, username: newName, previousUsername: normalizeUsername(oldName), clubsUpdated: renamed.length, csrfToken: session.csrf });
 });
 
 app.get('/auth/config', (req, res) => {
