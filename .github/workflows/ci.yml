@@ -64,6 +64,9 @@ jobs:
       - name: Independent swimmer sign-up email verification
         run: node --test tests/independent-swimmer-verify.integration.test.mjs
 
+      - name: Production health accepts identical code under a merge commit
+        run: node --test tests/live-commit-matches.test.mjs
+
       - name: Owner Console reporting, health checks and email delivery events
         run: node --test tests/owner-console.test.mjs tests/owner-console-reconciliation.test.mjs tests/owner-console.integration.test.mjs
 
