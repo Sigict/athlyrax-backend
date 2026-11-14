@@ -87,6 +87,13 @@ export function linkedAccountOf(row = {}) {
   return { username: text(row.swimmerAccountUsername), email: text(row.swimmerAccountEmail) };
 }
 
+// For legacy invitations that copied the guardian's address into the swimmer email,
+// that address never establishes an independently controlled child mailbox.
+export function independentAthleteInviteEmail(invite = {}) {
+  const email = text(invite.targetEmail).toLowerCase();
+  return invite.guardianRequired && email && email === text(invite.guardianEmail).toLowerCase() ? '' : email;
+}
+
 export function inviteStatus(invite = {}, now = Date.now()) {
   if (invite.revokedAt) return 'revoked';
   if (invite.acceptedAt) return 'accepted';
@@ -123,15 +130,17 @@ export function createAthleteInvite(db = {}, { swimmerId, tenantKey, clubName = 
   if (guardianRequired && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text(guardianEmail))) {
     return { ok: false, status: 400, error: 'This athlete is under 18 (or has no date of birth recorded): enter the parent/guardian email. The parent/guardian must confirm a code sent to that address.' };
   }
-  if (guardianRequired && targetEmail && text(targetEmail).toLowerCase() === text(guardianEmail).toLowerCase()) {
-    return { ok: false, status: 400, error: 'The parent/guardian email must be different from the athlete email.' };
-  }
+  // A child without an email may have the guardian's address in the club's Swimmer Email field.
+  // That address is NOT an independently verified athlete mailbox. Keep it only as the
+  // guardian contact/recovery email and issue an invitation with no athlete target email.
+  const athleteTarget = guardianRequired && text(targetEmail).toLowerCase() === text(guardianEmail).toLowerCase()
+    ? '' : text(targetEmail).toLowerCase();
   const id = `ai_${crypto.randomBytes(12).toString('hex')}`;
   const athleteSecret = secret(); const guardianSecret = guardianRequired ? secret() : '';
   const invite = {
     id, swimmerId: text(row.id), tenantKey: text(tenantKey), createdAt: now.toISOString(), createdBy: text(actor),
     expiresAt: new Date(now.getTime() + Math.max(1, Number(ttlHours) || 168) * 3600 * 1000).toISOString(),
-    targetEmail: text(targetEmail).toLowerCase(), tokenHash: sha256(athleteSecret),
+    targetEmail: athleteTarget, tokenHash: sha256(athleteSecret),
     guardianRequired, guardianEmail: text(guardianEmail).toLowerCase(), guardianTokenHash: guardianSecret ? sha256(guardianSecret) : '',
     guardianConsent: null, acceptedAt: '', acceptedBy: '', revokedAt: '', revokedBy: '',
   };

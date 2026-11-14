@@ -318,9 +318,10 @@ export function planBulkItem(db = {}, item = {}, now = new Date()) {
   if (guardianEmail && !validEmail(guardianEmail)) return skip('invalid-guardian-email', 'The parent/guardian email is not valid.');
   const guardianRequired = guardianRequiredFor(row, now);
   if (guardianRequired && !guardianEmail) return skip('missing-guardian-email', 'Under 18 or no date of birth: a parent/guardian email is required.');
-  if (guardianRequired && athleteEmail && athleteEmail === guardianEmail) return skip('same-email', 'The parent/guardian email must differ from the athlete email.');
+  // The same address is the guardian's contact/recovery email, not a child's own email.
+  const independentAthleteEmail = guardianRequired && athleteEmail === guardianEmail ? '' : athleteEmail;
   if (!guardianRequired && !athleteEmail) return skip('missing-athlete-email', 'An athlete email is required.');
-  return { ok: true, swimmerId, name, row, athleteEmail, guardianEmail: guardianRequired ? guardianEmail : '', guardianRequired, sendTo: guardianRequired ? 'guardian' : 'athlete' };
+  return { ok: true, swimmerId, name, row, athleteEmail: independentAthleteEmail, guardianEmail: guardianRequired ? guardianEmail : '', guardianRequired, sendTo: guardianRequired ? 'guardian' : 'athlete' };
 }
 
 export function dedupeBulkItems(items = []) {
