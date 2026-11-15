@@ -921,7 +921,6 @@
    "websiteFiles": [
     "src/AthlyraxPhase1App.jsx",
     "src/components/operations/AthleteAgreementsSectionCore.jsx",
-    "src/components/planning/PlannerDayPopupWithAiImport.jsx",
     "src/components/planning/TemplatesSection.jsx",
     "src/components/research/CoachLanguageResearchController.jsx",
     "src/planning-core/generationCore.js",
@@ -939,7 +938,6 @@
     "src/utils/scheduledSessionDetailsMutation.js",
     "src/utils/scheduledSessionsPrint.js",
     "src/utils/sessionFileImport.js",
-    "src/utils/sessionImportHistory.js",
     "src/utils/systemAttendancePersistence.js",
     "src/utils/validationThreeLayerReportData.js",
     "public/swimmer-signin.html"
@@ -992,7 +990,6 @@
     "src/components/operations/AthleteAgreementsSectionCore.jsx",
     "src/components/operations/GroupTestResultsModal.jsx",
     "src/components/planning/PlannerDayPopupCoachUi.jsx",
-    "src/components/planning/PlannerDayPopupWithAiImport.jsx",
     "src/components/planning/PlannerSessionResultsPopup.jsx",
     "src/components/planning/TemplatesSection.jsx",
     "src/components/research/CoachLanguageResearchController.jsx",
@@ -1012,7 +1009,8 @@
     "src/utils/ispPlannerSource.js",
     "src/utils/plannerAppMutations.js",
     "src/utils/plannerCanonicalDayVolumes.js",
-    "src/utils/plannerPopupData.js"
+    "src/utils/plannerPopupData.js",
+    "src/utils/reportCanonicalScope.js"
    ],
    "fields": [
     "accountId",
@@ -2806,7 +2804,9 @@
    "line": 4179,
    "area": "Owner administration",
    "permission": "Primary software owner only",
-   "calledBy": []
+   "calledBy": [
+    "Coaching Software"
+   ]
   },
   {
    "method": "GET",
