@@ -176,12 +176,29 @@ const isSpeedWeightedMetric = (record) => record?.kind !== 'trend'
  * (P = 1000·(B/T)³, so B/T = (P/1000)^(1/3) = (score/100)^(1/3)).
  * Null when no timed swim has a World Aquatics reference.
  */
+// A single timed swim implying more than this much higher speed than every other timed swim is
+// treated as unconfirmed for the speed level (owner item 14): one implausible result must not lift
+// every consistency axis. It still counts as its own evidence; with no such outlier nothing changes.
+export const SPEED_LEVEL_OUTLIER_RATIO = 1.10;
 export function swimmerSpeedLevel(records = []) {
-  const best = asArray(records)
+  const ranked = asArray(records)
     .filter((record) => WORLD_LEVEL_METHODS.has(record?.method) && Number.isFinite(Number(record?.score)) && Number(record.score) > 0)
-    .sort((a, b) => Number(b.score) - Number(a.score))[0];
+    .sort((a, b) => Number(b.score) - Number(a.score));
+  const ratioOf = (record) => Math.cbrt(Number(record.score) / 100);
+  // One swim can yield several records (test row and its repetition): compare with the best record
+  // of a DIFFERENT piece of evidence.
+  const evidenceOf = (record) => String(record?.evidenceId || record?.date || '');
+  const excludedIds = new Set();
+  let best = null;
+  for (const record of ranked) {
+    if (excludedIds.has(evidenceOf(record))) continue;
+    const next = ranked.find((other) => evidenceOf(other) !== evidenceOf(record) && !excludedIds.has(evidenceOf(other)));
+    if (next && ratioOf(record) > ratioOf(next) * SPEED_LEVEL_OUTLIER_RATIO) { excludedIds.add(evidenceOf(record)); continue; }
+    best = record; break;
+  }
   if (!best) return null;
-  return { ratio: Math.cbrt(Number(best.score) / 100), points: Number(best.score) * 10, evidenceId: best.evidenceId || '', date: best.date || '' };
+  const excluded = [...excludedIds].filter(Boolean);
+  return { ratio: ratioOf(best), points: Number(best.score) * 10, evidenceId: best.evidenceId || '', date: best.date || '', ...(excluded.length ? { unconfirmedOutliers: excluded } : {}) };
 }
 
 export const SPEED_LEVEL_NEEDED_REASON = 'Needs a timed test or race: consistency is placed on the world-record scale by the swimmer\'s speed.';
