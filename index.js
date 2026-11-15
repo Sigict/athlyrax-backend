@@ -1,5 +1,6 @@
 /* global process, Buffer */
 import { COACHING_PLAN_RULES, CAPACITY_ADDON_RULES, resolveSubscriptionComposition, computeSwimmerCapacity, stopwatchEntitlement, buildAddonLineItems, checkSwimmerCapacity } from './coaching-billing.mjs';
+import { athletePlanCatalogue } from './athlete-plans.mjs';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -4170,7 +4171,7 @@ app.get('/owner/console/sales', requireStrictAuth, requireSoftwareOwnerRole, asy
 	]);
 	const cpdPrices = await priceCheck(cpdStripeReadClient || stripeClient, ['02', '03'].map((m) => ({ product: `CPD 01 Module ${m}`, key: `cpd-module-${m}`, expectedMinor: 499, interval: 'one-time', salesEnabled: String(process.env[`CPD_MODULE${m}_SALES_ENABLED`] || '').toLowerCase() === 'true', priceId: process.env[`CPD_MODULE${m}_PRICE_ID`] })));
 	let reconciliation = []; try { reconciliation = billingReconciliation(coaching?.subscriptions || [], authUsers); } catch {}
-	res.status(200).json({ ok: true, days, periodLabel: PERIODS[days], generatedAt: new Date().toISOString(), keys: { coaching: COACHING_KEY_INFO, cpd: CPD_KEY_INFO }, coaching, cpd, prices: [...prices, ...cpdPrices], reconciliation });
+	res.status(200).json({ ok: true, days, periodLabel: PERIODS[days], generatedAt: new Date().toISOString(), keys: { coaching: COACHING_KEY_INFO, cpd: CPD_KEY_INFO }, coaching, cpd, prices: [...prices, ...cpdPrices], reconciliation, plannedPrices: athletePlanCatalogue() });
 });
 
 // Owner action (register item 25): re-read ONE subscription from Stripe as it is now and apply it with
