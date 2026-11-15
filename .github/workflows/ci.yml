@@ -50,7 +50,7 @@ jobs:
         run: node --test tests/cpd-module02.test.mjs
 
       - name: Coaching tiers, capacity blocks and Stopwatch entitlement
-        run: node --test tests/coaching-billing.test.mjs tests/coaching-billing.integration.test.mjs
+        run: node --test tests/coaching-billing.test.mjs tests/coaching-billing.integration.test.mjs tests/athlete-plans.test.mjs
 
       - name: Results inbox (Stopwatch/Assistant/Video results sent to the club)
         run: node --test tests/results-inbox.integration.test.mjs tests/checkout-stale-customer.test.mjs
@@ -67,8 +67,15 @@ jobs:
       - name: Independent swimmer sign-up email verification
         run: node --test tests/independent-swimmer-verify.integration.test.mjs
 
+      - name: Production health accepts identical code under a merge commit
+        run: node --test tests/live-commit-matches.test.mjs
+      - name: Swimmer username change (record, history and personal training kept; reserved names)
+        run: node --test tests/swimmer-username-change.integration.test.mjs
+      - name: Athlete App results sent to the club Results inbox (identity server-side, coach review)
+        run: node --test tests/athlete-results-to-club.integration.test.mjs
+
       - name: Owner Console reporting, health checks and email delivery events
-        run: node --test tests/owner-console.test.mjs tests/owner-console-reconciliation.test.mjs tests/owner-console.integration.test.mjs
+        run: node --test tests/owner-console.test.mjs tests/owner-console-reconciliation.test.mjs tests/owner-console.integration.test.mjs tests/owner-refresh-subscription.integration.test.mjs
 
       - name: One account with several roles (coach, swimmer, parent/guardian)
         run: node --test tests/multi-role-accounts.integration.test.mjs
