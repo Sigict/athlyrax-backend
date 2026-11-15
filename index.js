@@ -214,8 +214,12 @@ const authDailyAccessRecorded = new Map();
 const authPasswordResetByUser = new Map();
 const authPopupTickets = new Map();
 const AUTH_POPUP_TICKET_TTL_MS = 60 * 1000;
+// Tests only: ATHLYRAX_TEST_STRIPE_API_URL points the client at a local Stripe stand-in. Ignored in
+// production, where the client always talks to Stripe.
+const TEST_STRIPE_API_URL = !IS_PRODUCTION ? String(process.env.ATHLYRAX_TEST_STRIPE_API_URL || '').trim() : '';
+const testStripeApi = (() => { try { return TEST_STRIPE_API_URL ? new URL(TEST_STRIPE_API_URL) : null; } catch { return null; } })();
 const stripeClient = BILLING_STRIPE_SECRET_KEY
-	? new Stripe(BILLING_STRIPE_SECRET_KEY, { apiVersion: '2025-03-31.basil' })
+	? new Stripe(BILLING_STRIPE_SECRET_KEY, { apiVersion: '2025-03-31.basil', ...(testStripeApi ? { host: testStripeApi.hostname, port: Number(testStripeApi.port) || 80, protocol: testStripeApi.protocol.replace(':', '') } : {}) })
 	: null;
 
 if (AUTH_REQUIRED && IS_PRODUCTION && AUTH_SECRET === 'athlyrax-dev-secret-change-me') {
@@ -4165,6 +4169,30 @@ app.get('/owner/console/sales', requireStrictAuth, requireSoftwareOwnerRole, asy
 	const cpdPrices = await priceCheck(cpdStripeReadClient || stripeClient, ['02', '03'].map((m) => ({ product: `CPD 01 Module ${m}`, key: `cpd-module-${m}`, expectedMinor: 499, interval: 'one-time', salesEnabled: String(process.env[`CPD_MODULE${m}_SALES_ENABLED`] || '').toLowerCase() === 'true', priceId: process.env[`CPD_MODULE${m}_PRICE_ID`] })));
 	let reconciliation = []; try { reconciliation = billingReconciliation(coaching?.subscriptions || [], authUsers); } catch {}
 	res.status(200).json({ ok: true, days, periodLabel: PERIODS[days], generatedAt: new Date().toISOString(), keys: { coaching: COACHING_KEY_INFO, cpd: CPD_KEY_INFO }, coaching, cpd, prices: [...prices, ...cpdPrices], reconciliation });
+});
+
+// Owner action (register item 25): re-read ONE subscription from Stripe as it is now and apply it with
+// the normal subscription handler. This is not an event replay: no Stripe event is resent and nothing
+// is changed in Stripe. Only an account already linked to that Stripe customer is updated, and the
+// before/after billing state is written to the audit log.
+const billingSnapshot = (b = {}) => ({ status: String(b?.status || '') || null, planKey: String(b?.planKey || '') || null, cancelAtPeriodEnd: b?.cancelAtPeriodEnd === true, currentPeriodEnd: String(b?.currentPeriodEnd || '') || null });
+app.post('/owner/console/billing/refresh-from-stripe', requireStrictAuth, requireSoftwareOwnerRole, async (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	const subscriptionId = String(req.body?.subscriptionId || '').trim();
+	if (!/^sub_[A-Za-z0-9]{8,64}$/.test(subscriptionId)) return res.status(400).json({ ok: false, error: 'invalid_subscription_id' });
+	if (!stripeClient) return res.status(503).json({ ok: false, error: 'stripe_unavailable' });
+	let subscription;
+	try { subscription = await stripeClient.subscriptions.retrieve(subscriptionId); } catch (error) {
+		return res.status(error?.statusCode === 404 ? 404 : 502).json({ ok: false, error: error?.statusCode === 404 ? 'subscription_not_found' : 'stripe_read_failed' });
+	}
+	const customerId = String(subscription?.customer || '').trim();
+	const user = findAuthUserByCustomerId(customerId);
+	if (!user) return res.status(409).json({ ok: false, error: 'no_linked_account', detail: 'No AthlyraX account is linked to this Stripe customer; nothing was changed.' });
+	const before = billingSnapshot(user.billing);
+	await handleStripeSubscriptionEvent(subscription);
+	const after = billingSnapshot(findAuthUserByCustomerId(customerId)?.billing);
+	appendAuthAuditEvent({ action: 'owner_billing_refreshed_from_stripe', req, status: 'success', target: String(user.username || ''), details: { subscriptionId, before, after } });
+	return res.status(200).json({ ok: true, username: String(user.username || ''), subscriptionId, before, after, changed: JSON.stringify(before) !== JSON.stringify(after) });
 });
 
 // Integrity log (stdout, no personal data): club databases, recorded software failures and Stripe read
