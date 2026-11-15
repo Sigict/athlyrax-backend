@@ -72,7 +72,7 @@ jobs:
         run: node --test tests/athlete-results-to-club.integration.test.mjs
 
       - name: Owner Console reporting, health checks and email delivery events
-        run: node --test tests/owner-console.test.mjs tests/owner-console-reconciliation.test.mjs tests/owner-console.integration.test.mjs
+        run: node --test tests/owner-console.test.mjs tests/owner-console-reconciliation.test.mjs tests/owner-console.integration.test.mjs tests/owner-refresh-subscription.integration.test.mjs
 
       - name: One account with several roles (coach, swimmer, parent/guardian)
         run: node --test tests/multi-role-accounts.integration.test.mjs
