@@ -16,6 +16,7 @@ jobs:
     env:
       BACKEND_URL: https://athlyrax-backend.onrender.com
       EXPECTED_GUARD: 2026-08-13-v1
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout exact commit
         uses: actions/checkout@v4
@@ -40,7 +41,9 @@ jobs:
             guard="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-DB-Persistence-Guard:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
             backend_commit="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${headers}")"
 
-            if [[ "${code}" == "401" && "${guard}" == "${EXPECTED_GUARD}" && "${backend_commit}" == "${GITHUB_SHA}" ]]; then
+            same_code=no
+            if [[ "${backend_commit}" =~ ^[0-9a-f]{40}$ ]] && node scripts/live-commit-matches.mjs "${backend_commit}" "${GITHUB_SHA}"; then same_code=yes; fi
+            if [[ "${code}" == "401" && "${guard}" == "${EXPECTED_GUARD}" && "${same_code}" == "yes" ]]; then
               grep -qi '^Cache-Control:.*no-store' "${headers}"
               echo "Exact live backend ${backend_commit} exposes persistence guard ${guard}; protected /db is read-only probed and no-store."
               echo 'ATHLYRAX_LIVE_STORAGE_BOUNDARY_OK'
