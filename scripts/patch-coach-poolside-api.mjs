@@ -70,7 +70,7 @@ async function applyCoachPoolsideMutation(req, res, mutator) {
 			if (!currentDb || typeof currentDb !== 'object' || Array.isArray(currentDb)) throw new Error('Coach Poolside database is unavailable.');
 			output = mutator(currentDb);
 			if (!output?.ok) return;
-			writeAtomicJsonFile(tenantScope.storagePaths.dbPath, output.db);
+			writeAtomicJsonFileCompact(tenantScope.storagePaths.dbPath, output.db);
 		});
 		if (!output?.ok) {
 			res.status(Number(output?.status || 400)).json({ error: String(output?.error || 'Poolside change was rejected.') });

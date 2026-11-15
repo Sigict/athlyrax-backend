@@ -58,6 +58,9 @@ jobs:
       - name: Coach Pool Console connection (session load, results per set/rep, lane plan)
         run: node --test tests/coach-poolside-console.integration.test.mjs tests/coach-poolside-projection.test.mjs
 
+      - name: Pool Console squad membership, compact poolside write in the build, demo.coach role
+        run: node --test tests/poolside-current-squad-and-build-write.test.mjs tests/coach-observations.test.mjs tests/coach-poolside-mutations.test.mjs tests/demo-coach-canonical-role.test.mjs
+
       - name: Whole-club save keeps audit metadata of unchanged rows
         run: node --test tests/ownership-metadata-unchanged-rows.integration.test.mjs
 
