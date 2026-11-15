@@ -18,6 +18,9 @@ function setSessionId(row = {}) {
 function rowSquadIds(row = {}) {
   return [...new Set([
     ...ids(row.squadIds),
+    // Swimmer records carry their squad as currentSquadId (Squads, Squad Transfers, demo data); without it
+    // a swimmer recorded only that way vanished from the Pool Console with their observations.
+    text(row.currentSquadId),
     text(row.squadId),
     text(row.teamId),
   ].filter(Boolean))];
