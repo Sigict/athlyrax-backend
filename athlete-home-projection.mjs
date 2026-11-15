@@ -376,7 +376,11 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
       dob: text(athlete.dob || athlete.dateOfBirth),
       asn: text(athlete.asn || athlete.asaN || athlete.asaNumber || athlete.membershipNumber),
     },
-    clubConnections,
+    // The swimmer's squad comes from this club's own record when the connection does not name it.
+    clubConnections: (() => {
+      const own = asArray(db.squads).find((sq) => text(sq?.id) && text(sq.id) === text(athlete.currentSquadId || athlete.squadId));
+      return own ? clubConnections.map((c) => (text(c?.squadName) ? c : { ...c, squadId: text(c?.squadId) || text(own.id), squadName: text(own.name) })) : clubConnections;
+    })(),
     sessions,
     disciplines: clubDisciplines(athlete, clubProfile),
     integratedProfile: clubProfile || athlete.integratedProfile || null,
