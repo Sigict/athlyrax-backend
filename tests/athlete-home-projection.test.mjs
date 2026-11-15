@@ -175,3 +175,11 @@ test('athlete sees only their own recorded club results, lane and start offset',
   assert.ok(!JSON.stringify(home).includes('private') && !JSON.stringify(home).includes('coachA'), 'no coach-only fields');
   assert.deepEqual(s.myLane, { lane: 'Lane 2', position: 2, swimmersInLane: 2, sendoffSeconds: 60, staggerSeconds: 5, startOffsetSeconds: 5 });
 });
+
+test('club connection shows the swimmer\'s squad from the club record when the connection has none', async () => {
+  const { buildAthleteHomeProjection } = await import('../athlete-home-projection.mjs');
+  const db = { squads: [{ id: 'sq-1', name: 'Squad One' }], swimmers: [{ id: 'amelia', firstName: 'Amelia', lastName: 'Foster', currentSquadId: 'sq-1', swimmerAccountUsername: 'amelia1' }] };
+  const p = buildAthleteHomeProjection(db, { username: 'amelia1', role: 'swimmer' }, { tenantId: 'tenant-a', connection: { tenantId: 'tenant-a', clubId: 'tenant-a', clubName: 'Club A', status: 'active' } });
+  const club = p.clubConnections.find((c) => c.clubName === 'Club A');
+  assert.equal(club?.squadName, 'Squad One');
+});

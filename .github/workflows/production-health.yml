@@ -18,9 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - name: Checkout (commit comparison script)
+        uses: actions/checkout@v4
+
       - name: Check public frontend and exact backend boundaries
         id: health
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -u
           failed=0
@@ -87,7 +92,9 @@ jobs:
           if [[ ! "${backend_commit}" =~ ^[0-9a-f]{40}$ ]]; then
             failed=1
             reasons+=("backend_commit_header_missing")
-          elif [[ "${expected_backend_commit}" =~ ^[0-9a-f]{40}$ && "${backend_commit}" != "${expected_backend_commit}" ]]; then
+          # Same code counts as current: a pull request's head commit can be live while main is the merge
+          # commit of that same pull request (identical files). Different code is still stale.
+          elif [[ "${expected_backend_commit}" =~ ^[0-9a-f]{40}$ ]] && ! node scripts/live-commit-matches.mjs "${backend_commit}" "${expected_backend_commit}"; then
             failed=1
             reasons+=("backend_commit_stale_expected_${expected_backend_commit}_received_${backend_commit}")
           fi
@@ -105,7 +112,8 @@ jobs:
           fi
 
       - name: Record health transition without alert spam
-        if: always()
+        # Only main records alerts; a manual run from a branch reports in its own log only.
+        if: always() && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           HEALTH_STATE: ${{ steps.health.outputs.state }}
