@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 export const RESULTS_INBOX_MAX_BYTES = 2 * 1024 * 1024;
 export const RESULTS_INBOX_MAX_RESULTS = 2000;
 export const RESULTS_INBOX_MAX_ITEMS = 500;
-const SOURCES = new Set(['console', 'stopwatch', 'assistant', 'video']);
+const SOURCES = new Set(['console', 'stopwatch', 'assistant', 'video', 'athlete']);
 const STATUSES = new Set(['new', 'imported', 'dismissed']);
 
 const text = (value, max = 200) => String(value ?? '').trim().slice(0, max);
@@ -99,6 +99,34 @@ export function registerResultsInbox(app, deps) {
 		return next;
 	}
 
+	// Adds one validated results file to a club's inbox (same rules for coaches' apps and athletes).
+	function addToInbox(tenantId, file, { sentBy = '', app: appName = '' } = {}) {
+		let size = 0;
+		try { size = Buffer.byteLength(JSON.stringify(file ?? null)); } catch { size = Infinity; }
+		if (size > RESULTS_INBOX_MAX_BYTES) return Promise.resolve({ status: 413, body: { error: 'The results file is larger than 2 MB.' } });
+		const check = validateResultsFile(file);
+		if (!check.ok) return Promise.resolve({ status: 400, body: { error: check.error } });
+		const fingerprint = resultsFingerprint(file);
+		const dir = tenantDir(tenantId);
+		return serial(dir, () => {
+			const index = readIndex(dir);
+			const existing = index.find((row) => row.fingerprint === fingerprint);
+			if (existing) return { status: 200, body: { ok: true, duplicate: true, item: existing } };
+			if (index.filter((row) => row.status === 'new').length >= RESULTS_INBOX_MAX_ITEMS) {
+				return { status: 409, body: { error: 'The Results inbox is full. Import or dismiss older items first.' } };
+			}
+			const id = crypto.randomBytes(12).toString('hex');
+			const item = {
+				id, fingerprint, status: 'new', createdAt: new Date().toISOString(),
+				sentBy: text(sentBy, 120), app: SOURCES.has(text(appName, 40)) ? text(appName, 40) : (check.summary.sources[0] || 'console'),
+				...check.summary,
+			};
+			writeAtomic(path.join(dir, `${id}.json`), file);
+			writeAtomic(path.join(dir, 'index.json'), [item, ...index]);
+			return { status: 201, body: { ok: true, duplicate: false, item } };
+		});
+	}
+
 	app.post('/results-inbox', requireStrictAuth, requireWriteRole, (req, res) => {
 		const tenantId = tenantOf(req, res); if (!tenantId) return;
 		const file = req.body?.file;
@@ -174,4 +202,5 @@ export function registerResultsInbox(app, deps) {
 		}).then((out) => res.status(out.status).json(out.body))
 			.catch(() => res.status(500).json({ error: 'Could not update the item.' }));
 	});
+	return { addToInbox };
 }

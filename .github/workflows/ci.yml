@@ -66,6 +66,10 @@ jobs:
 
       - name: Production health accepts identical code under a merge commit
         run: node --test tests/live-commit-matches.test.mjs
+      - name: Swimmer username change (record, history and personal training kept; reserved names)
+        run: node --test tests/swimmer-username-change.integration.test.mjs
+      - name: Athlete App results sent to the club Results inbox (identity server-side, coach review)
+        run: node --test tests/athlete-results-to-club.integration.test.mjs
 
       - name: Owner Console reporting, health checks and email delivery events
         run: node --test tests/owner-console.test.mjs tests/owner-console-reconciliation.test.mjs tests/owner-console.integration.test.mjs
