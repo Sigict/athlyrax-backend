@@ -22,6 +22,8 @@ import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraini
 import { buildClubResults, buildSelfReportedProgress, testProtocols } from './athlete-tests-races.mjs';
 import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
 import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
+import * as athleteHomeProjectionModule from './athlete-home-projection.mjs';
+import { usernameProblem, normalizeUsername, renameSwimmerLinks, hasActiveWearable } from './account-username.mjs';
 import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
 import { issueGuardianAccountCode, verifyGuardianAccountCode } from './athlete-guardian-account-activation.mjs';
 import { savedContacts, applyContactChoice, supersedeLinkInvite, clubOverview, COACH_STATE_LABELS, buildInviteEmail, markAutoDelivery, rotateInviteToken, resendAllowed, recordDelivery, updateDelivery, newDeliveryId, applyDeliveryEvent, planBulkItem, dedupeBulkItems, BULK_MAX_ITEMS } from './athlete-invite-delivery.mjs';
@@ -215,8 +217,12 @@ const authDailyAccessRecorded = new Map();
 const authPasswordResetByUser = new Map();
 const authPopupTickets = new Map();
 const AUTH_POPUP_TICKET_TTL_MS = 60 * 1000;
+// Tests only: ATHLYRAX_TEST_STRIPE_API_URL points the client at a local Stripe stand-in. Ignored in
+// production, where the client always talks to Stripe.
+const TEST_STRIPE_API_URL = !IS_PRODUCTION ? String(process.env.ATHLYRAX_TEST_STRIPE_API_URL || '').trim() : '';
+const testStripeApi = (() => { try { return TEST_STRIPE_API_URL ? new URL(TEST_STRIPE_API_URL) : null; } catch { return null; } })();
 const stripeClient = BILLING_STRIPE_SECRET_KEY
-	? new Stripe(BILLING_STRIPE_SECRET_KEY, { apiVersion: '2025-03-31.basil' })
+	? new Stripe(BILLING_STRIPE_SECRET_KEY, { apiVersion: '2025-03-31.basil', ...(testStripeApi ? { host: testStripeApi.hostname, port: Number(testStripeApi.port) || 80, protocol: testStripeApi.protocol.replace(':', '') } : {}) })
 	: null;
 
 if (AUTH_REQUIRED && IS_PRODUCTION && AUTH_SECRET === 'athlyrax-dev-secret-change-me') {
@@ -4168,6 +4174,30 @@ app.get('/owner/console/sales', requireStrictAuth, requireSoftwareOwnerRole, asy
 	res.status(200).json({ ok: true, days, periodLabel: PERIODS[days], generatedAt: new Date().toISOString(), keys: { coaching: COACHING_KEY_INFO, cpd: CPD_KEY_INFO }, coaching, cpd, prices: [...prices, ...cpdPrices], reconciliation, plannedPrices: athletePlanCatalogue() });
 });
 
+// Owner action (register item 25): re-read ONE subscription from Stripe as it is now and apply it with
+// the normal subscription handler. This is not an event replay: no Stripe event is resent and nothing
+// is changed in Stripe. Only an account already linked to that Stripe customer is updated, and the
+// before/after billing state is written to the audit log.
+const billingSnapshot = (b = {}) => ({ status: String(b?.status || '') || null, planKey: String(b?.planKey || '') || null, cancelAtPeriodEnd: b?.cancelAtPeriodEnd === true, currentPeriodEnd: String(b?.currentPeriodEnd || '') || null });
+app.post('/owner/console/billing/refresh-from-stripe', requireStrictAuth, requireSoftwareOwnerRole, async (req, res) => {
+	res.set('Cache-Control', 'no-store');
+	const subscriptionId = String(req.body?.subscriptionId || '').trim();
+	if (!/^sub_[A-Za-z0-9]{8,64}$/.test(subscriptionId)) return res.status(400).json({ ok: false, error: 'invalid_subscription_id' });
+	if (!stripeClient) return res.status(503).json({ ok: false, error: 'stripe_unavailable' });
+	let subscription;
+	try { subscription = await stripeClient.subscriptions.retrieve(subscriptionId); } catch (error) {
+		return res.status(error?.statusCode === 404 ? 404 : 502).json({ ok: false, error: error?.statusCode === 404 ? 'subscription_not_found' : 'stripe_read_failed' });
+	}
+	const customerId = String(subscription?.customer || '').trim();
+	const user = findAuthUserByCustomerId(customerId);
+	if (!user) return res.status(409).json({ ok: false, error: 'no_linked_account', detail: 'No AthlyraX account is linked to this Stripe customer; nothing was changed.' });
+	const before = billingSnapshot(user.billing);
+	await handleStripeSubscriptionEvent(subscription);
+	const after = billingSnapshot(findAuthUserByCustomerId(customerId)?.billing);
+	appendAuthAuditEvent({ action: 'owner_billing_refreshed_from_stripe', req, status: 'success', target: String(user.username || ''), details: { subscriptionId, before, after } });
+	return res.status(200).json({ ok: true, username: String(user.username || ''), subscriptionId, before, after, changed: JSON.stringify(before) !== JSON.stringify(after) });
+});
+
 // Integrity log (stdout, no personal data): club databases, recorded software failures and Stripe read
 // access, at start-up and every 6 hours, so a failure cannot stay silent between owner visits.
 const OPS_PUBLIC_TENANTS = new Set(['demo-company', 'snapshot-public', 'athlyrax-demo']);
@@ -5116,7 +5146,7 @@ app.post('/athlete-invites/accept', requireLoginRateLimit, async (req, res) => {
 		if (!AUTH_USERNAME_PATTERN.test(username)) { res.status(400).json({ error: 'Username must be 3-32 letters, numbers, dot, underscore or dash.' }); return; }
 		if (password.length < 10) { res.status(400).json({ error: 'Password must be at least 10 characters.' }); return; }
 		if (!fullName || !AUTH_EMAIL_PATTERN.test(email)) { res.status(400).json({ error: 'Full name and a valid email are required.' }); return; }
-		if (authUsers.some((u) => String(u?.username || '').toLowerCase() === username)) { res.status(409).json({ error: 'That username is taken.' }); return; }
+		{ const problem = chosenUsername ? usernameProblem(username, { users: authUsers }) : (authUsers.some((u) => String(u?.username || '').toLowerCase() === username) ? 'That username is taken.' : ''); if (problem) { res.status(problem === 'That username is taken.' ? 409 : 400).json({ error: problem }); return; } }
 		if (childInvite && email.toLowerCase() === String(inviteRow?.guardianEmail || '').trim().toLowerCase()) { res.status(400).json({ error: 'Use the swimmer\'s own email address, not the parent/guardian\'s. A swimmer without an email can get a login created by the parent/guardian from the parent/guardian link.', code: 'guardian-email-for-child' }); return; }
 		if (authUsers.some((u) => String(u?.email || '').toLowerCase() === email.toLowerCase())) {
 			res.status(409).json(childInvite
@@ -5229,11 +5259,110 @@ app.post('/swimmer/clubs/leave', requireStrictAuth, requireSwimmerRole, async (r
 });
 
 // Stopwatch / Assistant / Video results sent to the coach's club for review and import.
-registerResultsInbox(app, {
+const resultsInbox = registerResultsInbox(app, {
 	storageRoot: STORAGE_ROOT,
 	requireStrictAuth,
 	requireWriteRole,
 	resolveTenantId: (req) => resolveTenantKeyFromUser(findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {}),
+});
+
+// ATHLYRAX_ATHLETE_RESULTS_TO_CLUB: an athlete sends the repetitions they recorded for one of their
+// club's sessions to that club's Results inbox. The swimmer identity and the session come from the
+// server (the athlete's own linked record, a session the athlete is authorised to see); the coach
+// reviews and imports them with the normal save, so athlete-entered results are never written into
+// club data unseen and stay labelled athlete-entered (unverified). Re-sending the same results is a no-op.
+const clockToSeconds = (v) => { const t = String(v ?? '').trim(); if (/^\d+(\.\d+)?$/.test(t)) return Number(t); const m = t.match(/^(\d{1,3}):(\d{1,2}(?:\.\d+)?)$/); return m ? Number(m[1]) * 60 + Number(m[2]) : NaN; };
+app.post('/swimmer/club-session-results', requireStrictAuth, requireSwimmerRole, async (req, res) => {
+	const sessionId = String(req.body?.coachSessionId || '').trim().slice(0, 200);
+	const rows = Array.isArray(req.body?.results) ? req.body.results : [];
+	if (!sessionId || !rows.length) { res.status(400).json({ error: 'Choose a club session and record at least one repetition.' }); return; }
+	if (rows.length > 300) { res.status(413).json({ error: 'Send at most 300 repetitions at once.' }); return; }
+	const storageResolution = resolveStoragePathsForRequest(req);
+	const authUser = findAuthUser(String(req.auth?.username || '').trim()) || req.auth || {};
+	const primaryTenantId = String(storageResolution?.tenantId || resolveAuthTenantId(req.auth) || '').trim();
+	let target = null;
+	for (const connection of athleteTenantRegistry.activeAthleteTenantConnections(authUser, primaryTenantId)) {
+		const paths = connection.tenantId === primaryTenantId && storageResolution?.storagePaths ? storageResolution.storagePaths : resolveStoragePathsForTenantKey(connection.tenantId);
+		const db = readJsonFile(paths.dbPath);
+		if (!db || typeof db !== 'object' || Array.isArray(db)) continue;
+		let projection = null;
+		try { projection = athleteHomeProjectionModule.buildAthleteHomeProjection(db, authUser, { tenantId: connection.tenantId, connection }); } catch { projection = null; }
+		const session = (projection?.sessions || []).find((x) => x.id === sessionId && x.ownerType === 'club');
+		if (projection?.athlete?.id && session) { target = { tenantId: connection.tenantId, athlete: projection.athlete, session }; break; }
+	}
+	if (!target) { res.status(404).json({ error: 'This club session is not one of your authorised sessions.' }); return; }
+	const sets = target.session.sets || [];
+	const results = [];
+	for (const [i, row] of rows.entries()) {
+		const set = sets.find((x) => x.id && x.id === String(row?.setId || '')) || sets[Number(row?.setIndex)];
+		const seconds = clockToSeconds(row?.swimTime);
+		const rep = Number(row?.rep);
+		if (!set || !(seconds > 0 && seconds < 86400) || !(Number.isInteger(rep) && rep >= 1 && rep <= 500)) { res.status(400).json({ error: `Repetition ${i + 1} does not match a set of this session or has no valid time.` }); return; }
+		const poolLength = Number(row?.poolLength) === 50 ? 50 : 25;
+		const splits = (Array.isArray(row?.cumulativeSplits) ? row.cumulativeSplits : []).map((v, k) => ({ distance: poolLength * (k + 1), cumulativeSeconds: clockToSeconds(v) })).filter((x) => x.cumulativeSeconds > 0);
+		const strokes = Number(row?.strokes);
+		const capturedAt = /^\d{4}-\d{2}-\d{2}T/.test(String(row?.capturedAt || '')) ? String(row.capturedAt) : new Date().toISOString();
+		results.push({
+			format: 'athlyrax-swim-result', v: 1, id: `athlete-${target.athlete.id}-${sessionId}-${set.id || Number(row?.setIndex)}-${rep}-${capturedAt}`.slice(0, 300),
+			source: 'athlete', sessionId, setId: set.id || '', setTitle: set.title || `${set.reps || ''}x${set.distance || ''}`,
+			swimmer: { id: target.athlete.id, name: target.athlete.displayName }, rep, distance: Number(set.distance) || null,
+			time: { seconds, text: String(row?.swimTime || '') }, splits, strokeCount: strokes > 0 && strokes < 1000 ? strokes : null,
+			startOffsetSeconds: Number.isFinite(Number(row?.startOffsetSeconds)) ? Number(row.startOffsetSeconds) : null,
+			review: { status: 'needs-review', note: 'Athlete-entered (unverified)' }, enteredBy: 'athlete', capturedAt,
+		});
+	}
+	const file = { format: 'athlyrax-results-file', v: 1, exportedAt: new Date().toISOString(), session: { id: sessionId, title: target.session.title, date: target.session.date }, results };
+	let out;
+	try { out = await resultsInbox.addToInbox(target.tenantId, file, { sentBy: String(req.auth?.username || ''), app: 'athlete' }); }
+	catch { res.status(503).json({ error: 'Your results could not be sent to the club now. They stay saved on this device; try again.' }); return; }
+	if (out.status < 300) appendAuthAuditEvent({ action: 'athlete_results_sent_to_club', req, status: 'success', target: target.athlete.id, details: { sessionId, results: results.length, duplicate: out.body.duplicate === true } });
+	res.status(out.status).json(out.body.ok ? { ok: true, duplicate: out.body.duplicate, sent: results.length, inboxItemId: out.body.item?.id } : out.body);
+});
+
+// ATHLYRAX_SWIMMER_USERNAME_CHANGE: a swimmer changes their own username after activation (password
+// required). The account link on their swimmer record in every club, and their personal training
+// file, move to the new name in one guarded step; swimmer ids, results, attendance and history do not
+// change. The old name stays reserved. Coaching accounts are not renamed here.
+app.post('/auth/username', requireStrictAuth, requireAdminRateLimit, async (req, res) => {
+	const user = findAuthUser(String(req.auth?.username || '').trim());
+	if (!user || String(user.role || '').toLowerCase() !== 'swimmer' || req.auth?.athleteMode) { res.status(403).json({ error: 'Only a swimmer account can change its username here.' }); return; }
+	if (!verifyPassword(String(req.body?.currentPassword || ''), user.passwordHash)) { res.status(401).json({ error: 'Your current password is not correct.' }); return; }
+	const oldName = String(user.username); const newName = normalizeUsername(req.body?.username);
+	if (newName === normalizeUsername(oldName)) { res.status(400).json({ error: 'That is already your username.' }); return; }
+	const problem = usernameProblem(newName, { users: authUsers, self: oldName });
+	if (problem) { res.status(problem === 'That username is taken.' ? 409 : 400).json({ error: problem }); return; }
+	const clubs = tenantKeysOnDisk().map((key) => athleteTenantPaths(key)).filter(Boolean);
+	for (const t of clubs) { const db = readJsonFile(t.paths.dbPath); if (db && hasActiveWearable(db, oldName)) { res.status(409).json({ error: 'Disconnect your wearable first, then reconnect it after changing your username.' }); return; } }
+	const oldPersonal = personalTrainingPath(STORAGE_ROOT, normalizeUsername(oldName)); const newPersonal = personalTrainingPath(STORAGE_ROOT, newName);
+	const renamed = [];
+	try {
+		await enqueueWrite(async () => {
+			if (fs.existsSync(newPersonal)) throw new Error('target personal store exists');
+			if (fs.existsSync(oldPersonal)) { fs.mkdirSync(path.dirname(newPersonal), { recursive: true }); fs.copyFileSync(oldPersonal, newPersonal); }
+			for (const t of clubs) {
+				const db = readJsonFile(t.paths.dbPath); if (!db || typeof db !== 'object' || Array.isArray(db)) continue;
+				const out = renameSwimmerLinks(db, oldName, newName);
+				if (!out.changed) continue;
+				writeDbSnapshotIfPossible(t.paths.dbPath, t.paths.snapshotDir);
+				writeAtomicJsonFile(t.paths.dbPath, out.db); renamed.push(t);
+			}
+			const previous = Array.isArray(user.previousUsernames) ? user.previousUsernames : [];
+			const snapshot = { username: user.username, previousUsernames: user.previousUsernames };
+			user.username = newName; user.previousUsernames = [...previous, { username: normalizeUsername(oldName), changedAt: new Date().toISOString() }].slice(-10);
+			try { persistAuthUsers(); } catch (error) { Object.assign(user, snapshot); throw error; }
+		});
+	} catch {
+		// Undo: club links back to the old name; the copied personal store is removed. The account is unchanged.
+		for (const t of renamed) { try { const db = readJsonFile(t.paths.dbPath); if (db) writeAtomicJsonFile(t.paths.dbPath, renameSwimmerLinks(db, newName, oldName).db); } catch {} }
+		try { if (fs.existsSync(oldPersonal) && fs.existsSync(newPersonal)) fs.unlinkSync(newPersonal); } catch {}
+		res.status(503).json({ error: 'Your username could not be changed safely. Nothing was changed; please try again.' });
+		return;
+	}
+	try { if (fs.existsSync(oldPersonal)) fs.unlinkSync(oldPersonal); } catch {}
+	const session = issueAuthToken(user, { csrf: req.auth.csrf });
+	setAuthCookies(res, { token: session.token, csrfToken: session.csrf });
+	appendAuthAuditEvent({ action: 'username_changed', req, status: 'success', actor: newName, target: newName, details: { previousUsername: normalizeUsername(oldName), clubsUpdated: renamed.length } });
+	res.status(200).json({ ok: true, username: newName, previousUsername: normalizeUsername(oldName), clubsUpdated: renamed.length, csrfToken: session.csrf });
 });
 
 app.get('/auth/config', (req, res) => {

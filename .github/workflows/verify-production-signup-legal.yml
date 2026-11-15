@@ -36,6 +36,7 @@ jobs:
         id: verify_release
         if: github.event_name != 'pull_request'
         env:
+          GH_TOKEN: ${{ github.token }}
           BACKEND_URL: https://athlyrax-backend.onrender.com
           EXPECTED_RELEASE_MARKER: ATHLYRAX_DEMO_RECOVERY_RELEASE_2026_08_08_V1
         run: |
@@ -62,7 +63,9 @@ jobs:
               "${BACKEND_URL}/db?commit_probe=${expected_sha}-${attempt}" || true)"
             backend_commit="$(awk 'BEGIN{IGNORECASE=1} /^X-AthlyraX-Backend-Commit:/ {gsub(/\r/, ""); sub(/^[^:]+:[[:space:]]*/, ""); print; exit}' "${header_file}")"
 
-            if [[ "${config_code}" == "200" && "${release_match}" == "yes" && "${db_code}" == "401" && "${backend_commit}" == "${expected_sha}" ]]; then
+            same_code=no
+            if [[ "${backend_commit}" =~ ^[0-9a-f]{40}$ ]] && node scripts/live-commit-matches.mjs "${backend_commit}" "${expected_sha}"; then same_code=yes; fi
+            if [[ "${config_code}" == "200" && "${release_match}" == "yes" && "${db_code}" == "401" && "${same_code}" == "yes" ]]; then
               register_code="$(curl --silent --show-error --location \
                 --connect-timeout 15 --max-time 30 \
                 --header 'Content-Type: application/json' \
