@@ -1158,6 +1158,7 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
     if (times.length && distance > 0) demandById.set(String(evidenceId || ''), { distance, time: mean(times), bestTime: Math.min(...times), stroke: measuredStroke,
       course: test?.course || raw?.course || set?.course || test?.poolLength || raw?.poolLength, repCount: times.length,
       firstRepsTime: times.length ? mean(times.slice(0, 2)) : null, maximal: maximalEffort,
+      measurementSources: [...new Set(collectTestRepRows(test, raw).map((rep) => String(rep?.measurementSource || raw?.measurementSource || 'recorded')))],
       ...protocolInfo });
 
     const testContext = {
@@ -1729,7 +1730,8 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
       actualRest: swimmerResult?.actualRest ?? meanRecordedRest(repetitions), times,
       sprintIntent: kinds.sprint, highIntensityIntent: kinds.intensive, aerobicIntent: kinds.aerobic });
     if (times.length && setDistance > 0) demandById.set(evidenceId, { distance: setDistance, time: mean(times), bestTime: Math.min(...times), stroke: set?.stroke, course: set?.course || set?.poolLength,
-      repCount: times.length, firstRepsTime: mean(times.slice(0, 2)), maximal: false, ...protocolInfo });
+      repCount: times.length, firstRepsTime: mean(times.slice(0, 2)), maximal: false,
+      measurementSources: [...new Set(repetitions.map((rep) => String(rep?.measurementSource || swimmerResult?.measurementSource || 'recorded')))], ...protocolInfo });
     if (times.length >= 3 && protocolInfo.restSeconds !== null && ['high-intensity', 'sprint'].includes(protocolInfo.protocolClass)) {
       const lossPct = Math.max(0, 100 * (mean(times.slice(1)) / times[0] - 1));
       const recoveryScore = calibratedStabilityScore(lossPct);
