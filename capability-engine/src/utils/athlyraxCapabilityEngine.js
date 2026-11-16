@@ -290,7 +290,10 @@ function protocolOf({ sendOff, rest, times, sprintIntent, highIntensityIntent, a
   const meanRep = times.length ? mean(times) : null;
   const explicitRest = parseIntervalSeconds(rest);
   const sendOffSeconds = parseIntervalSeconds(sendOff);
-  const restSeconds = explicitRest !== null ? explicitRest : (sendOffSeconds !== null && meanRep > 0 ? Math.max(0, sendOffSeconds - meanRep) : null);
+  // A recorded rest above zero is used as is; a zero or blank rest beside a send-off is a template
+  // placeholder, so the rest is the send-off minus the swimming time.
+  const fromSendOff = sendOffSeconds !== null && meanRep > 0 ? Math.max(0, sendOffSeconds - meanRep) : null;
+  const restSeconds = explicitRest !== null && explicitRest > 0 ? explicitRest : (fromSendOff !== null ? fromSendOff : explicitRest);
   return { ...classifyRepeatProtocol({ sprintIntent, highIntensityIntent, aerobicIntent, meanRepSeconds: meanRep, restSeconds }), restSeconds, meanRepSeconds: meanRep,
     sendOffRecorded: restSeconds !== null };
 }
