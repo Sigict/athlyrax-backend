@@ -3,8 +3,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const PAGES = new Set(['/', '/software', '/framework', '/snapshot', '/books', '/research', '/contact']);
+const PAGES = new Set(['/', '/software', '/framework', '/snapshot', '/books', '/education', '/research', '/contact']);
 const EVENTS = new Set(['page_view', 'session_start', 'enquiry_click']);
+// Filter recognised automation without storing user agents or visitor identifiers.
+export const isAutomatedAnalyticsAgent = (value) => /(?:headlesschrome|playwright|puppeteer|selenium|phantomjs|googlebot|bingbot|bytespider|facebookexternalhit|curl\/|wget\/)/i.test(String(value || ''));
+
 const KEEP_DAYS = 120;
 const VALID_HOST = /^[a-z0-9.-]{1,100}$/;
 const EMPTY = () => ({ pageViews: 0, estimatedSessions: 0, enquiryClicks: 0, pages: {}, sources: {} });
@@ -61,7 +64,7 @@ export function websiteSummary(data, days = 30, today = new Date()) {
     trend.push({ date, pageViews: Number(row.pageViews || 0), estimatedSessions: Number(row.estimatedSessions || 0), enquiryClicks: Number(row.enquiryClicks || 0) });
   }
   const sortCounts = (obj) => Object.entries(obj).sort((a,b) => b[1] - a[1]).slice(0, 12).map(([name, count]) => ({ name, count }));
-  return { periodDays: windowDays, collectedFrom: data.startedAt || null, totals: { pageViews: totals.pageViews, estimatedSessions: totals.estimatedSessions, enquiryClicks: totals.enquiryClicks }, topPages: sortCounts(totals.pages), sources: sortCounts(totals.sources), trend, methodology: 'First-party aggregate statistical events; visitors can opt out. Estimated sessions are browser-session starts, not unique people. Enquiry clicks are not completed enquiries. Bots, blockers and visitor objections affect counts. Not comparable directly to Netlify CDN analytics.' };
+  return { periodDays: windowDays, collectedFrom: data.startedAt || null, totals: { pageViews: totals.pageViews, estimatedSessions: totals.estimatedSessions, enquiryClicks: totals.enquiryClicks }, topPages: sortCounts(totals.pages), sources: sortCounts(totals.sources), trend, methodology: 'First-party approximate browser-session starts, not unique visitors or Google Search clicks. Source domains come from the opening page referrer; www.google.com also includes non-organic referrals. Known automation is excluded from new data when detectable, but historical data cannot be cleaned retrospectively. Browsers can opt out. Not directly comparable with Google Search Console (different metrics and date windows) or CDN logs.' };
 }
 
 export function registerWebsiteAnalytics(app, { storageRoot, requireStrictAuth, requireSoftwareOwnerRole, resolveClientKey }) {
@@ -97,6 +100,8 @@ export function registerWebsiteAnalytics(app, { storageRoot, requireStrictAuth, 
     const allowed = origin === 'https://athlyrax.com' || origin === 'https://www.athlyrax.com'
       || (process.env.NODE_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin));
     if (!allowed) return res.status(403).json({ error: 'Website origin required.' });
+    // No user-agent is retained. Ignore known bot/test traffic before counting events.
+    if (isAutomatedAnalyticsAgent(req.headers['user-agent'])) return res.status(204).end();
     if (Number(req.headers['content-length'] || 0) > 900) return res.status(413).end();
     const data = req.body;
     if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length > 4 ||
