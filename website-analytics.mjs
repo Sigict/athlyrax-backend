@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const PAGES = new Set(['/', '/software', '/framework', '/snapshot', '/books', '/education', '/research', '/contact']);
+const PAGES = new Set(['/', '/software', '/framework', '/snapshot', '/books', '/education', '/research', '/contact', '/who-its-for', '/how-it-works', '/video-analysis']);
 const EVENTS = new Set(['page_view', 'session_start', 'enquiry_click']);
 // Filter recognised automation without storing user agents or visitor identifiers.
 export const isAutomatedAnalyticsAgent = (value) => /(?:headlesschrome|playwright|puppeteer|selenium|phantomjs|googlebot|bingbot|bytespider|facebookexternalhit|curl\/|wget\/)/i.test(String(value || ''));
