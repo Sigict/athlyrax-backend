@@ -395,8 +395,14 @@ function interpolateReferenceTime(distance, table) {
 // scored as World Aquatics points / 10 (owner decision 26-10-2026): the cubic
 // scale separates age-group, club and Olympic swimmers, where the former
 // linear time ratio placed a club swimmer close to world class.
-function performanceReferenceScore({ time, distance, sex, stroke, course }) {
-  return worldAquaticsScore({ time, distance, stroke, sex, course });
+// ONE SPEED SCALE (owner decision 16-11-2026, option B): every swimmer's time is
+// scored against the same reference (the men's base times), whatever the swimmer's
+// sex, so a faster swimmer always scores higher and a slower one lower. The speed
+// level that weights the consistency axes is derived from these scores and so uses
+// the same scale. Displayed World Aquatics points (worldAquaticsPoints) stay sex-specific.
+export const RADAR_SPEED_REFERENCE_SEX = 'male';
+function performanceReferenceScore({ time, distance, stroke, course }) {
+  return worldAquaticsScore({ time, distance, stroke, sex: RADAR_SPEED_REFERENCE_SEX, course });
 }
 
 // Efficiency reference (D-6, owner decision 25-10-2026: elite table).
