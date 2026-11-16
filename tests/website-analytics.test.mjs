@@ -4,15 +4,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { normalizeWebsitePath, normalizeSource, applyWebsiteEvent, websiteSummary, registerWebsiteAnalytics } from '../website-analytics.mjs';
+import { normalizeWebsitePath, normalizeSource, applyWebsiteEvent, websiteSummary, registerWebsiteAnalytics, isAutomatedAnalyticsAgent } from '../website-analytics.mjs';
 
 test('website path allowlist excludes private app and arbitrary paths', () => {
   assert.equal(normalizeWebsitePath('/software.html?x=1'), '/software');
   assert.equal(normalizeWebsitePath('/contact/'), '/contact');
+  assert.equal(normalizeWebsitePath('/education'), '/education');
   assert.equal(normalizeWebsitePath('/books/why-training-isnt-working'), '/books/why-training-isnt-working');
   assert.equal(normalizeWebsitePath('/signin'), '');
   assert.equal(normalizeWebsitePath('/api/db'), '');
   assert.equal(normalizeWebsitePath('/something-private'), '');
+});
+test('recognised automation is filtered without storing user agents', () => {
+  assert.equal(isAutomatedAnalyticsAgent('HeadlessChrome/125'), true);
+  assert.equal(isAutomatedAnalyticsAgent('Playwright test agent'), true);
+  assert.equal(isAutomatedAnalyticsAgent('Googlebot/2.1'), true);
+  assert.equal(isAutomatedAnalyticsAgent('Mozilla/5.0 Chrome/125'), false);
 });
 test('sources are referral hosts only and self-referrals do not identify visitors', () => {
   assert.equal(normalizeSource(''), 'Direct / unknown');
@@ -57,13 +64,14 @@ test('public statistical collection requires origin and valid purpose; owner rep
     await new Promise(resolve => server.once('listening', resolve));
     const root = 'http://127.0.0.1:' + server.address().port;
     const payload = { event: 'page_view', path: '/software', consent: true, source: '' };
-    const request = (origin, body = payload) => fetch(root + '/website-analytics/collect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });
+    const request = (origin, body = payload, agent = '') => fetch(root + '/website-analytics/collect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}), ...(agent ? { 'User-Agent': agent } : {}) }, body: JSON.stringify(body) });
     assert.equal((await request('https://invalid.example')).status, 403);
     assert.equal((await request('https://athlyrax.com', { ...payload, consent: false })).status, 400);
     assert.equal((await request('https://athlyrax.com', { event: 'page_view', path: '/software', purpose: 'statistics', source: '' })).status, 204);
     assert.equal((await request('https://athlyrax.com', { event: 'page_view', path: '/software', purpose: 'marketing' })).status, 400);
     assert.equal((await request('https://athlyrax.com', { ...payload, path: '/api/db' })).status, 400);
     assert.equal((await request('https://athlyrax.com')).status, 204);
+    assert.equal((await request('https://athlyrax.com', payload, 'Playwright/1.50')).status, 204);
     assert.equal((await fetch(root + '/website-analytics/owner-summary')).status, 401);
     assert.equal((await fetch(root + '/website-analytics/owner-summary', { headers: { 'x-test-auth': 'yes' } })).status, 403);
     const ok = await fetch(root + '/website-analytics/owner-summary?days=7', { headers: { 'x-test-auth': 'yes', 'x-test-owner': 'yes' } });
