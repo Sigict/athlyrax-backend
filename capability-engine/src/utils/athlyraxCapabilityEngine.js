@@ -1537,14 +1537,17 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     return { ...unscored, trendRecords: axisTrends };
   }
 
-  // Locked core calculation (Mathematical Engine Specification):
-  //   Ai = Σ(Sm·Wm·Ws·Wr·Wf·Wsignal) / Σ(Wm·Ws·Wr·Wf·Wsignal)
-  // over every eligible metric record of the axis, in one stage. Sm is the
-  // record's normalised metric score; Wm the axis metric weight; Ws the source
-  // weight for the phase context; Wr the recency weight; Wf = min(1, E/Et)
-  // with E the evidence records of that metric and Et the axis exposure
-  // target; Wsignal the record's signal weight. No floors, no extra
-  // source-reliability factor and no intermediate averages.
+  // Evidence-neutral axis score (owner decision 16-11-2026; replaces the single-stage
+  // Σ(Sm·Wm·Ws·Wr·Wf·Wsignal) / Σ(Wm·Ws·Wr·Wf·Wsignal)):
+  //   1. per metric and source: S(m,s) = Σ(Sm·Wr·Wsignal) / Σ(Wr·Wsignal) over its records;
+  //   2. per metric: S(m) = Σ_s Ws·S(m,s) / Σ_s Ws over the sources that measured it;
+  //   3. per axis:   A = Σ_m Wm·S(m) / Σ_m Wm over the measured metrics.
+  // Measurement weights (Wm, Ws) are therefore the same for every swimmer: how many records a
+  // metric or source has, and how much evidence exists (Wf = min(1, E/Et)), no longer changes the
+  // mix of measures inside the axis. Fewer records, older results and missing measures lower the
+  // axis CONFIDENCE (exposure, recency, completeness), never the score itself. If one swimmer
+  // scores at least as high as another on every measure both have within an axis, and both have
+  // the same measures, the axis score cannot be lower.
   const metricNames = Object.keys(axis.metrics);
   const exposureByMetric = new Map(metricNames.map((metric) => {
     const ids = new Set(axisRecords.filter((record) => record.metric === metric)
@@ -1555,30 +1558,36 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     const Wm = Number(axis.metrics[record.metric]) || 0;
     const Ws = resolveSourceWeight(record.source, phaseContext);
     const Wr = recencyWeight(record.date, calculationDate);
+    // Wf: evidence exposure of the metric. Reported for confidence only; not a score weight.
     const Wf = frequencyWeight(exposureByMetric.get(record.metric) || 0, axis.exposureTarget);
     const Wsignal = Math.max(0, Math.min(1, Number(record.signal)));
-    const weight = Wm * Ws * Wr * Wf * (Number.isFinite(Wsignal) ? Wsignal : 0);
-    return { ...record, weights: { Wm, Ws, Wr, Wf, Wsignal, W: weight } };
+    const Wrec = Wr * (Number.isFinite(Wsignal) ? Wsignal : 0);
+    // W: the record's within-metric-and-source weight (recency × signal), used only inside its own group.
+    return { ...record, weights: { Wm, Ws, Wr, Wf, Wsignal, W: Wm > 0 && Ws > 0 ? Wrec : 0 } };
   });
   const contributing = weighted.filter((record) => record.weights.W > 0 && Number.isFinite(Number(record.score)));
+  const weightedMean = (rows, weightOf, valueOf) => {
+    const w = rows.reduce((sum, row) => sum + weightOf(row), 0);
+    return w > 0 ? rows.reduce((sum, row) => sum + valueOf(row) * weightOf(row), 0) / w : null;
+  };
   const metricSummaries = metricNames.map((metric) => {
     const metricRecords = contributing.filter((record) => record.metric === metric);
     if (!metricRecords.length) return null;
-    const weightSum = metricRecords.reduce((sum, record) => sum + record.weights.W, 0);
+    const sourceScores = [...new Set(metricRecords.map((record) => record.source))].map((source) => {
+      const rows = metricRecords.filter((record) => record.source === source);
+      return { source, score: atLeastZero(weightedMean(rows, (r) => r.weights.W, (r) => Number(r.score))),
+        weight: resolveSourceWeight(source, phaseContext), evidenceCount: rows.length };
+    });
+    const score = weightedMean(sourceScores, (row) => row.weight, (row) => row.score);
+    if (!Number.isFinite(score)) return null;
     return {
       metric,
-      // Display only: the weighted mean of this metric's records. The axis
-      // score is the single-stage sum over records, not an average of these.
-      score: atLeastZero(metricRecords.reduce((sum, record) => sum + record.score * record.weights.W, 0) / weightSum),
+      score: atLeastZero(score),
       officialWeight: axis.metrics[metric] || 0,
       frequency: metricRecords[0].weights.Wf,
-      effectiveWeight: weightSum,
+      effectiveWeight: axis.metrics[metric] || 0,
       evidenceCount: metricRecords.length,
-      sourceScores: [...new Set(metricRecords.map((record) => record.source))].map((source) => {
-        const rows = metricRecords.filter((record) => record.source === source);
-        const w = rows.reduce((sum, record) => sum + record.weights.W, 0);
-        return { source, score: atLeastZero(rows.reduce((sum, record) => sum + record.score * record.weights.W, 0) / w), weight: w };
-      }),
+      sourceScores,
     };
   }).filter(Boolean);
 
@@ -1586,24 +1595,22 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     return buildNotScoredAxis(axis, 'No valid weighted metric contribution remained after validation.');
   }
 
-  const axisDenominator = contributing.reduce((sum, record) => sum + record.weights.W, 0);
-  const rawScore = axisDenominator > 0
-    ? atLeastZero(contributing.reduce((sum, record) => sum + (record.score * record.weights.W), 0) / axisDenominator)
-    : null;
+  const rawScore = weightedMean(metricSummaries, (row) => row.officialWeight, (row) => row.score);
   const availableMetricNames = metricSummaries.map((metric) => metric.metric);
   const omittedMetrics = metricNames.filter((metric) => !availableMetricNames.includes(metric));
   const completeness = clamp(
     availableMetricNames.reduce((sum, metric) => sum + (axis.metrics[metric] || 0), 0) * 100,
   );
-  // Official rule: capability quality is calculated from the available valid
-  // calibrated metrics. Missing metrics are excluded and their weights rescaled.
-  // Completeness affects confidence/validation below; it must not alter the score.
-  const score = rawScore;
+  // Capability is calculated from the available valid measurements; missing measures are
+  // excluded with their weights rescaled. Completeness, exposure and recency set confidence only.
+  const score = rawScore === null ? null : atLeastZero(rawScore);
   const recencyCoverage = clamp(
     mean(axisRecords.map((record) => recencyWeight(record.date, calculationDate))) * 100,
   );
+  // Exposure: how much of each measured metric's evidence target is met (Wf), weighted by Wm.
+  const exposureCoverage = clamp(100 * (weightedMean(metricSummaries, (row) => row.officialWeight, (row) => row.frequency) ?? 0));
   const agreement = sourceAgreementScore(axisRecords);
-  const confidence = clamp((0.35 * completeness) + (0.35 * recencyCoverage) + (0.30 * agreement));
+  const confidence = clamp((0.30 * completeness) + (0.25 * exposureCoverage) + (0.25 * recencyCoverage) + (0.20 * agreement));
   const evidenceIds = new Set(axisRecords.map((record) => String(record.evidenceId || '').trim()).filter(Boolean));
 
   return {
@@ -1614,6 +1621,7 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     validation: score === null ? 'Not Scored' : validationLabel(availableMetricNames.length, availableMetricNames.length + omittedMetrics.length),
     evidenceCount: evidenceIds.size || axisRecords.length,
     completeness,
+    exposureCoverage,
     recencyCoverage,
     sourceAgreement: agreement,
     availableMetrics: availableMetricNames,
