@@ -266,8 +266,11 @@ const eventKey = (demand) => {
 // Repeat-set protocol classification (owner decision 16-11-2026): from the recorded EFFORT (intent
 // in the prescription or test name), REPETITION DURATION and RECORDED RECOVERY, never from distance
 // alone. Thresholds are PROVISIONAL (to be validated on real recorded sets).
+// Software classification rules (owner decision 16-11-2026): provisional, NOT physiological boundaries.
+// The recorded purpose of the set (name / energy code) remains the primary input.
 export const PROTOCOL_THRESHOLDS = Object.freeze({
-  sprintMaxRepSeconds: 30, sprintMinRestToWork: 2, highIntensityMaxRepSeconds: 120, status: 'provisional',
+  sprintMaxRepSeconds: 30, sprintMinRestToWork: 2, highIntensityMaxRepSeconds: 120,
+  status: 'provisional software classification rule, not a physiological boundary',
 });
 export function parseIntervalSeconds(value) {
   const raw = String(value ?? '').trim();
@@ -286,17 +289,29 @@ export function classifyRepeatProtocol({ sprintIntent = false, highIntensityInte
   if (aerobicIntent) return { protocolClass: 'aerobic', reason: `aerobic intent, ${meanRepSeconds.toFixed(1)} s reps, rest ${restSeconds.toFixed(0)} s` };
   return { protocolClass: 'unclassified', reason: 'effort not recorded as sprint, high-intensity or aerobic' };
 }
-function protocolOf({ sendOff, rest, times, sprintIntent, highIntensityIntent, aerobicIntent }) {
+// Recovery provenance (owner decision 16-11-2026): send-off, swimming time and rest are separate.
+//  1. recorded actual rest (pilot / console field; a recorded 0 s is real data, never "missing");
+//  2. otherwise send-off − swimming time (0 when the swim used the whole send-off);
+//  3. otherwise the prescribed rest (a prescribed 0:00 = continuous swimming, kept as 0).
+// A prescribed rest is a plan: when a send-off is recorded the send-off governs the actual timing.
+function protocolOf({ sendOff, rest, actualRest = null, times, sprintIntent, highIntensityIntent, aerobicIntent }) {
   const meanRep = times.length ? mean(times) : null;
-  const explicitRest = parseIntervalSeconds(rest);
+  const recordedRest = actualRest === null || actualRest === undefined || actualRest === '' ? null : parseIntervalSeconds(actualRest) ?? (Number(actualRest) === 0 ? 0 : null);
+  const prescribedRest = rest === null || rest === undefined || String(rest).trim() === '' ? null : (/^0+(:0+(\.0+)?)?$/.test(String(rest).trim()) ? 0 : parseIntervalSeconds(rest));
   const sendOffSeconds = parseIntervalSeconds(sendOff);
-  // A recorded rest above zero is used as is; a zero or blank rest beside a send-off is a template
-  // placeholder, so the rest is the send-off minus the swimming time.
   const fromSendOff = sendOffSeconds !== null && meanRep > 0 ? Math.max(0, sendOffSeconds - meanRep) : null;
-  const restSeconds = explicitRest !== null && explicitRest > 0 ? explicitRest : (fromSendOff !== null ? fromSendOff : explicitRest);
-  return { ...classifyRepeatProtocol({ sprintIntent, highIntensityIntent, aerobicIntent, meanRepSeconds: meanRep, restSeconds }), restSeconds, meanRepSeconds: meanRep,
-    sendOffRecorded: restSeconds !== null };
+  let restSeconds = null; let restSource = 'not recorded';
+  if (recordedRest !== null) { restSeconds = recordedRest; restSource = 'recorded actual rest'; }
+  else if (fromSendOff !== null) { restSeconds = fromSendOff; restSource = 'send-off minus swimming time'; }
+  else if (prescribedRest !== null) { restSeconds = prescribedRest; restSource = 'prescribed rest'; }
+  return { ...classifyRepeatProtocol({ sprintIntent, highIntensityIntent, aerobicIntent, meanRepSeconds: meanRep, restSeconds }), restSeconds, restSource, meanRepSeconds: meanRep,
+    sendOffSeconds, sendOffRecorded: restSeconds !== null };
 }
+const meanRecordedRest = (reps) => {
+  const values = asArray(reps).map((rep) => rep?.actualRestSeconds ?? rep?.actualRest).filter((v) => v !== undefined && v !== null && v !== '')
+    .map((v) => parseIntervalSeconds(v) ?? (Number(v) === 0 ? 0 : null)).filter((v) => v !== null);
+  return values.length ? mean(values) : null;
+};
 // Race results that do not establish demonstrated speed (owner decision 16-11-2026: verified races only).
 const UNVERIFIED_RACE = /\b(dq|dsq|disqualified|dnf|dns|unofficial|provisional|estimated|exhibition)\b/i;
 export const isVerifiedRaceResult = (result) => !(result?.verified === false || UNVERIFIED_RACE.test(String(result?.status ?? result?.resultStatus ?? '')));
@@ -1132,7 +1147,8 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
     const highIntensityIntent = /race\s*pace|broken|anaerobic|lactate|\ben3\b|\blt\b|\blp\b|high[\s-]*intensity/.test(text) || TRAINING_INTENSIVE_CODES.test(energyCode);
     const aerobicIntent = /threshold|aerobic|endurance|\ben1\b|\ben2\b|\ba1\b|\ba2\b/.test(text) || TRAINING_AEROBIC_CODES.test(energyCode);
     const protocolInfo = protocolOf({ sendOff: raw?.sendOff ?? raw?.interval ?? set?.sendOff ?? set?.interval ?? protocol?.sendOff,
-      rest: raw?.rest ?? set?.rest, times, sprintIntent: sprint || energyCode === 'sp', highIntensityIntent, aerobicIntent });
+      rest: raw?.rest ?? set?.rest, actualRest: raw?.actualRest ?? meanRecordedRest(collectTestRepRows(test, raw)),
+      times, sprintIntent: sprint || energyCode === 'sp', highIntensityIntent, aerobicIntent });
     const performanceScore = times.length && maximalEffort
       ? performanceReferenceScore({ time: Math.min(...times), distance, sex: raw?.gender || raw?.sex || swimmer?.gender || swimmer?.sex, stroke: measuredStroke,
         course: test?.course || raw?.course || set?.course || test?.poolLength || raw?.poolLength })
@@ -1709,7 +1725,8 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
     const times = parsed.map(rep => rep.time).filter(value => Number.isFinite(value) && value > 0);
     const strokeCounts = parsed.map(rep => rep.strokes).filter(value => Number.isFinite(value) && value > 0);
     const setDistance = inferDistance(set, {});
-    const protocolInfo = protocolOf({ sendOff: set?.sendOff ?? set?.interval ?? swimmerResult?.sendOff, rest: set?.rest ?? swimmerResult?.rest, times,
+    const protocolInfo = protocolOf({ sendOff: set?.sendOff ?? set?.interval ?? swimmerResult?.sendOff, rest: set?.rest ?? swimmerResult?.rest,
+      actualRest: swimmerResult?.actualRest ?? meanRecordedRest(repetitions), times,
       sprintIntent: kinds.sprint, highIntensityIntent: kinds.intensive, aerobicIntent: kinds.aerobic });
     if (times.length && setDistance > 0) demandById.set(evidenceId, { distance: setDistance, time: mean(times), bestTime: Math.min(...times), stroke: set?.stroke, course: set?.course || set?.poolLength,
       repCount: times.length, firstRepsTime: mean(times.slice(0, 2)), maximal: false, ...protocolInfo });
