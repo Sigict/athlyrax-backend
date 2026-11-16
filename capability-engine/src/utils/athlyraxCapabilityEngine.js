@@ -9,7 +9,7 @@ import { canonicalBuiltInTestTemplate } from './testTemplateCatalog.js';
 import { resolveCompetitionCourseKey, isYardCourseKey } from './competitionCourse.js';
 import { buildEfficiencyAdaptabilityIndicators, latestArmSpanCm } from './efficiencyAdaptabilityIndicators.js';
 import { worldAquaticsScore, WORLD_AQUATICS_BASE_TIMES } from './worldAquaticsPoints.js';
-import { resolvePushOffAllowance, eliteStrokeIndexReference, EFFICIENCY_REFERENCE_STATUS } from '../data/efficiencyReference.js';
+import { resolvePushOffAllowance, eliteStrokeIndexReference, eliteDistancePerCycleReference, efficiencyStrokeFamily, EFFICIENCY_REFERENCE_STATUS } from '../data/efficiencyReference.js';
 import { resolveRecordedProgramSplitLength } from './recordedRaceResultDisplay.js';
 import { buildSwimmerScheduleDeliveryRatios } from './swimmerTrainingDeliveryRatios.js';
 
@@ -201,13 +201,138 @@ export function swimmerSpeedLevel(records = []) {
   return { ratio: ratioOf(best), points: Number(best.score) * 10, evidenceId: best.evidenceId || '', date: best.date || '', ...(excluded.length ? { unconfirmedOutliers: excluded } : {}) };
 }
 
-export const SPEED_LEVEL_NEEDED_REASON = 'Needs a timed test or race: consistency is placed on the world-record scale by the swimmer\'s speed.';
+export const SPEED_LEVEL_NEEDED_REASON = 'Needs a timed test or race: consistency is weighted by how fast each set was swum relative to the swimmer\'s own best.';
 
-export function applySpeedLevel(records = [], speedLevel = null) {
-  if (!speedLevel) return records;
-  return records.map((record) => (isSpeedWeightedMetric(record) && Number.isFinite(Number(record.score))
-    ? { ...record, consistencyScore: record.score, speedLevel: speedLevel.ratio, score: record.score * speedLevel.ratio }
-    : record));
+// RELATIVE DEMAND (owner decision 16-11-2026). Absolute speed is scored once, in the speed measures
+// (maximum velocity, peak output, threshold pace) on the single men's world-record scale. Every other
+// consistency measure is interpreted against how hard the swim was FOR THIS SWIMMER:
+//   relative speed r = swim speed ÷ the swimmer's own best speed for that distance and stroke, taken
+//   from World Aquatics points on the single scale (r = (P_swim ÷ P_best)^(1/3), so distances compare);
+//   relative demand D = min(1, r³) (power rises with the cube of speed; same cubic as the points).
+// A consistent set at 90 % of the swimmer's maximum speed (D ≈ 0.73) is weaker evidence of control
+// than the same consistency at 100 %, so the measure scores Sm × D. A faster swimmer gets no extra
+// credit here: two swimmers with the same relative pattern score the same on every non-speed measure.
+// Durability and Robustness therefore credit a demanding pace sustained (performance reserve used),
+// but reserve alone never creates a record: only measured sets are scored. A record whose pace was
+// not recorded cannot be placed and is excluded (listed), never scored at full value.
+// Efficiency: distance per stroke cycle (DPC) at the swimmer's own maximum effort ÷ elite DPC. A swim
+// at r ≥ 0.95 is measured at maximum; a slower swim is adjusted along the swimmer's own speed–efficiency
+// profile (DPC against r, fitted from their recorded swims) and marked ESTIMATED; without a usable
+// profile a sub-maximal swim is not scored. Speed itself is not part of the efficiency score.
+export const RELATIVE_DEMAND_METHOD = 'relative-demand-v1 (D = (P_swim / P_best), cube of relative speed; provisional)';
+export const DEMAND_WEIGHTED_NOTE = 'Consistency, durability and robustness measures are weighted by relative demand: how fast the set was swum compared with the swimmer\'s own best (D = relative speed³, provisional). Speed itself is scored only in the speed measures.';
+const MAX_EFFORT_RELATIVE_SPEED = 0.95;
+const isDemandWeightedMetric = (record) => record?.kind !== 'trend'
+  && (record?.axis === 'durability' || SPEED_WEIGHTED_METRICS.has(`${record?.axis}|${record?.metric}`));
+
+function demandPoints(demand) {
+  if (!demand || !(Number(demand.time) > 0) || !(Number(demand.distance) > 0)) return null;
+  const stroke = demand.stroke || 'freestyle';
+  const score = worldAquaticsScore({ time: Number(demand.time), distance: Number(demand.distance), stroke,
+    sex: RADAR_SPEED_REFERENCE_SEX, course: demand.course });
+  return Number.isFinite(score) && score > 0 ? score : null;
+}
+
+// The swimmer's best performance (points / 10, single scale) per stroke family, from timed tests and races.
+// Same outlier guard as the speed level (owner item 14): one implausible swim never sets the reference.
+function bestPerformanceByStroke(records) {
+  const groups = new Map();
+  for (const record of records) {
+    if (!WORLD_LEVEL_METHODS.has(record?.method) || !(Number(record.score) > 0)) continue;
+    const family = efficiencyStrokeFamily(record?.context?.stroke || record?.demand?.stroke || 'freestyle') || 'free';
+    const distance = Number(record?.context?.distance || record?.demand?.distance) || 0;
+    // Best per stroke, and per stroke and distance (preferred: the same event as the swim).
+    for (const key of [family, ...(distance > 0 ? [`${family}|${distance}`] : [])]) {
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(record);
+    }
+  }
+  const best = new Map();
+  for (const [family, group] of groups) {
+    const level = swimmerSpeedLevel(group);
+    if (level) best.set(family, 100 * level.ratio ** 3);
+  }
+  return best;
+}
+
+export function relativeSpeedOf(demand, bestByStroke, overallBest) {
+  const points = demandPoints(demand);
+  if (!points) return null;
+  const family = efficiencyStrokeFamily(demand.stroke || 'freestyle') || 'free';
+  // Own best at the same stroke and distance where recorded, else the best in that stroke, else overall.
+  const reference = bestByStroke.get(`${family}|${Number(demand.distance)}`) || bestByStroke.get(family) || overallBest;
+  if (!(reference > 0)) return null;
+  return Math.min(1, Math.cbrt(points / reference));
+}
+
+// Speed–efficiency profile: least-squares DPC = a + b·r over the swimmer's stroke-counted swims of one
+// stroke family. Usable with ≥ 3 swims spanning ≥ 0.08 of relative speed and one at r ≥ 0.90; the
+// slope is not allowed to be positive (a longer stroke at higher speed is not extrapolated).
+export function speedEfficiencyProfile(points) {
+  const rows = asArray(points).filter((p) => Number(p.r) > 0 && Number(p.dpc) > 0);
+  if (rows.length < 3) return null;
+  const rs = rows.map((p) => p.r); const span = Math.max(...rs) - Math.min(...rs);
+  if (span < 0.08 || Math.max(...rs) < 0.90) return null;
+  const mr = mean(rs); const md = mean(rows.map((p) => p.dpc));
+  const sxx = rows.reduce((t, p) => t + (p.r - mr) ** 2, 0);
+  const slope = Math.min(0, rows.reduce((t, p) => t + (p.r - mr) * (p.dpc - md), 0) / sxx);
+  return { slope, intercept: md - slope * mr, swims: rows.length, span };
+}
+
+export function applyRelativeDemand(records = [], { overallBest = null, keepUnplaced = false } = {}) {
+  const bestByStroke = bestPerformanceByStroke(records);
+  const best = Number(overallBest) > 0 ? Number(overallBest) : Math.max(0, ...[...bestByStroke].filter(([k]) => !k.includes('|')).map(([, v]) => v));
+  const out = [];
+  const excluded = [];
+  // Efficiency profiles per stroke family, from every stroke-counted swim with a recorded pace.
+  const effRows = records.filter((r) => r.axis === 'efficiency' && r.metric === 'speed_per_stroke' && r.dpc > 0 && r.eliteDpc > 0);
+  const profileInput = new Map();
+  for (const r of effRows) {
+    const rel = relativeSpeedOf(r.demand, bestByStroke, best);
+    if (rel === null) continue;
+    const family = efficiencyStrokeFamily(r.demand?.stroke || 'freestyle') || 'free';
+    if (!profileInput.has(family)) profileInput.set(family, []);
+    profileInput.get(family).push({ r: rel, dpc: r.dpc });
+  }
+  const profiles = new Map([...profileInput].map(([family, rows]) => [family, speedEfficiencyProfile(rows)]));
+  for (const record of records) {
+    if (record.axis === 'efficiency' && record.metric === 'speed_per_stroke' && record.kind !== 'trend') {
+      const rel = relativeSpeedOf(record.demand, bestByStroke, best);
+      if (!(record.dpc > 0) || !(record.eliteDpc > 0) || rel === null) { excluded.push({ ...record, excludedReason: 'pace or stroke count not usable' }); continue; }
+      const family = efficiencyStrokeFamily(record.demand?.stroke || 'freestyle') || 'free';
+      const profile = profiles.get(family);
+      let dpcAtMax = null; let estimated = false;
+      if (rel >= MAX_EFFORT_RELATIVE_SPEED) dpcAtMax = record.dpc;
+      else if (profile) { dpcAtMax = record.dpc + profile.slope * (1 - rel); estimated = true; }
+      if (!(dpcAtMax > 0)) { excluded.push({ ...record, excludedReason: 'sub-maximal swim without a speed-efficiency profile' }); continue; }
+      out.push({ ...record, score: clamp(100 * dpcAtMax / record.eliteDpc), method: 'distance-per-cycle-at-own-maximum-vs-elite',
+        relativeSpeed: rel, dpcAtMax, estimated, strokeIndexScore: record.score });
+      continue;
+    }
+    if (!isDemandWeightedMetric(record) || !Number.isFinite(Number(record.score))) { out.push(record); continue; }
+    const rel = relativeSpeedOf(record.demand, bestByStroke, best);
+    // keepUnplaced (non-canonical callers without requireSpeedLevel): the measured value is kept as
+    // recorded when it cannot be placed; the canonical radars exclude it instead.
+    if (rel === null) { if (keepUnplaced) out.push(record); else excluded.push({ ...record, excludedReason: 'pace not recorded' }); continue; }
+    const D = rel ** 3;
+    out.push({ ...record, consistencyScore: record.score, relativeSpeed: rel, relativeDemand: D, score: record.score * D });
+  }
+  return { records: out, excluded, profiles: Object.fromEntries(profiles), bestByStroke: Object.fromEntries(bestByStroke) };
+}
+
+// Estimated capacity at a given pace (e.g. another swimmer's maximum): performance reserve and the
+// distance per cycle the swimmer's own profile predicts there. Always ESTIMATED; never a radar input.
+export function capacityAtPace(relativeDemandResult, { distance, time, stroke = 'freestyle', course }) {
+  const bestByStroke = new Map(Object.entries(relativeDemandResult?.bestByStroke || {}));
+  const best = Math.max(0, ...bestByStroke.values());
+  const points = demandPoints({ distance, time, stroke, course });
+  const family = efficiencyStrokeFamily(stroke) || 'free';
+  const reference = bestByStroke.get(`${family}|${Number(distance)}`) || bestByStroke.get(family) || best;
+  if (!points || !(reference > 0)) return null;
+  const relativeSpeed = Math.cbrt(points / reference);
+  const profile = relativeDemandResult?.profiles?.[family] || null;
+  return { estimated: true, relativeSpeed, reservePct: 100 * (1 - relativeSpeed), relativeDemand: Math.min(1, relativeSpeed ** 3),
+    dpc: profile ? profile.intercept + profile.slope * Math.min(1, relativeSpeed) : null };
 }
 
 function toNumber(value, fallback = Number.NaN) {
@@ -412,7 +537,7 @@ function performanceReferenceScore({ time, distance, stroke, course }) {
 // values) pending owner confirmation of the table.
 // Elite Stroke Index reference: src/data/efficiencyReference.js (stroke-, sex- and
 // course-specific world records; provisional elite stroke-rate table).
-export const EFFICIENCY_REFERENCE_NOTE = 'Efficiency 0–100 = swimmer Stroke Index ÷ elite reference Stroke Index × 100 (reference speed from the current world record of the same stroke, distance, sex and pool course; elite stroke rate from a provisional table pending source validation). Stroke Index is a stroke-economy indicator, not propelling efficiency.';
+export const EFFICIENCY_REFERENCE_NOTE = 'Efficiency 0–100 = the swimmer\'s distance per stroke cycle at their own maximum effort ÷ elite distance per cycle × 100 (elite: world-record speed of the same stroke, distance, sex and pool course × 60 ÷ elite stroke rate, provisional table). Swims below 95 % of the swimmer\'s own best speed are moved to maximum effort along the swimmer\'s own speed–efficiency profile and marked estimated. Speed itself is not part of the efficiency score.';
 export function eliteStrokeIndex({ distance, stroke, sex, course = 'LC' }) {
   return eliteStrokeIndexReference({ distance: Number(distance), stroke, sex, course });
 }
@@ -465,6 +590,8 @@ function buildEfficiencyAdaptabilityRecords({ canonicalTests, completedCompetiti
       addMetric(records, { axis: 'efficiency', metric: 'speed_per_stroke', score,
         source: sourceOf[row.source], date: row.date, evidenceId: row.id, signal: 1, rawValue: row.si,
         method: 'stroke-index-vs-elite-reference',
+        demand: row.speed > 0 && row.distance > 0 ? { distance: row.distance, time: row.distance / row.speed, stroke: row.stroke, course: row.course } : null,
+        dpc: row.dpc, eliteDpc: eliteDistancePerCycleReference({ distance: row.distance, stroke: row.stroke, sex, course: row.course }),
         // The radar is 0–100; the % of the reference is kept uncapped for tracking beyond it.
         context: { referencePct: Math.round(score * 10) / 10, eliteSi: row.eliteSi, course: row.course, verified: row.verified === true } });
     }
@@ -588,6 +715,9 @@ function addMetric(records, {
   rawValue = null,
   method = '',
   context = null,
+  demand = null,
+  dpc = null,
+  eliteDpc = null,
 }) {
   if (!axis || !metric || !Number.isFinite(Number(score))) return;
   const resolvedDate = dateKey(date);
@@ -606,7 +736,18 @@ function addMetric(records, {
     // Measurement identity (distance, stroke, course, repetitions) used by the
     // decision engine; never used for scoring.
     ...(context ? { context } : {}),
+    // Pace of the swim behind the record (relative demand) and, for efficiency, its measured and
+    // elite distance per stroke cycle. Used by applyRelativeDemand.
+    ...(demand ? { demand } : {}),
+    ...(Number(dpc) > 0 ? { dpc: Number(dpc) } : {}),
+    ...(Number(eliteDpc) > 0 ? { eliteDpc: Number(eliteDpc) } : {}),
   });
+}
+
+// Attach the pace of each swim (distance, mean time, stroke, course) to the records it produced.
+function annotateDemand(records, demandById) {
+  return records.map((record) => (record.demand || !demandById.has(record.evidenceId) ? record
+    : { ...record, demand: demandById.get(record.evidenceId) }));
 }
 
 // A within-swimmer change relative to that swimmer's own earlier measurement
@@ -657,6 +798,7 @@ function readExplicitMetricScores(payload, records, source, date, evidenceId) {
 
 function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
   const records = [];
+  const demandById = new Map();
   // Compare like-for-like performances in date order; an earlier recorded
   // personal measurement is a valid longitudinal baseline, not an invented target.
   const personalBaselines = new Map();
@@ -726,6 +868,8 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
       : null;
 
     readExplicitMetricScores(raw, records, 'testing', date, evidenceId);
+    if (times.length && distance > 0) demandById.set(String(evidenceId || ''), { distance, time: mean(times), stroke: measuredStroke,
+      course: test?.course || raw?.course || set?.course || test?.poolLength || raw?.poolLength });
 
     const testContext = {
       distance,
@@ -1045,7 +1189,7 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
       }
     }
   }
-  return records;
+  return annotateDemand(records, demandById);
 }
 
 // A competition console may store splits as cumulative race-clock stamps.
@@ -1079,6 +1223,7 @@ function competitionSegments(result, officialTime = Number.NaN) {
 
 export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }) {
   const records = [];
+  const demandById = new Map();
   const history = new Map();
   const measuredStrokeBaselines = new Map();
   const ordered = [...asArray(completedCompetitions)].sort((a, b) => dateKey(a?.date).localeCompare(dateKey(b?.date)));
@@ -1107,6 +1252,7 @@ export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }
     const date = competition?.date;
     const evidenceId = competition?.id;
     if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(distance) || distance <= 0) continue;
+    demandById.set(String(evidenceId || ''), { distance, time, stroke, course: courseKey });
 
     // Any pool course: a yard race is scored at the same pace over the matching
     // short course metre event (worldAquaticsPoints, labelled approximate).
@@ -1194,7 +1340,7 @@ export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }
     }
     if (signature) history.set(signature, time);
   }
-  return records;
+  return annotateDemand(records, demandById);
 }
 
 // Which recorded training sets can measure which axis (Training radar). One
@@ -1235,6 +1381,7 @@ export const TRAINING_AXIS_UNDEFINED_REASON = Object.freeze({
 
 function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentScheduleIds = new Set() }) {
   const records = [];
+  const demandById = new Map();
   for (const set of asArray(canonicalSets)) {
     // A swimmer recorded as absent from the session cannot have swum its
     // sets; results stored for them there are contradictory and not read.
@@ -1270,6 +1417,8 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
     }
     const times = parsed.map(rep => rep.time).filter(value => Number.isFinite(value) && value > 0);
     const strokeCounts = parsed.map(rep => rep.strokes).filter(value => Number.isFinite(value) && value > 0);
+    const setDistance = inferDistance(set, {});
+    if (times.length && setDistance > 0) demandById.set(evidenceId, { distance: setDistance, time: mean(times), stroke: set?.stroke, course: set?.course || set?.poolLength });
     if (times.length >= 3) {
       const variation = coefficientOfVariation(times);
       const score = calibratedStabilityScore(variation);
@@ -1337,7 +1486,7 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
       }
     }
   }
-  return records;
+  return annotateDemand(records, demandById);
 }
 
 // Delivery evidence is reported independently from capability scoring. Completing
@@ -1628,9 +1777,13 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     omittedMetrics,
     reasons: score === null
       ? ['No valid weighted metric contribution remained after validation.']
-      : (omittedMetrics.length
-        ? [`Not measured in this window: ${omittedMetrics.join(', ')}.`]
-        : []),
+      : [
+        ...(omittedMetrics.length ? [`Not measured in this window: ${omittedMetrics.join(', ')}.`] : []),
+        ...(contributing.some((record) => record.estimated)
+          ? [`ESTIMATED: ${contributing.filter((record) => record.estimated).length} of ${contributing.filter((record) => record.method === 'distance-per-cycle-at-own-maximum-vs-elite').length} stroke-counted swims were below 95 % of the swimmer's own best speed; their stroke length at maximum effort is estimated from the swimmer's speed–efficiency profile.`]
+          : []),
+      ],
+    estimatedRecords: contributing.filter((record) => record.estimated).length,
     metricRecords: weighted,
     metricSummaries,
     trendRecords: axisTrends,
@@ -1808,19 +1961,23 @@ export function buildAthlyraxCapabilitySnapshot({
   // radars) those measures are not scored, since unweighted they would read
   // near 100 for any steady swimmer.
   const speedLevel = swimmerSpeedLevel(unweightedRecords) || fallbackSpeedLevel || null;
-  const records = speedLevel || !requireSpeedLevel
-    ? applySpeedLevel(unweightedRecords, speedLevel)
-    : unweightedRecords.filter((record) => !isSpeedWeightedMetric(record));
-  const awaitingSpeedAxes = speedLevel || !requireSpeedLevel ? new Set()
-    : new Set(unweightedRecords.filter((record) => isSpeedWeightedMetric(record)).map((record) => record.axis));
+  // Relative demand (owner decision 16-11-2026) replaces the global speed-level multiplier.
+  const relativeDemand = applyRelativeDemand(unweightedRecords, { overallBest: speedLevel ? 100 * speedLevel.ratio ** 3 : null,
+    keepUnplaced: !requireSpeedLevel });
+  const records = relativeDemand.records;
+  const awaitingSpeedAxes = speedLevel ? new Set()
+    : new Set(relativeDemand.excluded.map((record) => record.axis));
   const phaseContext = resolvePhaseContext(scope);
   const calculationKey = dateKey(calculationDate) || new Date().toISOString().slice(0, 10);
   const axes = selectedSingleSwimmer
     ? ATHLYRAX_AXIS_DEFINITIONS.map((axis) => {
       const scored = scoreAxis(axis, records, calculationKey, phaseContext);
+      const unplaced = relativeDemand.excluded.filter((record) => record.axis === axis.key).length;
       const withSpeed = !Number.isFinite(scored.score) && awaitingSpeedAxes.has(axis.key)
         ? { ...scored, reasons: [SPEED_LEVEL_NEEDED_REASON, ...asArray(scored.reasons)] }
-        : scored;
+        : unplaced
+          ? { ...scored, unplacedRecords: unplaced, reasons: [...asArray(scored.reasons), `${unplaced} measurement${unplaced === 1 ? '' : 's'} without a recorded pace (or a best time to compare with) not scored: relative demand cannot be placed.`] }
+          : scored;
       return axis.key === 'efficiency' && efficiencyReasons.length
         ? { ...withSpeed, reasons: [...efficiencyReasons, ...asArray(withSpeed.reasons)], efficiencyEvidence: efficiencyAdaptability.efficiencyEvidence }
         : withSpeed;
@@ -1859,6 +2016,9 @@ export function buildAthlyraxCapabilitySnapshot({
     integratedScore,
     integratedConfidence,
     speedLevel,
+    // Relative demand: per-stroke best, speed–efficiency profiles and the records excluded for lack of a pace.
+    relativeDemand: { bestByStroke: relativeDemand.bestByStroke, profiles: relativeDemand.profiles,
+      excluded: relativeDemand.excluded.map((r) => ({ axis: r.axis, metric: r.metric, evidenceId: r.evidenceId, reason: r.excludedReason })) },
     integratedLabel: fullRadarAvailable ? 'Integrated Capability' : 'Limited capability summary',
     // No interpretation label from an undocumented confidence cut-off (S14);
     // the neutral evidence reading lives in capabilityEvidenceReading.js.

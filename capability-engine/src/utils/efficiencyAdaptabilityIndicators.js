@@ -283,7 +283,7 @@ export function buildEfficiencyAdaptabilityIndicators({ tests = [], competitions
       pushOffMetresPerWall,
       pushOffEstimatedCount: efficiencyMeasurements.filter((row) => row.pushOffEstimated).length,
       score: null,
-      scoreNote: 'Efficiency score (Capability, Competition, Integrated) = Stroke Index ÷ elite Stroke Index × 100; elite speed from the world-class reference, elite stroke rate from a provisional table pending owner confirmation. Scored only from at least 2 stroke-counted swims; a measurement above the elite reference counts only after coach verification and is then shown at its full % of the reference. Stroke Index is a stroke-economy indicator (speed × distance per cycle), not propelling efficiency. Below: each swimmer\'s own values and change.',
+      scoreNote: 'Efficiency score (Capability, Competition, Integrated) = distance per stroke cycle at the swimmer\'s own maximum effort ÷ elite distance per cycle × 100 (owner decision 16-11-2026); swims below 95 % of the swimmer\'s own best speed are moved to maximum effort along their own speed–efficiency profile and marked estimated; elite stroke rate from a provisional table pending owner confirmation. Scored only from at least 2 stroke-counted swims; a measurement above the elite reference counts only after coach verification and is then shown at its full % of the reference. Stroke Index is a stroke-economy indicator (speed × distance per cycle), not propelling efficiency. Below: each swimmer\'s own values and change.',
     },
     adaptability: {
       retests,
