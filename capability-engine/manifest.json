@@ -1,12 +1,12 @@
 {
   "purpose": "Exact copy of the AthlyraX capability engine from the website repository, run on the server for the Athlete App. Do not edit here: change the website source and re-copy.",
   "sourceRepository": "Sigict/athlyrax-v6-private",
-  "sourceCommit": "7087d71537a503939783a9d8194b61755c07385c",
+  "sourceCommit": "537d4739147a812beabbcccd2b620d4d7bcecd5c",
   "files": {
     "src/data/efficiencyReference.js": "9e94702dbafa91c69707ad3c13ce425c2bb65d14bc464fe250547aeab3834fc1",
     "src/data/worldRecordBaseTimes.js": "83229db5b6f94739e844b6019930ac4685be376076d0dfc044cf57562a3cc983",
     "src/sports/swimming/swimmingReports.js": "88003e3634299410215cd8be34f189de6dc8423b3a70f95767a7c5c1dc54479c",
-    "src/utils/athlyraxCapabilityEngine.js": "d1c2f42412b0e311226867417dba67e83c8488805fb13dfa37169271d73a8292",
+    "src/utils/athlyraxCapabilityEngine.js": "2e05c29af7c2548199d1666ff425bca956d90dd77ca3322edcb17108ed1270ef",
     "src/utils/attendanceIdentity.js": "c5bdc193d2aab06da302624ad87f430f114789085f47c7af766ace0aaaa220a2",
     "src/utils/canonicalScheduleRows.js": "b6ce5ab5e647c13a3a5f3c7d55e7e08a8f162d87fe244910cd6a4a8c11437252",
     "src/utils/canonicalSwimmerEvidence.js": "db7b2bc4de9d02f86a6e1497d3a897557abda72e3320b31fa00bd358a65df568",
