@@ -10,6 +10,9 @@ test('website path allowlist excludes private app and arbitrary paths', () => {
   assert.equal(normalizeWebsitePath('/software.html?x=1'), '/software');
   assert.equal(normalizeWebsitePath('/contact/'), '/contact');
   assert.equal(normalizeWebsitePath('/education'), '/education');
+  assert.equal(normalizeWebsitePath('/who-its-for'), '/who-its-for');
+  assert.equal(normalizeWebsitePath('/how-it-works'), '/how-it-works');
+  assert.equal(normalizeWebsitePath('/video-analysis'), '/video-analysis');
   assert.equal(normalizeWebsitePath('/books/why-training-isnt-working'), '/books/why-training-isnt-working');
   assert.equal(normalizeWebsitePath('/signin'), '');
   assert.equal(normalizeWebsitePath('/api/db'), '');
