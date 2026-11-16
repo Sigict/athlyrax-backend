@@ -229,16 +229,24 @@ export const VALIDATED_SPEED_DISTANCES = Object.freeze([50, 100, 200, 400, 800, 
 export const AEROBIC_REPEATABILITY_MIN_REPS = 6;
 export const ADAPTABILITY_MIN_COMPARISONS = 2;
 export const NOT_CALIBRATED = 'Not Calibrated';
+// Calibration status (owner decision 16-11-2026): only the World Aquatics speed scale (single men's
+// reference) and the Adaptability smallest-worthwhile-change scale (D-7) are owner-approved. Every other
+// 0–100 mapping (CV/deterioration anchors, % of own best) is PROVISIONAL until validated on measured data.
+const APPROVED_CALIBRATION_METHODS = new Set(['world-class-time-reference', 'competition-world-class-time-reference',
+  'retest-response-vs-smallest-worthwhile-change', 'same-event-same-course-race-time-change-vs-smallest-worthwhile-change']);
+export const PROVISIONAL_CALIBRATION_NOTE = 'Provisional calibration: this score uses a 0–100 mapping (variation/deterioration anchors or % of own best) that has not yet been validated on measured swimming data.';
 export const INSUFFICIENT_EVIDENCE = 'Not Scored — Insufficient Evidence';
 export const EFFICIENCY_NOT_CALIBRATED_REASON = 'Efficiency is Not Calibrated: measured stroke length, stroke rate, speed and stroke index are shown, but no validated 0–100 calibration has been approved (provisional elite references are not used for scoring).';
 
 // The derived measurement a record holds. Records with the same (source, evidence, measure) are the
 // same calculated value.
 export function measureOf(record) {
+  if (record?.measure) return record.measure;
   if (SPEED_METHODS.has(record?.method)) return 'speed-result';
   if (REP_TIME_CV_METHODS.has(record?.method)
     || (record?.method === 'cv-stability-calibration' && record?.metric === 'pace_stability')) return 'repetition-time-cv';
   if (FATIGUE_LOSS_METHODS.has(record?.method)) return 'fatigue-loss';
+  if (record?.method === 'measured-training-early-to-late-pace-deterioration-pct') return 'pace-decay';
   return `${record?.axis}|${record?.metric}|${record?.method || 'explicit'}`;
 }
 export const measurementIdOf = (record) => `${record?.source || ''}|${record?.evidenceId || ''}|${measureOf(record)}`;
@@ -254,6 +262,41 @@ const eventKey = (demand) => {
   const family = efficiencyStrokeFamily(demand?.stroke || 'freestyle') || 'other';
   return `${family}|${Number(demand?.distance) || 0}|${courseClass(demand?.course)}`;
 };
+
+// Repeat-set protocol classification (owner decision 16-11-2026): from the recorded EFFORT (intent
+// in the prescription or test name), REPETITION DURATION and RECORDED RECOVERY, never from distance
+// alone. Thresholds are PROVISIONAL (to be validated on real recorded sets).
+export const PROTOCOL_THRESHOLDS = Object.freeze({
+  sprintMaxRepSeconds: 30, sprintMinRestToWork: 2, highIntensityMaxRepSeconds: 120, status: 'provisional',
+});
+export function parseIntervalSeconds(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{1,2}):(\d{2}(?:\.\d+)?)$/);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  const n = Number(raw.replace(/s$/i, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+export function classifyRepeatProtocol({ sprintIntent = false, highIntensityIntent = false, aerobicIntent = false, meanRepSeconds = null, restSeconds = null } = {}) {
+  if (restSeconds === null || restSeconds === undefined || !(Number(restSeconds) >= 0) || !(Number(meanRepSeconds) > 0)) return { protocolClass: 'unclassified', reason: 'no recorded recovery (send-off or rest)' };
+  restSeconds = Number(restSeconds); meanRepSeconds = Number(meanRepSeconds);
+  const t = PROTOCOL_THRESHOLDS;
+  if (sprintIntent && meanRepSeconds <= t.sprintMaxRepSeconds && restSeconds >= t.sprintMinRestToWork * meanRepSeconds) return { protocolClass: 'sprint', reason: `sprint intent, ${meanRepSeconds.toFixed(1)} s reps, rest ${restSeconds.toFixed(0)} s` };
+  if ((sprintIntent || highIntensityIntent) && meanRepSeconds <= t.highIntensityMaxRepSeconds) return { protocolClass: 'high-intensity', reason: `high-intensity intent, ${meanRepSeconds.toFixed(1)} s reps, rest ${restSeconds.toFixed(0)} s` };
+  if (aerobicIntent) return { protocolClass: 'aerobic', reason: `aerobic intent, ${meanRepSeconds.toFixed(1)} s reps, rest ${restSeconds.toFixed(0)} s` };
+  return { protocolClass: 'unclassified', reason: 'effort not recorded as sprint, high-intensity or aerobic' };
+}
+function protocolOf({ sendOff, rest, times, sprintIntent, highIntensityIntent, aerobicIntent }) {
+  const meanRep = times.length ? mean(times) : null;
+  const explicitRest = parseIntervalSeconds(rest);
+  const sendOffSeconds = parseIntervalSeconds(sendOff);
+  const restSeconds = explicitRest !== null ? explicitRest : (sendOffSeconds !== null && meanRep > 0 ? Math.max(0, sendOffSeconds - meanRep) : null);
+  return { ...classifyRepeatProtocol({ sprintIntent, highIntensityIntent, aerobicIntent, meanRepSeconds: meanRep, restSeconds }), restSeconds, meanRepSeconds: meanRep,
+    sendOffRecorded: restSeconds !== null };
+}
+// Race results that do not establish demonstrated speed (owner decision 16-11-2026: verified races only).
+const UNVERIFIED_RACE = /\b(dq|dsq|disqualified|dnf|dns|unofficial|provisional|estimated|exhibition)\b/i;
+export const isVerifiedRaceResult = (result) => !(result?.verified === false || UNVERIFIED_RACE.test(String(result?.status ?? result?.resultStatus ?? '')));
 
 // Single-home resolution. Returns { records, excluded } where excluded lists records removed with a reason.
 export function resolveSingleHome(records = []) {
@@ -273,6 +316,7 @@ export function resolveSingleHome(records = []) {
     if (measure === 'speed-result') {
       // One speed result per swim, scored once on Power & Speed (validated event distances only).
       const preferred = rows.find((r) => WORLD_LEVEL_METHODS.has(r.method)) || rows[0];
+      if (preferred?.demand && preferred.demand.maximal === false) { exclude(rows, 'not a maximal test, time trial or verified race: shown as context only'); continue; }
       const distance = Number(preferred?.context?.distance || preferred?.demand?.distance) || 0;
       if (!VALIDATED_SPEED_DISTANCES.includes(distance)) { exclude(rows, `speed result at ${distance || '?'} m: no validated reference distance; shown as context only`); continue; }
       out.push({ ...preferred, axis: 'power_speed_expression', metric: 'maximum_velocity', measure, homeRule: 'speed result → Power & Speed (single home)' });
@@ -280,30 +324,38 @@ export function resolveSingleHome(records = []) {
       continue;
     }
     if (measure === 'repetition-time-cv') {
-      // Home by recorded protocol: sprint → Power sprint stability; high intensity → Anaerobic
-      // repeatability; aerobic (recorded send-off, ≥ 6 reps) → Aerobic repeatability; else Technical.
-      const has = (pred) => rows.find(pred);
-      const sprint = has((r) => r.metric === 'sprint_stability');
-      const intensive = has((r) => r.axis === 'anaerobic_capacity');
-      const aerobic = has((r) => r.axis === 'aerobic_capacity');
-      const technical = has((r) => r.axis === 'technical_control');
+      // Home by the recorded protocol class (effort, repetition duration, recorded recovery):
+      // sprint → Power & Speed sprint stability; high-intensity → Anaerobic repeatability;
+      // aerobic (≥ 6 reps) → Aerobic repeatability; unclassified → Technical Control pace stability.
       const demand = rows.find((r) => r.demand)?.demand || {};
+      const cls = demand.protocolClass || 'unclassified';
+      const base = rows.find((r) => r.axis === 'technical_control') || rows[0];
       let home = null; let rule = '';
-      if (sprint) { home = { ...sprint, axis: 'power_speed_expression', metric: 'sprint_stability' }; rule = 'sprint protocol → Power & Speed sprint stability'; }
-      else if (intensive) { home = { ...intensive, axis: 'anaerobic_capacity', metric: 'repeatability' }; rule = 'high-intensity protocol → Anaerobic repeatability'; }
-      else if (aerobic) {
-        if (demand.sendOffRecorded && Number(demand.repCount) >= AEROBIC_REPEATABILITY_MIN_REPS) { home = { ...aerobic, axis: 'aerobic_capacity', metric: 'repeatability' }; rule = 'aerobic protocol with recorded send-off → Aerobic repeatability'; }
+      if (cls === 'sprint') { home = { axis: 'power_speed_expression', metric: 'sprint_stability' }; rule = `sprint protocol (${demand.reason}) → Power & Speed sprint stability`; }
+      else if (cls === 'high-intensity') { home = { axis: 'anaerobic_capacity', metric: 'repeatability' }; rule = `high-intensity protocol (${demand.reason}) → Anaerobic repeatability`; }
+      else if (cls === 'aerobic') {
+        if (Number(demand.repCount) >= AEROBIC_REPEATABILITY_MIN_REPS) { home = { axis: 'aerobic_capacity', metric: 'repeatability' }; rule = `aerobic protocol (${demand.reason}) → Aerobic repeatability`; }
         else { exclude(rows, `aerobic repeatability needs a recorded send-off or rest and ≥ ${AEROBIC_REPEATABILITY_MIN_REPS} repetitions`); continue; }
-      } else if (technical) { home = { ...technical, axis: 'technical_control', metric: 'pace_stability' }; rule = 'no energy-system protocol → Technical Control pace stability'; }
-      if (!home) { exclude(rows, 'no home for this measurement'); continue; }
-      out.push({ ...home, measure, homeRule: rule });
-      exclude(rows.filter((r) => r.axis !== home.axis || r.metric !== home.metric || r.method !== home.method), `same repetition-time variation already scored (${rule})`);
+      } else { home = { axis: 'technical_control', metric: 'pace_stability' }; rule = `protocol unclassified (${demand.reason || 'no recorded recovery'}) → Technical Control pace stability`; }
+      const own = rows.find((r) => r.axis === home.axis && r.metric === home.metric) || base;
+      out.push({ ...own, ...home, measure, homeRule: rule, protocolClass: cls });
+      exclude(rows.filter((r) => r !== own), `same repetition-time variation already scored (${rule})`);
+      continue;
+    }
+    if (measure === 'pace-decay') {
+      // Early-to-late pace decay: Aerobic pace maintenance for an aerobic protocol, else Durability.
+      const demand = rows[0].demand || {};
+      const aerobicHome = demand.protocolClass === 'aerobic';
+      out.push({ ...rows[0], ...(aerobicHome ? { axis: 'aerobic_capacity', metric: 'pace_stability' } : {}), measure,
+        homeRule: aerobicHome ? 'aerobic protocol → Aerobic pace maintenance' : 'sustained set → Durability late-set stability' });
       continue;
     }
     if (measure === 'fatigue-loss') {
-      const anaerobic = rows.find((r) => r.axis === 'anaerobic_capacity');
-      const home = anaerobic || rows[0];
-      out.push({ ...home, measure, homeRule: anaerobic ? 'high-intensity repeats → Anaerobic fatigue loss' : 'sustained set → Durability fatigue loss' });
+      const cls = rows.find((r) => r.demand)?.demand?.protocolClass;
+      const anaerobicHome = cls === 'high-intensity' || cls === 'sprint';
+      const home = (anaerobicHome ? rows.find((r) => r.axis === 'anaerobic_capacity') : rows.find((r) => r.axis === 'durability')) || rows[0];
+      const target = anaerobicHome ? { axis: 'anaerobic_capacity', metric: 'fatigue_resistance' } : { axis: 'durability', metric: 'fatigue_resistance' };
+      out.push({ ...home, ...target, measure, homeRule: anaerobicHome ? 'high-intensity repeats → Anaerobic fatigue loss' : 'sustained set → Durability fatigue loss' });
       exclude(rows.filter((r) => r !== home), 'same fatigue loss already scored');
       continue;
     }
@@ -439,7 +491,7 @@ export function sameEventBests(records = []) {
   const bests = new Map();
   for (const record of records) {
     if (record?.measure !== 'speed-result' && !SPEED_METHODS.has(record?.method)) continue;
-    const d = record.demand; if (!d) continue;
+    const d = record.demand; if (!d || d.maximal === false) continue;
     const time = Number(d.bestTime || d.time); if (!(time > 0)) continue;
     const key = eventKey(d);
     if (!bests.has(key) || time < bests.get(key).time) bests.set(key, { time, evidenceId: record.evidenceId, date: record.date });
@@ -456,7 +508,26 @@ export function addRelativeSpeedContext(records = []) {
     return { ...record, relativeSpeed: relativeSpeed === null ? 'unavailable' : relativeSpeed,
       relativeSpeedReference: best ? { ...best, event: eventKey(record.demand) } : null };
   });
-  return { records: out, bests: Object.fromEntries([...bests].map(([k, v]) => [k, v])) };
+  // Dedicated measures that need a same-event best (16-11-2026, provisional linear scale: 100 = the
+  // swimmer's own best pace). Aerobic sustainable pace: mean pace of an aerobic set (≥ 6 reps, recorded
+  // recovery). Anaerobic repeat output: mean of the first two reps of a high-intensity set. Each is a
+  // separate measurement of the set, never the speed result again; unavailable without a same-event best.
+  const added = [];
+  const seen = new Set();
+  for (const record of out) {
+    const d = record?.demand; if (!d || record.kind === 'trend' || seen.has(record.evidenceId + record.source)) continue;
+    const best = bests.get(eventKey(d)); if (!best) continue;
+    if (record.measure === 'repetition-time-cv' && d.protocolClass === 'aerobic' && Number(d.repCount) >= AEROBIC_REPEATABILITY_MIN_REPS && d.time > 0) {
+      seen.add(record.evidenceId + record.source);
+      added.push({ ...record, axis: 'aerobic_capacity', metric: 'threshold_pace', score: clamp(100 * best.time / d.time), rawValue: d.time,
+        method: 'sustained-pace-vs-own-best', measure: 'sustained-pace', homeRule: 'aerobic set mean pace vs own same-event best (provisional linear scale)', relativeSpeed: best.time / d.time, relativeSpeedReference: { ...best, event: eventKey(d) } });
+    } else if (record.measure === 'repetition-time-cv' && ['high-intensity', 'sprint'].includes(d.protocolClass) && d.firstRepsTime > 0) {
+      seen.add(record.evidenceId + record.source);
+      added.push({ ...record, axis: 'anaerobic_capacity', metric: 'peak_output', score: clamp(100 * best.time / d.firstRepsTime), rawValue: d.firstRepsTime,
+        method: 'repeat-output-vs-own-best', measure: 'repeat-output', homeRule: 'first two reps of a high-intensity set vs own same-event best (provisional linear scale)', relativeSpeed: best.time / d.firstRepsTime, relativeSpeedReference: { ...best, event: eventKey(d) } });
+    }
+  }
+  return { records: [...out, ...added], bests: Object.fromEntries([...bests].map(([k, v]) => [k, v])) };
 }
 
 // Speed–stroke profile (C2): per stroke family and course class, from stroke-counted swims. No forced
@@ -1048,7 +1119,17 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
     const measuredStroke = test?.stroke || raw?.stroke || set?.stroke || namedStroke || protocol?.stroke || '';
     // Speed results come from MAXIMAL efforts only (a single-rep max test or a test named max / time
     // trial); the fastest rep of a repeat set is submaximal and is not a maximum-speed result (16-11-2026).
-    const maximalEffort = times.length === 1 || /\bmax\b|max effort|time trial|\btt\b/.test(text);
+    // Maximal test or time trial only (16-11-2026): a single repetition is not automatically maximal.
+    const maximalTemplate = /builtin-test-max\b/.test(String(test?.templateId || raw?.templateId || '')) || /^max$/i.test(String(raw?.templateName || test?.templateName || '').trim());
+    const maximalEffort = maximalTemplate || /\bmax\b|max effort|time trial|\btt\b/.test(text);
+    // Effort from the recorded protocol only, never from distance (16-11-2026): the test name and the
+    // energy code recorded on the test, its linked set or the canonical protocol (e.g. the Repeatability
+    // battery is recorded as EN2, the Max battery as SP).
+    const energyCode = String(raw?.energy ?? raw?.energySystem ?? set?.energy ?? set?.energySystem ?? protocol?.energy ?? '').trim().toLowerCase();
+    const highIntensityIntent = /race\s*pace|broken|anaerobic|lactate|\ben3\b|\blt\b|\blp\b|high[\s-]*intensity/.test(text) || TRAINING_INTENSIVE_CODES.test(energyCode);
+    const aerobicIntent = /threshold|aerobic|endurance|\ben1\b|\ben2\b|\ba1\b|\ba2\b/.test(text) || TRAINING_AEROBIC_CODES.test(energyCode);
+    const protocolInfo = protocolOf({ sendOff: raw?.sendOff ?? raw?.interval ?? set?.sendOff ?? set?.interval ?? protocol?.sendOff,
+      rest: raw?.rest ?? set?.rest, times, sprintIntent: sprint || energyCode === 'sp', highIntensityIntent, aerobicIntent });
     const performanceScore = times.length && maximalEffort
       ? performanceReferenceScore({ time: Math.min(...times), distance, sex: raw?.gender || raw?.sex || swimmer?.gender || swimmer?.sex, stroke: measuredStroke,
         course: test?.course || raw?.course || set?.course || test?.poolLength || raw?.poolLength })
@@ -1057,7 +1138,8 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
     readExplicitMetricScores(raw, records, 'testing', date, evidenceId);
     if (times.length && distance > 0) demandById.set(String(evidenceId || ''), { distance, time: mean(times), bestTime: Math.min(...times), stroke: measuredStroke,
       course: test?.course || raw?.course || set?.course || test?.poolLength || raw?.poolLength, repCount: times.length,
-      sendOffRecorded: Boolean(String(raw?.sendOff ?? raw?.interval ?? raw?.rest ?? set?.sendOff ?? set?.interval ?? set?.rest ?? protocol?.sendOff ?? protocol?.interval ?? '').trim()) });
+      firstRepsTime: times.length ? mean(times.slice(0, 2)) : null, maximal: maximalEffort,
+      ...protocolInfo });
 
     const testContext = {
       distance,
@@ -1270,6 +1352,14 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
         });
       }
     }
+    // Anaerobic recovery-dependent output (16-11-2026): mean speed of reps 2..n ÷ rep 1, only under a
+    // recorded recovery; scored on the provisional CV/deterioration anchors as % loss.
+    if (times.length >= 3 && protocolInfo.restSeconds !== null && ['high-intensity', 'sprint'].includes(protocolInfo.protocolClass)) {
+      const lossPct = Math.max(0, 100 * (mean(times.slice(1)) / times[0] - 1));
+      const recoveryScore = calibratedStabilityScore(lossPct);
+      if (recoveryScore !== null) addMetric(records, { axis: 'anaerobic_capacity', metric: 'recovery_index', score: recoveryScore, date, evidenceId,
+        signal: testSignal, rawValue: lossPct, method: 'output-retention-under-recorded-recovery', context: { restSeconds: protocolInfo.restSeconds, repCount: times.length } });
+    }
 
     const outputReferenceTime = firstDefinedNumber(set?.referenceTime, set?.benchmarkTime, raw?.referenceTime, raw?.benchmarkTime);
     if (highIntensity && times.length > 0 && Number.isFinite(outputReferenceTime) && outputReferenceTime > 0) {
@@ -1440,11 +1530,13 @@ export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }
     const date = competition?.date;
     const evidenceId = competition?.id;
     if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(distance) || distance <= 0) continue;
-    demandById.set(String(evidenceId || ''), { distance, time, bestTime: time, stroke, course: courseKey, repCount: 1, race: true });
+    demandById.set(String(evidenceId || ''), { distance, time, bestTime: time, stroke, course: courseKey, repCount: 1, race: true, maximal: isVerifiedRaceResult(result) });
 
     // Any pool course: a yard race is scored at the same pace over the matching
     // short course metre event (worldAquaticsPoints, labelled approximate).
-    const performanceScore = performanceReferenceScore({ time, distance, sex: result?.gender || result?.sex || swimmer?.gender || swimmer?.sex, stroke, course: courseKey });
+    const performanceScore = isVerifiedRaceResult(result)
+      ? performanceReferenceScore({ time, distance, sex: result?.gender || result?.sex || swimmer?.gender || swimmer?.sex, stroke, course: courseKey })
+      : null;
     if (performanceScore !== null) {
       // Race time relative to an elite reference measures performance level,
       // not stroke efficiency. Do not invent speed-per-stroke without an
@@ -1564,15 +1656,15 @@ export const TRAINING_AXIS_MEASUREMENT = Object.freeze({
   technical_control: 'pace and stroke-count stability (CV) of a set with at least 3 timed repetitions',
   efficiency: null,
   robustness_of_efficiency: 'early-to-late stroke-count / pace drift of a set with at least 4 repetitions timed and stroke-counted',
-  aerobic_capacity: 'repeatability (CV) of an aerobic set (EN1/EN2/EN3, A1/A2) with at least 3 timed repetitions',
-  anaerobic_capacity: 'repeatability (CV) of an intensive set (EN3, LT, LP, B1/B2, C1-C3, RG) with at least 3 timed repetitions',
-  power_speed_expression: 'sprint stability (CV) of a sprint set (energy code SP, or sprint/speed/power/max/start in the set name) with at least 3 timed repetitions',
+  aerobic_capacity: 'repeatability (CV) and pace maintenance of an aerobic set (EN1/EN2/EN3, A1/A2) with a recorded send-off or rest and at least 6 timed repetitions',
+  anaerobic_capacity: 'repeatability (CV) and output after recorded recovery of a high-intensity set (EN3, LT, LP, B1/B2, C1-C3, RG, or sprint effort) with a recorded send-off or rest and at least 3 timed repetitions',
+  power_speed_expression: 'sprint stability (CV) of a sprint set: sprint effort (energy code SP, or sprint/speed/power/max/start in the set name), repetitions of 30 s or less and recorded rest of at least twice the swimming time (provisional thresholds)',
   adaptability: null,
   durability: 'early-to-late pace deterioration of a set with at least 6 timed repetitions',
 });
 export const TRAINING_AXIS_UNDEFINED_REASON = Object.freeze({
   efficiency: 'Efficiency is scored in Capability (decision D-6): Stroke Index from tests, races and stroke-counted training repetitions against the elite Stroke Index reference. No target stroke counts are used.',
-  adaptability: 'Adaptability is scored in Capability (decision D-7): response to changed demand (repeated tests, the same set on a tighter send-off; actual rest = send-off − swimming time), 50 = no change.',
+  adaptability: 'Adaptability is scored in Capability only from at least two comparable longitudinal comparisons (retests, same-event races), 50 = no change; a single within-session response is shown as an observation.',
 });
 
 function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentScheduleIds = new Set() }) {
@@ -1614,8 +1706,16 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
     const times = parsed.map(rep => rep.time).filter(value => Number.isFinite(value) && value > 0);
     const strokeCounts = parsed.map(rep => rep.strokes).filter(value => Number.isFinite(value) && value > 0);
     const setDistance = inferDistance(set, {});
+    const protocolInfo = protocolOf({ sendOff: set?.sendOff ?? set?.interval ?? swimmerResult?.sendOff, rest: set?.rest ?? swimmerResult?.rest, times,
+      sprintIntent: kinds.sprint, highIntensityIntent: kinds.intensive, aerobicIntent: kinds.aerobic });
     if (times.length && setDistance > 0) demandById.set(evidenceId, { distance: setDistance, time: mean(times), bestTime: Math.min(...times), stroke: set?.stroke, course: set?.course || set?.poolLength,
-      repCount: times.length, sendOffRecorded: Boolean(String(set?.sendOff ?? set?.interval ?? set?.rest ?? swimmerResult?.sendOff ?? '').trim()) });
+      repCount: times.length, firstRepsTime: mean(times.slice(0, 2)), maximal: false, ...protocolInfo });
+    if (times.length >= 3 && protocolInfo.restSeconds !== null && ['high-intensity', 'sprint'].includes(protocolInfo.protocolClass)) {
+      const lossPct = Math.max(0, 100 * (mean(times.slice(1)) / times[0] - 1));
+      const recoveryScore = calibratedStabilityScore(lossPct);
+      if (recoveryScore !== null) addMetric(records, { axis: 'anaerobic_capacity', metric: 'recovery_index', score: recoveryScore, source: 'training', date, evidenceId,
+        rawValue: lossPct, method: 'output-retention-under-recorded-recovery', context: { restSeconds: protocolInfo.restSeconds, repCount: times.length } });
+    }
     if (times.length >= 3) {
       const variation = coefficientOfVariation(times);
       const score = calibratedStabilityScore(variation);
@@ -2000,11 +2100,13 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
       ? ['No valid weighted metric contribution remained after validation.']
       : [
         ...(omittedMetrics.length ? [`Not measured in this window: ${omittedMetrics.join(', ')}.`] : []),
+        ...(contributing.some((record) => !APPROVED_CALIBRATION_METHODS.has(record.method)) ? [PROVISIONAL_CALIBRATION_NOTE] : []),
         ...(contributing.some((record) => record.estimated)
           ? [`ESTIMATED: ${contributing.filter((record) => record.estimated).length} of ${contributing.filter((record) => record.method === 'distance-per-cycle-at-own-maximum-vs-elite').length} stroke-counted swims were below 95 % of the swimmer's own best speed; their stroke length at maximum effort is estimated from the swimmer's speed–efficiency profile.`]
           : []),
       ],
     estimatedRecords: contributing.filter((record) => record.estimated).length,
+    calibrationStatus: contributing.some((record) => !APPROVED_CALIBRATION_METHODS.has(record.method)) ? 'provisional' : 'approved',
     metricRecords: weighted,
     metricSummaries,
     trendRecords: axisTrends,
