@@ -98,3 +98,19 @@ export function eliteStrokeIndexReference({ distance, stroke, sex, course = 'LC'
   const rate = rates.reduce((a, b) => a + b, 0) / rates.length;
   return ((d / record) ** 2 * 60) / rate;
 }
+
+// Elite distance per stroke cycle (m) = world-record speed × 60 ÷ elite stroke rate, same inputs as the
+// elite Stroke Index. Used for Efficiency at the swimmer's own maximum effort (owner decision 16-11-2026):
+// stroke length is compared with elite stroke length; speed itself is not part of the efficiency score.
+export function eliteDistancePerCycleReference({ distance, stroke, sex, course = 'LC' }) {
+  const family = efficiencyStrokeFamily(stroke);
+  const d = Number(distance);
+  if (!family || !(d > 0) || !WORLD_RECORD_BASE_TIMES[course]) return null;
+  const sexes = sexOf(sex) === 'open' ? ['female', 'male'] : [sexOf(sex)];
+  const records = sexes.map((s) => Number(WORLD_RECORD_BASE_TIMES[course]?.[s]?.[family]?.[d]));
+  const rates = sexes.map((s) => Number(ELITE_STROKE_RATE_PROVISIONAL[family]?.[s]?.[d]));
+  if (records.some((v) => !(v > 0)) || rates.some((v) => !(v > 0))) return null;
+  const record = records.reduce((a, b) => a + b, 0) / records.length;
+  const rate = rates.reduce((a, b) => a + b, 0) / rates.length;
+  return ((d / record) * 60) / rate;
+}
