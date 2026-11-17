@@ -54,20 +54,17 @@ test('athlete projection exposes no invented capability when no saved server sna
 });
 
 // ATHLYRAX_ATHLETE_CAPABILITY_SPEED_LEVEL
-test('athlete capability follows the ISP evidence model (16-11-2026): a maximal swim scores Power & Speed once; it never creates Aerobic or Anaerobic', async () => {
+test('athlete capability follows the ISP speed-level rule: no timed swim -> consistency areas Not Scored; a timed swim scales them', async () => {
   const demo = await import('../scripts/demo-showcase-dataset.mjs');
   const cap = await import('../athlete-club-capability.mjs');
   const db = demo.buildDemoTenantSeed();
   const s = db.swimmers[0];
   const before = cap.buildClubCapabilityProfile(db, s, { tenantId: 'demo' });
-  const axis = (p, id) => p.axes.find((a) => a.id === id);
-  assert.equal(axis(before, 'aerobic_capacity').value, null, 'no qualifying aerobic set: Not Scored, never invented');
-  assert.equal(axis(before, 'power_speed_expression').value, null);
+  const aerobic = (p) => p.axes.find((a) => a.id === 'aerobic_capacity');
+  assert.equal(aerobic(before).value, null);
+  assert.match(aerobic(before).reasons[0], /Needs a timed test or race/);
   const d = before.calculationDate;
   db.tests = [...(db.tests || []), { id: 't-max100', swimmerId: s.id, date: d, testDate: d, templateId: 'builtin-test-max', testItemKey: 'M100', testName: 'M100', category: 'Swimming', repResults: [{ overallTime: '1:02.50', overallStrokeCount: '58' }], resultTime: '1:02.50', distance: 100, stroke: 'free', capabilityScoringEligible: true, completed: true, status: 'completed' }];
   const after = cap.buildClubCapabilityProfile(db, s, { tenantId: 'demo' });
-  assert.ok(axis(after, 'power_speed_expression').value > 0, 'the maximal 100 m scores Power & Speed');
-  assert.equal(axis(after, 'aerobic_capacity').value, null, 'the speed result is not scored again on Aerobic');
-  assert.equal(axis(after, 'anaerobic_capacity').value, null, 'nor on Anaerobic');
-  assert.equal(axis(after, 'technical_control').value, axis(before, 'technical_control').value, 'consistency is scored as measured, no speed multiplier');
+  assert.ok(aerobic(after).value > 0 && aerobic(after).value < 90, `aerobic is speed-scaled, not saturated: ${aerobic(after).value}`);
 });
