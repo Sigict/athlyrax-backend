@@ -9,7 +9,7 @@ import { canonicalBuiltInTestTemplate } from './testTemplateCatalog.js';
 import { resolveCompetitionCourseKey, isYardCourseKey } from './competitionCourse.js';
 import { buildEfficiencyAdaptabilityIndicators, latestArmSpanCm } from './efficiencyAdaptabilityIndicators.js';
 import { worldAquaticsScore, WORLD_AQUATICS_BASE_TIMES } from './worldAquaticsPoints.js';
-import { resolvePushOffAllowance, eliteStrokeIndexReference, eliteDistancePerCycleReference, efficiencyStrokeFamily, EFFICIENCY_REFERENCE_STATUS } from '../data/efficiencyReference.js';
+import { resolvePushOffAllowance, eliteStrokeIndexReference, EFFICIENCY_REFERENCE_STATUS } from '../data/efficiencyReference.js';
 import { resolveRecordedProgramSplitLength } from './recordedRaceResultDisplay.js';
 import { buildSwimmerScheduleDeliveryRatios } from './swimmerTrainingDeliveryRatios.js';
 
@@ -201,411 +201,13 @@ export function swimmerSpeedLevel(records = []) {
   return { ratio: ratioOf(best), points: Number(best.score) * 10, evidenceId: best.evidenceId || '', date: best.date || '', ...(excluded.length ? { unconfirmedOutliers: excluded } : {}) };
 }
 
-export const SPEED_LEVEL_NEEDED_REASON = 'Needs a timed test or race: consistency is weighted by how fast each set was swum relative to the swimmer\'s own best.';
+export const SPEED_LEVEL_NEEDED_REASON = 'Needs a timed test or race: consistency is placed on the world-record scale by the swimmer\'s speed.';
 
-// ============================================================================================
-// EVIDENCE MODEL (owner decisions 16-11-2026, Stage 3; docs/verification/capability-audit-20261116/
-// stage2-revised-design.md). Raw swim → derived measurement → capability interpretation.
-//  * No speed-level or relative-demand multiplier: every measurement is scored as measured.
-//  * One swim may inform several axes through DIFFERENT measurements; the same derived measurement
-//    (same calculated value) is scored on ONE axis only (resolveSingleHome), enforced by
-//    assertSingleHome, which fails the calculation on a duplicate.
-//  * Relative speed (same-event best ÷ recorded time; same stroke, distance and course only) is
-//    stored as CONTEXT on records and never changes a score.
-//  * Efficiency is Not Calibrated: measured indicators and speed–stroke profiles are reported; no
-//    0–100 score until a calibration is validated and approved.
-//  * Adaptability is scored only from ≥ 2 comparable longitudinal comparisons.
-// ============================================================================================
-export const EVIDENCE_MODEL_VERSION = 'evidence-model-v1 (16-11-2026, draft)';
-const SPEED_METHODS = new Set(['world-class-time-reference', 'competition-world-class-time-reference',
-  'reference-normalised-maximum-velocity', 'reference-normalised-peak-time', 'reference-threshold-time']);
-const REP_TIME_CV_METHODS = new Set(['aerobic-pace-cv', 'high-intensity-repeatability-cv', 'sprint-stability-cv',
-  'measured-training-repetition-time-cv', 'measured-aerobic-training-repeatability-cv',
-  'measured-intensive-training-repeatability-cv', 'measured-training-sprint-repetition-time-cv']);
-const FATIGUE_LOSS_METHODS = new Set(['high-intensity-fatigue-loss', 'late-set-fatigue-loss']);
-// Speed results are scored on Power & Speed for the World Aquatics event distances (validated base
-// times). 25 m uses a derived base (not validated) and is kept as context only.
-export const VALIDATED_SPEED_DISTANCES = Object.freeze([50, 100, 200, 400, 800, 1500]);
-export const AEROBIC_REPEATABILITY_MIN_REPS = 6;
-export const ADAPTABILITY_MIN_COMPARISONS = 2;
-export const NOT_CALIBRATED = 'Not Calibrated';
-// Calibration status (owner decision 16-11-2026): only the World Aquatics speed scale (single men's
-// reference) and the Adaptability smallest-worthwhile-change scale (D-7) are owner-approved. Every other
-// 0–100 mapping (CV/deterioration anchors, % of own best) is PROVISIONAL until validated on measured data.
-const APPROVED_CALIBRATION_METHODS = new Set(['world-class-time-reference', 'competition-world-class-time-reference',
-  'retest-response-vs-smallest-worthwhile-change', 'same-event-same-course-race-time-change-vs-smallest-worthwhile-change']);
-export const PROVISIONAL_CALIBRATION_NOTE = 'Provisional calibration: this score uses a 0–100 mapping (variation/deterioration anchors or % of own best) that has not yet been validated on measured swimming data.';
-export const INSUFFICIENT_EVIDENCE = 'Not Scored — Insufficient Evidence';
-export const EFFICIENCY_NOT_CALIBRATED_REASON = 'Efficiency is Not Calibrated: measured stroke length, stroke rate, speed and stroke index are shown, but no validated 0–100 calibration has been approved (provisional elite references are not used for scoring).';
-
-// The derived measurement a record holds. Records with the same (source, evidence, measure) are the
-// same calculated value.
-export function measureOf(record) {
-  if (record?.measure) return record.measure;
-  if (SPEED_METHODS.has(record?.method)) return 'speed-result';
-  if (REP_TIME_CV_METHODS.has(record?.method)
-    || (record?.method === 'cv-stability-calibration' && record?.metric === 'pace_stability')) return 'repetition-time-cv';
-  if (FATIGUE_LOSS_METHODS.has(record?.method)) return 'fatigue-loss';
-  if (record?.method === 'measured-training-early-to-late-pace-deterioration-pct') return 'pace-decay';
-  return `${record?.axis}|${record?.metric}|${record?.method || 'explicit'}`;
-}
-export const measurementIdOf = (record) => `${record?.source || ''}|${record?.evidenceId || ''}|${measureOf(record)}`;
-
-const courseClass = (course) => {
-  const token = String(course ?? '').trim().toUpperCase().replace(/\s+/g, '');
-  if (/^(50|50M|LC|LCM)$/.test(token)) return 'LC';
-  if (/^(25|25M|SC|SCM)$/.test(token)) return 'SC';
-  if (/Y/.test(token)) return 'SCY';
-  return 'unrecorded';
-};
-const eventKey = (demand) => {
-  const family = efficiencyStrokeFamily(demand?.stroke || 'freestyle') || 'other';
-  return `${family}|${Number(demand?.distance) || 0}|${courseClass(demand?.course)}`;
-};
-
-// Repeat-set protocol classification (owner decision 16-11-2026): from the recorded EFFORT (intent
-// in the prescription or test name), REPETITION DURATION and RECORDED RECOVERY, never from distance
-// alone. Thresholds are PROVISIONAL (to be validated on real recorded sets).
-// Software classification rules (owner decision 16-11-2026): provisional, NOT physiological boundaries.
-// The recorded purpose of the set (name / energy code) remains the primary input.
-export const PROTOCOL_THRESHOLDS = Object.freeze({
-  sprintMaxRepSeconds: 30, sprintMinRestToWork: 2, highIntensityMaxRepSeconds: 120,
-  status: 'provisional software classification rule, not a physiological boundary',
-});
-export function parseIntervalSeconds(value) {
-  const raw = String(value ?? '').trim();
-  if (!raw) return null;
-  const m = raw.match(/^(\d{1,2}):(\d{2}(?:\.\d+)?)$/);
-  if (m) return Number(m[1]) * 60 + Number(m[2]);
-  const n = Number(raw.replace(/s$/i, ''));
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-export function classifyRepeatProtocol({ sprintIntent = false, highIntensityIntent = false, aerobicIntent = false, meanRepSeconds = null, restSeconds = null } = {}) {
-  if (restSeconds === null || restSeconds === undefined || !(Number(restSeconds) >= 0) || !(Number(meanRepSeconds) > 0)) return { protocolClass: 'unclassified', reason: 'no recorded recovery (send-off or rest)' };
-  restSeconds = Number(restSeconds); meanRepSeconds = Number(meanRepSeconds);
-  const t = PROTOCOL_THRESHOLDS;
-  if (sprintIntent && meanRepSeconds <= t.sprintMaxRepSeconds && restSeconds >= t.sprintMinRestToWork * meanRepSeconds) return { protocolClass: 'sprint', reason: `sprint intent, ${meanRepSeconds.toFixed(1)} s reps, rest ${restSeconds.toFixed(0)} s` };
-  if ((sprintIntent || highIntensityIntent) && meanRepSeconds <= t.highIntensityMaxRepSeconds) return { protocolClass: 'high-intensity', reason: `high-intensity intent, ${meanRepSeconds.toFixed(1)} s reps, rest ${restSeconds.toFixed(0)} s` };
-  if (aerobicIntent) return { protocolClass: 'aerobic', reason: `aerobic intent, ${meanRepSeconds.toFixed(1)} s reps, rest ${restSeconds.toFixed(0)} s` };
-  return { protocolClass: 'unclassified', reason: 'effort not recorded as sprint, high-intensity or aerobic' };
-}
-// Recovery provenance (owner decision 16-11-2026): send-off, swimming time and rest are separate.
-//  1. recorded actual rest (pilot / console field; a recorded 0 s is real data, never "missing");
-//  2. otherwise send-off − swimming time (0 when the swim used the whole send-off);
-//  3. otherwise the prescribed rest (a prescribed 0:00 = continuous swimming, kept as 0).
-// A prescribed rest is a plan: when a send-off is recorded the send-off governs the actual timing.
-function protocolOf({ sendOff, rest, actualRest = null, times, sprintIntent, highIntensityIntent, aerobicIntent }) {
-  const meanRep = times.length ? mean(times) : null;
-  const recordedRest = actualRest === null || actualRest === undefined || actualRest === '' ? null : parseIntervalSeconds(actualRest) ?? (Number(actualRest) === 0 ? 0 : null);
-  const prescribedRest = rest === null || rest === undefined || String(rest).trim() === '' ? null : (/^0+(:0+(\.0+)?)?$/.test(String(rest).trim()) ? 0 : parseIntervalSeconds(rest));
-  const sendOffSeconds = parseIntervalSeconds(sendOff);
-  const fromSendOff = sendOffSeconds !== null && meanRep > 0 ? Math.max(0, sendOffSeconds - meanRep) : null;
-  let restSeconds = null; let restSource = 'not recorded';
-  if (recordedRest !== null) { restSeconds = recordedRest; restSource = 'recorded actual rest'; }
-  else if (fromSendOff !== null) { restSeconds = fromSendOff; restSource = 'send-off minus swimming time'; }
-  else if (prescribedRest !== null) { restSeconds = prescribedRest; restSource = 'prescribed rest'; }
-  return { ...classifyRepeatProtocol({ sprintIntent, highIntensityIntent, aerobicIntent, meanRepSeconds: meanRep, restSeconds }), restSeconds, restSource, meanRepSeconds: meanRep,
-    sendOffSeconds, sendOffRecorded: restSeconds !== null };
-}
-const meanRecordedRest = (reps) => {
-  const values = asArray(reps).map((rep) => rep?.actualRestSeconds ?? rep?.actualRest).filter((v) => v !== undefined && v !== null && v !== '')
-    .map((v) => parseIntervalSeconds(v) ?? (Number(v) === 0 ? 0 : null)).filter((v) => v !== null);
-  return values.length ? mean(values) : null;
-};
-// Race results that do not establish demonstrated speed (owner decision 16-11-2026: verified races only).
-const UNVERIFIED_RACE = /\b(dq|dsq|disqualified|dnf|dns|unofficial|provisional|estimated|exhibition)\b/i;
-export const isVerifiedRaceResult = (result) => !(result?.verified === false || UNVERIFIED_RACE.test(String(result?.status ?? result?.resultStatus ?? '')));
-
-// Single-home resolution. Returns { records, excluded } where excluded lists records removed with a reason.
-export function resolveSingleHome(records = []) {
-  const groups = new Map();
-  const passThrough = [];
-  for (const record of records) {
-    if (record?.kind === 'trend') { passThrough.push(record); continue; }
-    const key = measurementIdOf(record);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(record);
-  }
-  const out = [...passThrough];
-  const excluded = [];
-  const exclude = (rows, reason) => rows.forEach((row) => excluded.push({ ...row, excludedReason: reason }));
-  for (const rows of groups.values()) {
-    const measure = measureOf(rows[0]);
-    if (measure === 'speed-result') {
-      // One speed result per swim, scored once on Power & Speed (validated event distances only).
-      const preferred = rows.find((r) => WORLD_LEVEL_METHODS.has(r.method)) || rows[0];
-      if (preferred?.demand && preferred.demand.maximal === false) { exclude(rows, 'not a maximal test, time trial or verified race: shown as context only'); continue; }
-      const distance = Number(preferred?.context?.distance || preferred?.demand?.distance) || 0;
-      if (!VALIDATED_SPEED_DISTANCES.includes(distance)) { exclude(rows, `speed result at ${distance || '?'} m: no validated reference distance; shown as context only`); continue; }
-      out.push({ ...preferred, axis: 'power_speed_expression', metric: 'maximum_velocity', measure, homeRule: 'speed result → Power & Speed (single home)' });
-      exclude(rows.filter((r) => r !== preferred), 'same speed result already scored on Power & Speed');
-      continue;
-    }
-    if (measure === 'repetition-time-cv') {
-      // Home by the recorded protocol class (effort, repetition duration, recorded recovery):
-      // sprint → Power & Speed sprint stability; high-intensity → Anaerobic repeatability;
-      // aerobic (≥ 6 reps) → Aerobic repeatability; unclassified → Technical Control pace stability.
-      const demand = rows.find((r) => r.demand)?.demand || {};
-      const cls = demand.protocolClass || 'unclassified';
-      const base = rows.find((r) => r.axis === 'technical_control') || rows[0];
-      let home = null; let rule = '';
-      if (cls === 'sprint') { home = { axis: 'power_speed_expression', metric: 'sprint_stability' }; rule = `sprint protocol (${demand.reason}) → Power & Speed sprint stability`; }
-      else if (cls === 'high-intensity') { home = { axis: 'anaerobic_capacity', metric: 'repeatability' }; rule = `high-intensity protocol (${demand.reason}) → Anaerobic repeatability`; }
-      else if (cls === 'aerobic') {
-        if (Number(demand.repCount) >= AEROBIC_REPEATABILITY_MIN_REPS) { home = { axis: 'aerobic_capacity', metric: 'repeatability' }; rule = `aerobic protocol (${demand.reason}) → Aerobic repeatability`; }
-        else { exclude(rows, `aerobic repeatability needs a recorded send-off or rest and ≥ ${AEROBIC_REPEATABILITY_MIN_REPS} repetitions`); continue; }
-      } else { home = { axis: 'technical_control', metric: 'pace_stability' }; rule = `protocol unclassified (${demand.reason || 'no recorded recovery'}) → Technical Control pace stability`; }
-      const own = rows.find((r) => r.axis === home.axis && r.metric === home.metric) || base;
-      out.push({ ...own, ...home, measure, homeRule: rule, protocolClass: cls });
-      exclude(rows.filter((r) => r !== own), `same repetition-time variation already scored (${rule})`);
-      continue;
-    }
-    if (measure === 'pace-decay') {
-      // Early-to-late pace decay: Aerobic pace maintenance for an aerobic protocol, else Durability.
-      const demand = rows[0].demand || {};
-      const aerobicHome = demand.protocolClass === 'aerobic';
-      out.push({ ...rows[0], ...(aerobicHome ? { axis: 'aerobic_capacity', metric: 'pace_stability' } : {}), measure,
-        homeRule: aerobicHome ? 'aerobic protocol → Aerobic pace maintenance' : 'sustained set → Durability late-set stability' });
-      continue;
-    }
-    if (measure === 'fatigue-loss') {
-      const cls = rows.find((r) => r.demand)?.demand?.protocolClass;
-      const anaerobicHome = cls === 'high-intensity' || cls === 'sprint';
-      const home = (anaerobicHome ? rows.find((r) => r.axis === 'anaerobic_capacity') : rows.find((r) => r.axis === 'durability')) || rows[0];
-      const target = anaerobicHome ? { axis: 'anaerobic_capacity', metric: 'fatigue_resistance' } : { axis: 'durability', metric: 'fatigue_resistance' };
-      out.push({ ...home, ...target, measure, homeRule: anaerobicHome ? 'high-intensity repeats → Anaerobic fatigue loss' : 'sustained set → Durability fatigue loss' });
-      exclude(rows.filter((r) => r !== home), 'same fatigue loss already scored');
-      continue;
-    }
-    // Efficiency is Not Calibrated: its per-swim values are indicators, not scored records.
-    if (rows[0].axis === 'efficiency' && rows[0].metric === 'speed_per_stroke') { exclude(rows, 'Efficiency indicator (Not Calibrated)'); continue; }
-    // Within-session send-off response is an observation, not a longitudinal comparison.
-    if (rows[0].method === 'tighter-send-off-pace-response-vs-smallest-worthwhile-change') { exclude(rows, 'within-session response: shown as an Adaptability observation, not a longitudinal comparison'); continue; }
-    out.push(...rows.map((r) => ({ ...r, measure })));
-  }
-  return { records: out, excluded };
-}
-
-// Evidence carrying generated demonstration measurements (measurementSource 'synthetic-demo').
-export function syntheticEvidenceIds(db = {}, swimmerId = '') {
-  const ids = new Set();
-  const marked = (value) => JSON.stringify(value ?? null).includes('synthetic-demo');
-  for (const test of asArray(db?.tests)) if (String(test?.swimmerId) === swimmerId && marked(test)) ids.add(String(test.id));
-  for (const set of asArray(db?.trainingSessionSets)) if (marked(set?.resultsBySwimmer?.[swimmerId])) ids.add(String(set.id));
-  for (const fixture of asArray(db?.fixtures)) for (const event of asArray(fixture?.events)) {
-    if (marked(event?.resultsBySwimmer?.[swimmerId])) ids.add(`${String(fixture?.id || '').trim()}:${String(event?.id || '').trim()}:${swimmerId}`);
-  }
-  return ids;
-}
-
-// Speed reserve at another pace (instruction §6): same-event best ÷ the given time. Context only.
-export function speedReserveAtPace(sameEventBestsByKey = {}, { stroke = 'freestyle', distance, course, time }) {
-  const key = eventKey({ stroke, distance, course });
-  const best = sameEventBestsByKey?.[key];
-  if (!best || !(Number(time) > 0)) return { status: 'unavailable', event: key, reason: 'no best for the same stroke, distance and course' };
-  const relativeSpeed = best.time / Number(time);
-  return { event: key, bestTime: best.time, time: Number(time), relativeSpeed, speedReserve: 1 - relativeSpeed,
-    meaning: 'unused demonstrated speed against this event benchmark; not a physiological reserve' };
-}
-
-function efficiencySwims(measurements = [], syntheticIds = new Set()) {
-  return asArray(measurements).filter((row) => row?.speed > 0 && row?.dpc > 0).map((row) => {
-    const event = eventKey({ stroke: row.stroke, distance: row.distance, course: row.course });
-    const time = Number(row.distance) / row.speed;
-    return { id: row.id, source: row.source, date: row.date, event, family: event.split('|')[0], courseClass: event.split('|')[2],
-      distance: Number(row.distance), speed: row.speed, dpc: row.dpc, strokeIndex: row.si,
-      // Derived stroke rate (cycles per minute over the whole swim, push-off time included).
-      strokeRate: Number(row.cycles) > 0 && time > 0 ? 60 * Number(row.cycles) / time : null, strokeRateDerived: true,
-      synthetic: syntheticIds.has(String(row.id)) };
-  });
-}
-
-// Efficiency analysis (Not Calibrated): indicators, speed–stroke profiles per stroke and course class,
-// and the C3 candidate calibrations. Nothing here is a score.
-export function buildEfficiencyAnalysis({ measurements = [], syntheticIds = new Set(), bests = {}, swimmer = null } = {}) {
-  const swims = efficiencySwims(measurements, syntheticIds);
-  const groups = new Map();
-  for (const swim of swims) {
-    const key = `${swim.family}|${swim.courseClass}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(swim);
-  }
-  const profiles = {};
-  for (const [key, rows] of groups) {
-    const [family, course] = key.split('|');
-    // Fastest same-family, same-course event best, as a speed (for the "within 5 % of best" coverage rule).
-    const bestSpeeds = Object.entries(bests).filter(([event]) => event.startsWith(`${family}|`) && event.endsWith(`|${course}`))
-      .map(([event, best]) => Number(event.split('|')[1]) / best.time);
-    const { predictStrokeLength, ...profile } = speedStrokeProfile(rows, { nearBestSpeed: bestSpeeds.length ? Math.max(...bestSpeeds) : null });
-    void predictStrokeLength;
-    profiles[key] = profile;
-  }
-  const mainKey = [...groups.keys()].sort((a, b) => groups.get(b).length - groups.get(a).length)[0];
-  return {
-    status: NOT_CALIBRATED,
-    reason: EFFICIENCY_NOT_CALIBRATED_REASON,
-    swims: swims.length,
-    syntheticSwims: swims.filter((s) => s.synthetic).length,
-    indicators: swims.map(({ id, source, date, event, speed, dpc, strokeRate, strokeIndex, synthetic }) => ({ id, source, date, event, speed, strokeLength: dpc, strokeRate, strokeIndex, synthetic })),
-    profiles,
-    candidates: efficiencyCalibrationCandidates({ swims: mainKey ? groups.get(mainKey) : [], armSpanCm: latestArmSpanCm(swimmer), profile: mainKey ? profiles[mainKey] : null }),
-    calibrationNote: 'Synthetic demonstration measurements must not be used to choose a calibration.',
-  };
-}
-
-// Adaptability investigations (owner priority 16-11-2026: recovery and technique adaptation).
-// Observations only: never scored.
-export function buildAdaptabilityInvestigations({ canonicalSets = [], swimmerId = '', efficiencyMeasurements = [], syntheticIds = new Set() } = {}) {
-  // Recovery adaptation: the same set (name, distance, reps, send-off) repeated on different dates:
-  // change in repetition-time variation and fatigue loss from the first to the last occurrence.
-  const bySignature = new Map();
-  for (const set of asArray(canonicalSets)) {
-    const reps = asArray(set?.resultsBySwimmer?.[swimmerId]?.reps).map((rep) => parseResultTime(rep?.overallTime ?? rep?.time)).filter((t) => t > 0);
-    const sendOff = String(set?.sendOff ?? set?.interval ?? '').trim();
-    if (reps.length < 3 || !sendOff) continue;
-    const signature = [String(set?.setName || '').trim().toLowerCase(), inferDistance(set, {}), reps.length, sendOff].join('|');
-    const date = dateKey(set?.scheduleDate || set?.sessionDate || set?.date);
-    if (!date) continue;
-    if (!bySignature.has(signature)) bySignature.set(signature, []);
-    bySignature.get(signature).push({ id: String(set.id), date, cv: coefficientOfVariation(reps), fatiguePct: 100 * (Math.max(...reps) / Math.min(...reps) - 1), synthetic: syntheticIds.has(String(set.id)) });
-  }
-  const recovery = [...bySignature].filter(([, rows]) => new Set(rows.map((r) => r.date)).size >= 2).map(([signature, rows]) => {
-    const ordered = rows.sort((a, b) => a.date.localeCompare(b.date)); const first = ordered[0]; const last = ordered[ordered.length - 1];
-    return { set: signature, occurrences: ordered.length, from: first.date, to: last.date, cvChange: last.cv - first.cv, fatigueLossChangePct: last.fatiguePct - first.fatiguePct, synthetic: ordered.some((r) => r.synthetic) };
-  });
-  // Technique adaptation: stroke length at comparable speed (±2 %), same stroke, distance and course,
-  // earliest vs latest swim.
-  const swims = efficiencySwims(efficiencyMeasurements, syntheticIds).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const technique = [];
-  for (let i = 0; i < swims.length; i += 1) for (let j = swims.length - 1; j > i; j -= 1) {
-    const a = swims[i]; const b = swims[j];
-    if (a.event === b.event && a.date < b.date && Math.abs(b.speed / a.speed - 1) <= 0.02) { technique.push({ event: a.event, from: a.id, to: b.id, fromDate: a.date, toDate: b.date, strokeLengthChangePct: 100 * (b.dpc / a.dpc - 1), synthetic: a.synthetic || b.synthetic }); break; }
-  }
-  return {
-    status: 'Investigation (not scored)',
-    recoveryAdaptation: recovery.length ? recovery : { status: 'Insufficient Evidence', reason: 'no identical set with a recorded send-off repeated on two dates' },
-    techniqueAdaptation: technique.length ? { comparisons: technique.length, meanStrokeLengthChangePct: mean(technique.map((t) => t.strokeLengthChangePct)), pairs: technique.slice(0, 20) } : { status: 'Insufficient Evidence', reason: 'no comparable-speed swims of the same event on two dates' },
-  };
-}
-
-// Fails the calculation if one derived measurement is scored on two axes.
-export function assertSingleHome(records = []) {
-  const seen = new Map();
-  for (const record of records) {
-    if (record?.kind === 'trend') continue;
-    const id = measurementIdOf(record);
-    const place = `${record.axis}|${record.metric}`;
-    if (seen.has(id) && seen.get(id) !== place) {
-      throw new Error(`Duplicate scoring: measurement ${id} on ${seen.get(id)} and ${place}`);
-    }
-    seen.set(id, place);
-  }
-  return true;
-}
-
-// Relative speed as context: the swimmer's best time for the SAME stroke, distance and course class
-// (recorded courses never mixed with unrecorded) ÷ the recorded time. Unavailable otherwise.
-export function sameEventBests(records = []) {
-  const bests = new Map();
-  for (const record of records) {
-    if (record?.measure !== 'speed-result' && !SPEED_METHODS.has(record?.method)) continue;
-    const d = record.demand; if (!d || d.maximal === false) continue;
-    const time = Number(d.bestTime || d.time); if (!(time > 0)) continue;
-    const key = eventKey(d);
-    if (!bests.has(key) || time < bests.get(key).time) bests.set(key, { time, evidenceId: record.evidenceId, date: record.date });
-  }
-  return bests;
-}
-export function addRelativeSpeedContext(records = []) {
-  const bests = sameEventBests(records);
-  const out = records.map((record) => {
-    if (!record?.demand || record.kind === 'trend') return record;
-    const best = bests.get(eventKey(record.demand));
-    const time = Number(record.demand.time);
-    const relativeSpeed = best && time > 0 ? best.time / time : null;
-    return { ...record, relativeSpeed: relativeSpeed === null ? 'unavailable' : relativeSpeed,
-      relativeSpeedReference: best ? { ...best, event: eventKey(record.demand) } : null };
-  });
-  // Dedicated measures that need a same-event best (16-11-2026, provisional linear scale: 100 = the
-  // swimmer's own best pace). Aerobic sustainable pace: mean pace of an aerobic set (≥ 6 reps, recorded
-  // recovery). Anaerobic repeat output: mean of the first two reps of a high-intensity set. Each is a
-  // separate measurement of the set, never the speed result again; unavailable without a same-event best.
-  const added = [];
-  const seen = new Set();
-  for (const record of out) {
-    const d = record?.demand; if (!d || record.kind === 'trend' || seen.has(record.evidenceId + record.source)) continue;
-    const best = bests.get(eventKey(d)); if (!best) continue;
-    if (record.measure === 'repetition-time-cv' && d.protocolClass === 'aerobic' && Number(d.repCount) >= AEROBIC_REPEATABILITY_MIN_REPS && d.time > 0) {
-      seen.add(record.evidenceId + record.source);
-      added.push({ ...record, axis: 'aerobic_capacity', metric: 'threshold_pace', score: clamp(100 * best.time / d.time), rawValue: d.time,
-        method: 'sustained-pace-vs-own-best', measure: 'sustained-pace', homeRule: 'aerobic set mean pace vs own same-event best (provisional linear scale)', relativeSpeed: best.time / d.time, relativeSpeedReference: { ...best, event: eventKey(d) } });
-    } else if (record.measure === 'repetition-time-cv' && ['high-intensity', 'sprint'].includes(d.protocolClass) && d.firstRepsTime > 0) {
-      seen.add(record.evidenceId + record.source);
-      added.push({ ...record, axis: 'anaerobic_capacity', metric: 'peak_output', score: clamp(100 * best.time / d.firstRepsTime), rawValue: d.firstRepsTime,
-        method: 'repeat-output-vs-own-best', measure: 'repeat-output', homeRule: 'first two reps of a high-intensity set vs own same-event best (provisional linear scale)', relativeSpeed: best.time / d.firstRepsTime, relativeSpeedReference: { ...best, event: eventKey(d) } });
-    }
-  }
-  return { records: [...out, ...added], bests: Object.fromEntries([...bests].map(([k, v]) => [k, v])) };
-}
-
-// Speed–stroke profile (C2): per stroke family and course class, from stroke-counted swims. No forced
-// slope sign; outliers beyond 3 median absolute deviations of the stroke-length residual are excluded
-// and listed; no prediction outside the observed speed range; Insufficient Evidence when coverage is thin.
-export const PROFILE_MIN_SWIMS = 5;
-export const PROFILE_MIN_SPEED_SPAN = 0.10;
-export const PROFILE_NEAR_BEST = 0.95;
-function linearFit(points) {
-  const n = points.length; const mx = mean(points.map((p) => p.x)); const my = mean(points.map((p) => p.y));
-  const sxx = points.reduce((t, p) => t + (p.x - mx) ** 2, 0);
-  if (!(sxx > 0)) return null;
-  const slope = points.reduce((t, p) => t + (p.x - mx) * (p.y - my), 0) / sxx;
-  const intercept = my - slope * mx;
-  const residualSd = Math.sqrt(points.reduce((t, p) => t + (p.y - (intercept + slope * p.x)) ** 2, 0) / Math.max(1, n - 2));
-  return { slope, intercept, residualSd, n };
-}
-const median = (values) => { const v = [...values].sort((a, b) => a - b); const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
-export function speedStrokeProfile(swims = [], { nearBestSpeed = null } = {}) {
-  const rows = asArray(swims).filter((s) => Number(s.speed) > 0 && Number(s.dpc) > 0);
-  const base = { swims: rows.length, synthetic: rows.filter((s) => s.synthetic).length };
-  if (rows.length < PROFILE_MIN_SWIMS) return { status: 'Insufficient Evidence', reason: `needs ≥ ${PROFILE_MIN_SWIMS} stroke-counted swims (${rows.length})`, ...base };
-  const first = linearFit(rows.map((s) => ({ x: s.speed, y: s.dpc })));
-  if (!first) return { status: 'Insufficient Evidence', reason: 'no speed variation', ...base };
-  const residuals = rows.map((s) => s.dpc - (first.intercept + first.slope * s.speed));
-  const med = median(residuals); const mad = median(residuals.map((r) => Math.abs(r - med)));
-  const keep = []; const outliers = [];
-  rows.forEach((s, i) => ((mad > 0 && Math.abs(residuals[i] - med) > 3 * mad) ? outliers : keep).push(s));
-  const speeds = keep.map((s) => s.speed); const lo = Math.min(...speeds); const hi = Math.max(...speeds);
-  const span = (hi - lo) / hi;
-  if (keep.length < PROFILE_MIN_SWIMS || span < PROFILE_MIN_SPEED_SPAN) return { status: 'Insufficient Evidence', reason: `needs ≥ ${PROFILE_MIN_SWIMS} swims spanning ≥ ${100 * PROFILE_MIN_SPEED_SPAN} % of speed (span ${(100 * span).toFixed(1)} %)`, outliers: outliers.map((s) => s.id), ...base };
-  if (nearBestSpeed > 0 && hi < PROFILE_NEAR_BEST * nearBestSpeed) return { status: 'Insufficient Evidence', reason: `no swim within ${100 - 100 * PROFILE_NEAR_BEST} % of the same-event best speed`, outliers: outliers.map((s) => s.id), ...base };
-  const dpcFit = linearFit(keep.map((s) => ({ x: s.speed, y: s.dpc })));
-  const rateRows = keep.filter((s) => Number(s.strokeRate) > 0);
-  const rateFit = rateRows.length >= PROFILE_MIN_SWIMS ? linearFit(rateRows.map((s) => ({ x: s.speed, y: s.strokeRate }))) : null;
-  const direction = Math.abs(dpcFit.slope) * (hi - lo) < dpcFit.residualSd ? 'approximately flat' : dpcFit.slope > 0 ? 'stroke length increases with speed' : 'stroke length decreases with speed';
-  return { status: 'Profile', speedRange: [lo, hi], strokeLength: dpcFit, strokeRate: rateFit, direction, outliers: outliers.map((s) => s.id),
-    measured: keep.length - keep.filter((s) => s.synthetic).length, ...base,
-    // Prediction only inside the observed speed range; labelled estimated by the caller.
-    predictStrokeLength: (speed) => (speed >= lo && speed <= hi ? dpcFit.intercept + dpcFit.slope * speed : null) };
-}
-
-// C3 candidate calibrations: computed for analysis and testing; none is used as a score.
-export function efficiencyCalibrationCandidates({ swims = [], armSpanCm = null, profile = null } = {}) {
-  const rows = asArray(swims).filter((s) => s.speed > 0 && s.dpc > 0).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  // (a) Same swimmer, comparable speed (±2 %), same stroke, distance and course: stroke-length change first → last.
-  const comparable = [];
-  for (let i = 0; i < rows.length; i += 1) for (let j = i + 1; j < rows.length; j += 1) {
-    const a = rows[i]; const b = rows[j];
-    if (a.event === b.event && a.date < b.date && Math.abs(b.speed / a.speed - 1) <= 0.02) comparable.push({ from: a.id, to: b.id, dpcChangePct: 100 * (b.dpc / a.dpc - 1) });
-  }
-  // (b) Stroke length relative to arm span (context; arm span alone is not propulsive efficiency).
-  const span = Number(armSpanCm) > 0 ? Number(armSpanCm) / 100 : null;
-  return {
-    withinSwimmerComparableSpeed: comparable.length ? { comparisons: comparable.length, meanDpcChangePct: mean(comparable.map((c) => c.dpcChangePct)), pairs: comparable.slice(0, 20) } : { status: 'Insufficient Evidence' },
-    strokeLengthPerArmSpan: span ? { meanRatio: mean(rows.map((s) => s.dpc / span)), armSpanM: span } : { status: 'Insufficient Evidence', reason: 'no arm span recorded' },
-    techniqueRetention: profile?.status === 'Profile' ? { strokeLengthSlopePerMs: profile.strokeLength.slope, direction: profile.direction } : { status: 'Insufficient Evidence' },
-    normativeStrokeIndex: { status: 'Unavailable', reason: 'no sourced, peer-reviewed normative stroke-index dataset in the repository' },
-    calibrationChosen: null,
-  };
+export function applySpeedLevel(records = [], speedLevel = null) {
+  if (!speedLevel) return records;
+  return records.map((record) => (isSpeedWeightedMetric(record) && Number.isFinite(Number(record.score))
+    ? { ...record, consistencyScore: record.score, speedLevel: speedLevel.ratio, score: record.score * speedLevel.ratio }
+    : record));
 }
 
 function toNumber(value, fallback = Number.NaN) {
@@ -810,7 +412,7 @@ function performanceReferenceScore({ time, distance, stroke, course }) {
 // values) pending owner confirmation of the table.
 // Elite Stroke Index reference: src/data/efficiencyReference.js (stroke-, sex- and
 // course-specific world records; provisional elite stroke-rate table).
-export const EFFICIENCY_REFERENCE_NOTE = 'Efficiency 0–100 = the swimmer\'s distance per stroke cycle at their own maximum effort ÷ elite distance per cycle × 100 (elite: world-record speed of the same stroke, distance, sex and pool course × 60 ÷ elite stroke rate, provisional table). Swims below 95 % of the swimmer\'s own best speed are moved to maximum effort along the swimmer\'s own speed–efficiency profile and marked estimated. Speed itself is not part of the efficiency score.';
+export const EFFICIENCY_REFERENCE_NOTE = 'Efficiency 0–100 = swimmer Stroke Index ÷ elite reference Stroke Index × 100 (reference speed from the current world record of the same stroke, distance, sex and pool course; elite stroke rate from a provisional table pending source validation). Stroke Index is a stroke-economy indicator, not propelling efficiency.';
 export function eliteStrokeIndex({ distance, stroke, sex, course = 'LC' }) {
   return eliteStrokeIndexReference({ distance: Number(distance), stroke, sex, course });
 }
@@ -863,8 +465,6 @@ function buildEfficiencyAdaptabilityRecords({ canonicalTests, completedCompetiti
       addMetric(records, { axis: 'efficiency', metric: 'speed_per_stroke', score,
         source: sourceOf[row.source], date: row.date, evidenceId: row.id, signal: 1, rawValue: row.si,
         method: 'stroke-index-vs-elite-reference',
-        demand: row.speed > 0 && row.distance > 0 ? { distance: row.distance, time: row.distance / row.speed, stroke: row.stroke, course: row.course } : null,
-        dpc: row.dpc, eliteDpc: eliteDistancePerCycleReference({ distance: row.distance, stroke: row.stroke, sex, course: row.course }),
         // The radar is 0–100; the % of the reference is kept uncapped for tracking beyond it.
         context: { referencePct: Math.round(score * 10) / 10, eliteSi: row.eliteSi, course: row.course, verified: row.verified === true } });
     }
@@ -883,7 +483,7 @@ function buildEfficiencyAdaptabilityRecords({ canonicalTests, completedCompetiti
       source: 'training', date: row.to.date, evidenceId: row.to.id, signal: 1, rawValue: row.paceChangePct,
       method: 'tighter-send-off-pace-response-vs-smallest-worthwhile-change' });
   }
-  return { records, efficiencyEvidence: evidence, indicatorMeasurements: indicators.efficiency.measurements, sex };
+  return { records, efficiencyEvidence: evidence };
 }
 
 function collectTestRepRows(test, raw) {
@@ -988,9 +588,6 @@ function addMetric(records, {
   rawValue = null,
   method = '',
   context = null,
-  demand = null,
-  dpc = null,
-  eliteDpc = null,
 }) {
   if (!axis || !metric || !Number.isFinite(Number(score))) return;
   const resolvedDate = dateKey(date);
@@ -1009,18 +606,7 @@ function addMetric(records, {
     // Measurement identity (distance, stroke, course, repetitions) used by the
     // decision engine; never used for scoring.
     ...(context ? { context } : {}),
-    // Pace of the swim behind the record (relative demand) and, for efficiency, its measured and
-    // elite distance per stroke cycle. Used by applyRelativeDemand.
-    ...(demand ? { demand } : {}),
-    ...(Number(dpc) > 0 ? { dpc: Number(dpc) } : {}),
-    ...(Number(eliteDpc) > 0 ? { eliteDpc: Number(eliteDpc) } : {}),
   });
-}
-
-// Attach the pace of each swim (distance, mean time, stroke, course) to the records it produced.
-function annotateDemand(records, demandById) {
-  return records.map((record) => (record.demand || !demandById.has(record.evidenceId) ? record
-    : { ...record, demand: demandById.get(record.evidenceId) }));
 }
 
 // A within-swimmer change relative to that swimmer's own earlier measurement
@@ -1071,7 +657,6 @@ function readExplicitMetricScores(payload, records, source, date, evidenceId) {
 
 function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
   const records = [];
-  const demandById = new Map();
   // Compare like-for-like performances in date order; an earlier recorded
   // personal measurement is a valid longitudinal baseline, not an invented target.
   const personalBaselines = new Map();
@@ -1127,39 +712,20 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
       || (distance > 0 && distance <= 200);
     const aerobic = /threshold|aerobic|endurance|distance|\ben1\b|\ben2\b/.test(text)
       || distance >= 400;
-    // Sprint intent from the recorded protocol, not from distance alone (16-11-2026; same rule as training).
-    const sprint = /sprint|speed|power|max|start|\bsp\b/.test(text);
+    const sprint = /sprint|speed|power|max|start|\bsp\b/.test(text)
+      || (distance > 0 && distance <= 50);
     const testSignal = signalWeight({ values: times, secondaryValues: strokes, explicit: true });
     // Free-text swimming test names may be the only stroke information for
     // manually recorded tests. Use a recognised stroke token, never guess.
     const strokeName = String(test?.testName || raw?.testName || '').trim();
     const namedStroke = strokeName.match(/\b(freestyle|free|front crawl|fr|backstroke|back|breaststroke|breast|butterfly|fly|medley|im)\b/i)?.[1] || '';
     const measuredStroke = test?.stroke || raw?.stroke || set?.stroke || namedStroke || protocol?.stroke || '';
-    // Speed results come from MAXIMAL efforts only (a single-rep max test or a test named max / time
-    // trial); the fastest rep of a repeat set is submaximal and is not a maximum-speed result (16-11-2026).
-    // Maximal test or time trial only (16-11-2026): a single repetition is not automatically maximal.
-    const maximalTemplate = /builtin-test-max\b/.test(String(test?.templateId || raw?.templateId || '')) || /^max$/i.test(String(raw?.templateName || test?.templateName || '').trim());
-    const maximalEffort = maximalTemplate || /\bmax\b|max effort|time trial|\btt\b/.test(text);
-    // Effort from the recorded protocol only, never from distance (16-11-2026): the test name and the
-    // energy code recorded on the test, its linked set or the canonical protocol (e.g. the Repeatability
-    // battery is recorded as EN2, the Max battery as SP).
-    const energyCode = String(raw?.energy ?? raw?.energySystem ?? set?.energy ?? set?.energySystem ?? protocol?.energy ?? '').trim().toLowerCase();
-    const highIntensityIntent = /race\s*pace|broken|anaerobic|lactate|\ben3\b|\blt\b|\blp\b|high[\s-]*intensity/.test(text) || TRAINING_INTENSIVE_CODES.test(energyCode);
-    const aerobicIntent = /threshold|aerobic|endurance|\ben1\b|\ben2\b|\ba1\b|\ba2\b/.test(text) || TRAINING_AEROBIC_CODES.test(energyCode);
-    const protocolInfo = protocolOf({ sendOff: raw?.sendOff ?? raw?.interval ?? set?.sendOff ?? set?.interval ?? protocol?.sendOff,
-      rest: raw?.rest ?? set?.rest, actualRest: raw?.actualRest ?? meanRecordedRest(collectTestRepRows(test, raw)),
-      times, sprintIntent: sprint || energyCode === 'sp', highIntensityIntent, aerobicIntent });
-    const performanceScore = times.length && maximalEffort
+    const performanceScore = times.length
       ? performanceReferenceScore({ time: Math.min(...times), distance, sex: raw?.gender || raw?.sex || swimmer?.gender || swimmer?.sex, stroke: measuredStroke,
         course: test?.course || raw?.course || set?.course || test?.poolLength || raw?.poolLength })
       : null;
 
     readExplicitMetricScores(raw, records, 'testing', date, evidenceId);
-    if (times.length && distance > 0) demandById.set(String(evidenceId || ''), { distance, time: mean(times), bestTime: Math.min(...times), stroke: measuredStroke,
-      course: test?.course || raw?.course || set?.course || test?.poolLength || raw?.poolLength, repCount: times.length,
-      firstRepsTime: times.length ? mean(times.slice(0, 2)) : null, maximal: maximalEffort,
-      measurementSources: [...new Set(collectTestRepRows(test, raw).map((rep) => String(rep?.measurementSource || raw?.measurementSource || 'recorded')))],
-      ...protocolInfo });
 
     const testContext = {
       distance,
@@ -1372,14 +938,6 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
         });
       }
     }
-    // Anaerobic recovery-dependent output (16-11-2026): mean speed of reps 2..n ÷ rep 1, only under a
-    // recorded recovery; scored on the provisional CV/deterioration anchors as % loss.
-    if (times.length >= 3 && protocolInfo.restSeconds !== null && ['high-intensity', 'sprint'].includes(protocolInfo.protocolClass)) {
-      const lossPct = Math.max(0, 100 * (mean(times.slice(1)) / times[0] - 1));
-      const recoveryScore = calibratedStabilityScore(lossPct);
-      if (recoveryScore !== null) addMetric(records, { axis: 'anaerobic_capacity', metric: 'recovery_index', score: recoveryScore, date, evidenceId,
-        signal: testSignal, rawValue: lossPct, method: 'output-retention-under-recorded-recovery', context: { restSeconds: protocolInfo.restSeconds, repCount: times.length } });
-    }
 
     const outputReferenceTime = firstDefinedNumber(set?.referenceTime, set?.benchmarkTime, raw?.referenceTime, raw?.benchmarkTime);
     if (highIntensity && times.length > 0 && Number.isFinite(outputReferenceTime) && outputReferenceTime > 0) {
@@ -1487,7 +1045,7 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
       }
     }
   }
-  return annotateDemand(records, demandById);
+  return records;
 }
 
 // A competition console may store splits as cumulative race-clock stamps.
@@ -1521,7 +1079,6 @@ function competitionSegments(result, officialTime = Number.NaN) {
 
 export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }) {
   const records = [];
-  const demandById = new Map();
   const history = new Map();
   const measuredStrokeBaselines = new Map();
   const ordered = [...asArray(completedCompetitions)].sort((a, b) => dateKey(a?.date).localeCompare(dateKey(b?.date)));
@@ -1550,13 +1107,10 @@ export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }
     const date = competition?.date;
     const evidenceId = competition?.id;
     if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(distance) || distance <= 0) continue;
-    demandById.set(String(evidenceId || ''), { distance, time, bestTime: time, stroke, course: courseKey, repCount: 1, race: true, maximal: isVerifiedRaceResult(result) });
 
     // Any pool course: a yard race is scored at the same pace over the matching
     // short course metre event (worldAquaticsPoints, labelled approximate).
-    const performanceScore = isVerifiedRaceResult(result)
-      ? performanceReferenceScore({ time, distance, sex: result?.gender || result?.sex || swimmer?.gender || swimmer?.sex, stroke, course: courseKey })
-      : null;
+    const performanceScore = performanceReferenceScore({ time, distance, sex: result?.gender || result?.sex || swimmer?.gender || swimmer?.sex, stroke, course: courseKey });
     if (performanceScore !== null) {
       // Race time relative to an elite reference measures performance level,
       // not stroke efficiency. Do not invent speed-per-stroke without an
@@ -1570,15 +1124,7 @@ export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }
     const segmentScore = calibratedStabilityScore(segmentCv);
     if (segmentScore !== null) {
       addMetric(records, { axis: 'technical_control', metric: 'pace_stability', score: segmentScore, source: 'competition', date, evidenceId, signal: signalWeight({ values: segments, explicit: true }), rawValue: segmentCv, method: 'competition-segment-cv' });
-      // Durability: late-race decay (a different measurement from the split CV above): mean of the last
-      // third of segments ÷ mean of the first third, excluding the dive segment.
-      const swumSegments = segments.slice(1);
-      if (distance >= 200 && swumSegments.length >= 3) {
-        const third = Math.max(1, Math.floor(swumSegments.length / 3));
-        const decayPct = Math.max(0, 100 * (mean(swumSegments.slice(-third)) / mean(swumSegments.slice(0, third)) - 1));
-        const decayScore = calibratedStabilityScore(decayPct);
-        if (decayScore !== null) addMetric(records, { axis: 'durability', metric: 'late_set_stability', score: decayScore, source: 'competition', date, evidenceId, signal: signalWeight({ values: swumSegments, explicit: true }), rawValue: decayPct, method: 'competition-late-race-decay' });
-      }
+      if (distance >= 200) addMetric(records, { axis: 'durability', metric: 'late_set_stability', score: segmentScore, source: 'competition', date, evidenceId, signal: signalWeight({ values: segments, explicit: true }), rawValue: segmentCv, method: 'competition-segment-cv' });
     }
 
     // Robustness of Efficiency in a race: stroke drift from the second to the
@@ -1648,7 +1194,7 @@ export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }
     }
     if (signature) history.set(signature, time);
   }
-  return annotateDemand(records, demandById);
+  return records;
 }
 
 // Which recorded training sets can measure which axis (Training radar). One
@@ -1676,20 +1222,19 @@ export const TRAINING_AXIS_MEASUREMENT = Object.freeze({
   technical_control: 'pace and stroke-count stability (CV) of a set with at least 3 timed repetitions',
   efficiency: null,
   robustness_of_efficiency: 'early-to-late stroke-count / pace drift of a set with at least 4 repetitions timed and stroke-counted',
-  aerobic_capacity: 'repeatability (CV) and pace maintenance of an aerobic set (EN1/EN2/EN3, A1/A2) with a recorded send-off or rest and at least 6 timed repetitions',
-  anaerobic_capacity: 'repeatability (CV) and output after recorded recovery of a high-intensity set (EN3, LT, LP, B1/B2, C1-C3, RG, or sprint effort) with a recorded send-off or rest and at least 3 timed repetitions',
-  power_speed_expression: 'sprint stability (CV) of a sprint set: sprint effort (energy code SP, or sprint/speed/power/max/start in the set name), repetitions of 30 s or less and recorded rest of at least twice the swimming time (provisional thresholds)',
+  aerobic_capacity: 'repeatability (CV) of an aerobic set (EN1/EN2/EN3, A1/A2) with at least 3 timed repetitions',
+  anaerobic_capacity: 'repeatability (CV) of an intensive set (EN3, LT, LP, B1/B2, C1-C3, RG) with at least 3 timed repetitions',
+  power_speed_expression: 'sprint stability (CV) of a sprint set (energy code SP, or sprint/speed/power/max/start in the set name) with at least 3 timed repetitions',
   adaptability: null,
   durability: 'early-to-late pace deterioration of a set with at least 6 timed repetitions',
 });
 export const TRAINING_AXIS_UNDEFINED_REASON = Object.freeze({
   efficiency: 'Efficiency is scored in Capability (decision D-6): Stroke Index from tests, races and stroke-counted training repetitions against the elite Stroke Index reference. No target stroke counts are used.',
-  adaptability: 'Adaptability is scored in Capability only from at least two comparable longitudinal comparisons (retests, same-event races), 50 = no change; a single within-session response is shown as an observation.',
+  adaptability: 'Adaptability is scored in Capability (decision D-7): response to changed demand (repeated tests, the same set on a tighter send-off; actual rest = send-off − swimming time), 50 = no change.',
 });
 
 function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentScheduleIds = new Set() }) {
   const records = [];
-  const demandById = new Map();
   for (const set of asArray(canonicalSets)) {
     // A swimmer recorded as absent from the session cannot have swum its
     // sets; results stored for them there are contradictory and not read.
@@ -1725,19 +1270,6 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
     }
     const times = parsed.map(rep => rep.time).filter(value => Number.isFinite(value) && value > 0);
     const strokeCounts = parsed.map(rep => rep.strokes).filter(value => Number.isFinite(value) && value > 0);
-    const setDistance = inferDistance(set, {});
-    const protocolInfo = protocolOf({ sendOff: set?.sendOff ?? set?.interval ?? swimmerResult?.sendOff, rest: set?.rest ?? swimmerResult?.rest,
-      actualRest: swimmerResult?.actualRest ?? meanRecordedRest(repetitions), times,
-      sprintIntent: kinds.sprint, highIntensityIntent: kinds.intensive, aerobicIntent: kinds.aerobic });
-    if (times.length && setDistance > 0) demandById.set(evidenceId, { distance: setDistance, time: mean(times), bestTime: Math.min(...times), stroke: set?.stroke, course: set?.course || set?.poolLength,
-      repCount: times.length, firstRepsTime: mean(times.slice(0, 2)), maximal: false,
-      measurementSources: [...new Set(repetitions.map((rep) => String(rep?.measurementSource || swimmerResult?.measurementSource || 'recorded')))], ...protocolInfo });
-    if (times.length >= 3 && protocolInfo.restSeconds !== null && ['high-intensity', 'sprint'].includes(protocolInfo.protocolClass)) {
-      const lossPct = Math.max(0, 100 * (mean(times.slice(1)) / times[0] - 1));
-      const recoveryScore = calibratedStabilityScore(lossPct);
-      if (recoveryScore !== null) addMetric(records, { axis: 'anaerobic_capacity', metric: 'recovery_index', score: recoveryScore, source: 'training', date, evidenceId,
-        rawValue: lossPct, method: 'output-retention-under-recorded-recovery', context: { restSeconds: protocolInfo.restSeconds, repCount: times.length } });
-    }
     if (times.length >= 3) {
       const variation = coefficientOfVariation(times);
       const score = calibratedStabilityScore(variation);
@@ -1796,10 +1328,7 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
             const lateStrokes = mean(late.map(rep => rep.strokes));
             const earlyTime = mean(early.map(rep => rep.time));
             const lateTime = mean(late.map(rep => rep.time));
-            // Stroke maintenance only (owner decision 16-11-2026): the time change is Durability's own
-            // early-to-late pace measurement and is not scored again here.
-            const deterioration = Math.max(0, 100 * (lateStrokes / earlyStrokes - 1));
-            void lateTime; void earlyTime;
+            const deterioration = Math.max(0, 100 * (lateStrokes / earlyStrokes - 1), 100 * (lateTime / earlyTime - 1));
             const driftScore = calibratedStabilityScore(deterioration);
             if (driftScore !== null) addMetric(records, { axis:'robustness_of_efficiency', metric:'stroke_drift', score:driftScore,
               source:'training', date, evidenceId, rawValue:deterioration, method:'measured-training-late-set-deterioration' });
@@ -1808,7 +1337,7 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
       }
     }
   }
-  return annotateDemand(records, demandById);
+  return records;
 }
 
 // Delivery evidence is reported independently from capability scoring. Completing
@@ -1880,8 +1409,8 @@ function sourceAgreementScore(records) {
     groups.get(record.source).push(record.score);
   }
   const sourceMeans = Array.from(groups.values()).map(mean).filter(Number.isFinite);
-  // Agreement needs at least two independent sources; with one it is not awarded (null), not scored.
-  if (sourceMeans.length < 2) return null;
+  if (!sourceMeans.length) return 0;
+  if (sourceMeans.length === 1) return 33;
   const spread = Math.max(...sourceMeans) - Math.min(...sourceMeans);
   return clamp(100 - (spread * 2.5));
 }
@@ -1987,21 +1516,7 @@ function buildNotScoredAxis(axis, reason) {
   };
 }
 
-// Confidence (16-11-2026): starting assumptions, not validated constants; tested for sensitivity.
-// A component that cannot be assessed (agreement with one source) is left out and the remaining
-// weights are rescaled, so it is never awarded by default.
-export const CONFIDENCE_WEIGHTS = Object.freeze({ completeness: 0.30, exposure: 0.25, recency: 0.25, agreement: 0.20 });
-export function combineConfidence(components, weights = CONFIDENCE_WEIGHTS) {
-  const present = Object.entries(weights).filter(([key]) => Number.isFinite(components?.[key]));
-  const total = present.reduce((sum, [, w]) => sum + w, 0);
-  return total > 0 ? clamp(present.reduce((sum, [key, w]) => sum + w * components[key], 0) / total) : 0;
-}
-
 function scoreAxis(axis, records, calculationDate, phaseContext) {
-  if (axis.key === 'efficiency') {
-    return { ...buildNotScoredAxis(axis, EFFICIENCY_NOT_CALIBRATED_REASON), validation: NOT_CALIBRATED, notCalibrated: true,
-      trendRecords: records.filter((record) => record.axis === 'efficiency' && record.kind === 'trend') };
-  }
   // Evidence after the evaluation date cannot already be a measured adaptation.
   // In particular, a selected future target-meet window must not credit results
   // that have not yet happened at the snapshot's as-of date.
@@ -2022,17 +1537,14 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     return { ...unscored, trendRecords: axisTrends };
   }
 
-  // Evidence-neutral axis score (owner decision 16-11-2026; replaces the single-stage
-  // Σ(Sm·Wm·Ws·Wr·Wf·Wsignal) / Σ(Wm·Ws·Wr·Wf·Wsignal)):
-  //   1. per metric and source: S(m,s) = Σ(Sm·Wr·Wsignal) / Σ(Wr·Wsignal) over its records;
-  //   2. per metric: S(m) = Σ_s Ws·S(m,s) / Σ_s Ws over the sources that measured it;
-  //   3. per axis:   A = Σ_m Wm·S(m) / Σ_m Wm over the measured metrics.
-  // Measurement weights (Wm, Ws) are therefore the same for every swimmer: how many records a
-  // metric or source has, and how much evidence exists (Wf = min(1, E/Et)), no longer changes the
-  // mix of measures inside the axis. Fewer records, older results and missing measures lower the
-  // axis CONFIDENCE (exposure, recency, completeness), never the score itself. If one swimmer
-  // scores at least as high as another on every measure both have within an axis, and both have
-  // the same measures, the axis score cannot be lower.
+  // Locked core calculation (Mathematical Engine Specification):
+  //   Ai = Σ(Sm·Wm·Ws·Wr·Wf·Wsignal) / Σ(Wm·Ws·Wr·Wf·Wsignal)
+  // over every eligible metric record of the axis, in one stage. Sm is the
+  // record's normalised metric score; Wm the axis metric weight; Ws the source
+  // weight for the phase context; Wr the recency weight; Wf = min(1, E/Et)
+  // with E the evidence records of that metric and Et the axis exposure
+  // target; Wsignal the record's signal weight. No floors, no extra
+  // source-reliability factor and no intermediate averages.
   const metricNames = Object.keys(axis.metrics);
   const exposureByMetric = new Map(metricNames.map((metric) => {
     const ids = new Set(axisRecords.filter((record) => record.metric === metric)
@@ -2043,66 +1555,55 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     const Wm = Number(axis.metrics[record.metric]) || 0;
     const Ws = resolveSourceWeight(record.source, phaseContext);
     const Wr = recencyWeight(record.date, calculationDate);
-    // Wf: evidence exposure of the metric. Reported for confidence only; not a score weight.
     const Wf = frequencyWeight(exposureByMetric.get(record.metric) || 0, axis.exposureTarget);
     const Wsignal = Math.max(0, Math.min(1, Number(record.signal)));
-    const Wrec = Wr * (Number.isFinite(Wsignal) ? Wsignal : 0);
-    // W: the record's within-metric-and-source weight (recency × signal), used only inside its own group.
-    return { ...record, weights: { Wm, Ws, Wr, Wf, Wsignal, W: Wm > 0 && Ws > 0 ? Wrec : 0 } };
+    const weight = Wm * Ws * Wr * Wf * (Number.isFinite(Wsignal) ? Wsignal : 0);
+    return { ...record, weights: { Wm, Ws, Wr, Wf, Wsignal, W: weight } };
   });
   const contributing = weighted.filter((record) => record.weights.W > 0 && Number.isFinite(Number(record.score)));
-  const weightedMean = (rows, weightOf, valueOf) => {
-    const w = rows.reduce((sum, row) => sum + weightOf(row), 0);
-    return w > 0 ? rows.reduce((sum, row) => sum + valueOf(row) * weightOf(row), 0) / w : null;
-  };
   const metricSummaries = metricNames.map((metric) => {
     const metricRecords = contributing.filter((record) => record.metric === metric);
     if (!metricRecords.length) return null;
-    const sourceScores = [...new Set(metricRecords.map((record) => record.source))].map((source) => {
-      const rows = metricRecords.filter((record) => record.source === source);
-      return { source, score: atLeastZero(weightedMean(rows, (r) => r.weights.W, (r) => Number(r.score))),
-        weight: resolveSourceWeight(source, phaseContext), evidenceCount: rows.length };
-    });
-    const score = weightedMean(sourceScores, (row) => row.weight, (row) => row.score);
-    if (!Number.isFinite(score)) return null;
+    const weightSum = metricRecords.reduce((sum, record) => sum + record.weights.W, 0);
     return {
       metric,
-      score: atLeastZero(score),
+      // Display only: the weighted mean of this metric's records. The axis
+      // score is the single-stage sum over records, not an average of these.
+      score: atLeastZero(metricRecords.reduce((sum, record) => sum + record.score * record.weights.W, 0) / weightSum),
       officialWeight: axis.metrics[metric] || 0,
       frequency: metricRecords[0].weights.Wf,
-      effectiveWeight: axis.metrics[metric] || 0,
+      effectiveWeight: weightSum,
       evidenceCount: metricRecords.length,
-      sourceScores,
+      sourceScores: [...new Set(metricRecords.map((record) => record.source))].map((source) => {
+        const rows = metricRecords.filter((record) => record.source === source);
+        const w = rows.reduce((sum, record) => sum + record.weights.W, 0);
+        return { source, score: atLeastZero(rows.reduce((sum, record) => sum + record.score * record.weights.W, 0) / w), weight: w };
+      }),
     };
   }).filter(Boolean);
 
   if (!metricSummaries.length) {
     return buildNotScoredAxis(axis, 'No valid weighted metric contribution remained after validation.');
   }
-  if (axis.key === 'adaptability') {
-    const comparisons = new Set(contributing.map((record) => `${record.source}|${record.evidenceId}`)).size;
-    if (comparisons < ADAPTABILITY_MIN_COMPARISONS) {
-      return { ...buildNotScoredAxis(axis, `${INSUFFICIENT_EVIDENCE}: Adaptability needs ≥ ${ADAPTABILITY_MIN_COMPARISONS} comparable longitudinal comparisons (${comparisons} recorded); the observation is listed, not scored.`),
-        validation: INSUFFICIENT_EVIDENCE, observations: contributing.map((record) => ({ evidenceId: record.evidenceId, metric: record.metric, value: record.score, method: record.method })), trendRecords: axisTrends };
-    }
-  }
 
-  const rawScore = weightedMean(metricSummaries, (row) => row.officialWeight, (row) => row.score);
+  const axisDenominator = contributing.reduce((sum, record) => sum + record.weights.W, 0);
+  const rawScore = axisDenominator > 0
+    ? atLeastZero(contributing.reduce((sum, record) => sum + (record.score * record.weights.W), 0) / axisDenominator)
+    : null;
   const availableMetricNames = metricSummaries.map((metric) => metric.metric);
   const omittedMetrics = metricNames.filter((metric) => !availableMetricNames.includes(metric));
   const completeness = clamp(
     availableMetricNames.reduce((sum, metric) => sum + (axis.metrics[metric] || 0), 0) * 100,
   );
-  // Capability is calculated from the available valid measurements; missing measures are
-  // excluded with their weights rescaled. Completeness, exposure and recency set confidence only.
-  const score = rawScore === null ? null : atLeastZero(rawScore);
+  // Official rule: capability quality is calculated from the available valid
+  // calibrated metrics. Missing metrics are excluded and their weights rescaled.
+  // Completeness affects confidence/validation below; it must not alter the score.
+  const score = rawScore;
   const recencyCoverage = clamp(
     mean(axisRecords.map((record) => recencyWeight(record.date, calculationDate))) * 100,
   );
-  // Exposure: how much of each measured metric's evidence target is met (Wf), weighted by Wm.
-  const exposureCoverage = clamp(100 * (weightedMean(metricSummaries, (row) => row.officialWeight, (row) => row.frequency) ?? 0));
   const agreement = sourceAgreementScore(axisRecords);
-  const confidence = combineConfidence({ completeness, exposure: exposureCoverage, recency: recencyCoverage, agreement });
+  const confidence = clamp((0.35 * completeness) + (0.35 * recencyCoverage) + (0.30 * agreement));
   const evidenceIds = new Set(axisRecords.map((record) => String(record.evidenceId || '').trim()).filter(Boolean));
 
   return {
@@ -2113,22 +1614,15 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     validation: score === null ? 'Not Scored' : validationLabel(availableMetricNames.length, availableMetricNames.length + omittedMetrics.length),
     evidenceCount: evidenceIds.size || axisRecords.length,
     completeness,
-    exposureCoverage,
     recencyCoverage,
     sourceAgreement: agreement,
     availableMetrics: availableMetricNames,
     omittedMetrics,
     reasons: score === null
       ? ['No valid weighted metric contribution remained after validation.']
-      : [
-        ...(omittedMetrics.length ? [`Not measured in this window: ${omittedMetrics.join(', ')}.`] : []),
-        ...(contributing.some((record) => !APPROVED_CALIBRATION_METHODS.has(record.method)) ? [PROVISIONAL_CALIBRATION_NOTE] : []),
-        ...(contributing.some((record) => record.estimated)
-          ? [`ESTIMATED: ${contributing.filter((record) => record.estimated).length} of ${contributing.filter((record) => record.method === 'distance-per-cycle-at-own-maximum-vs-elite').length} stroke-counted swims were below 95 % of the swimmer's own best speed; their stroke length at maximum effort is estimated from the swimmer's speed–efficiency profile.`]
-          : []),
-      ],
-    estimatedRecords: contributing.filter((record) => record.estimated).length,
-    calibrationStatus: contributing.some((record) => !APPROVED_CALIBRATION_METHODS.has(record.method)) ? 'provisional' : 'approved',
+      : (omittedMetrics.length
+        ? [`Not measured in this window: ${omittedMetrics.join(', ')}.`]
+        : []),
     metricRecords: weighted,
     metricSummaries,
     trendRecords: axisTrends,
@@ -2300,31 +1794,28 @@ export function buildAthlyraxCapabilitySnapshot({
     }
   }
 
-  // Speed level: the best timed swim on the single scale. DISPLAY ONLY (no multiplier, 16-11-2026).
+  // Speed level: the best timed swim in the window, else the swimmer's best
+  // earlier one (fallbackSpeedLevel). With neither, consistency cannot be
+  // placed on the world-record scale; with requireSpeedLevel (the canonical
+  // radars) those measures are not scored, since unweighted they would read
+  // near 100 for any steady swimmer.
   const speedLevel = swimmerSpeedLevel(unweightedRecords) || fallbackSpeedLevel || null;
-  void requireSpeedLevel;
-  // Evidence model: single home per derived measurement, relative speed as context, demo labelling.
-  const homed = resolveSingleHome(unweightedRecords);
-  const withContext = addRelativeSpeedContext(homed.records);
-  const syntheticIds = selectedSingleSwimmer ? syntheticEvidenceIds(db, selectedSwimmerId) : new Set();
-  const records = withContext.records.map((record) => (syntheticIds.has(record.evidenceId) ? { ...record, synthetic: true } : record));
-  assertSingleHome(records);
+  const records = speedLevel || !requireSpeedLevel
+    ? applySpeedLevel(unweightedRecords, speedLevel)
+    : unweightedRecords.filter((record) => !isSpeedWeightedMetric(record));
+  const awaitingSpeedAxes = speedLevel || !requireSpeedLevel ? new Set()
+    : new Set(unweightedRecords.filter((record) => isSpeedWeightedMetric(record)).map((record) => record.axis));
   const phaseContext = resolvePhaseContext(scope);
   const calculationKey = dateKey(calculationDate) || new Date().toISOString().slice(0, 10);
-  const efficiencyAnalysis = selectedSingleSwimmer
-    ? buildEfficiencyAnalysis({ measurements: efficiencyAdaptability.indicatorMeasurements, syntheticIds, bests: withContext.bests, swimmer })
-    : null;
-  const adaptabilityInvestigations = selectedSingleSwimmer
-    ? buildAdaptabilityInvestigations({ canonicalSets, swimmerId: selectedSwimmerId, efficiencyMeasurements: efficiencyAdaptability.indicatorMeasurements, syntheticIds })
-    : null;
   const axes = selectedSingleSwimmer
     ? ATHLYRAX_AXIS_DEFINITIONS.map((axis) => {
       const scored = scoreAxis(axis, records, calculationKey, phaseContext);
-      const synthetic = asArray(scored.metricRecords).some((record) => record.synthetic);
-      const labelled = synthetic ? { ...scored, demonstrationData: true, reasons: [...asArray(scored.reasons), 'Includes demonstration (synthetic) measurements: shows the software working, not scientific evidence.'] } : scored;
-      return axis.key === 'efficiency'
-        ? { ...labelled, reasons: [...efficiencyReasons, ...asArray(labelled.reasons)], efficiencyEvidence: efficiencyAdaptability.efficiencyEvidence, efficiencyAnalysis }
-        : axis.key === 'adaptability' ? { ...labelled, investigations: adaptabilityInvestigations } : labelled;
+      const withSpeed = !Number.isFinite(scored.score) && awaitingSpeedAxes.has(axis.key)
+        ? { ...scored, reasons: [SPEED_LEVEL_NEEDED_REASON, ...asArray(scored.reasons)] }
+        : scored;
+      return axis.key === 'efficiency' && efficiencyReasons.length
+        ? { ...withSpeed, reasons: [...efficiencyReasons, ...asArray(withSpeed.reasons)], efficiencyEvidence: efficiencyAdaptability.efficiencyEvidence }
+        : withSpeed;
     })
     : ATHLYRAX_AXIS_DEFINITIONS.map((axis) => buildNotScoredAxis(axis, 'Select one swimmer to calculate an individual capability profile.'));
   const validAxes = axes.filter((axis) => Number.isFinite(axis.score));
@@ -2360,12 +1851,6 @@ export function buildAthlyraxCapabilitySnapshot({
     integratedScore,
     integratedConfidence,
     speedLevel,
-    evidenceModel: EVIDENCE_MODEL_VERSION,
-    // Same-event bests behind relative speed (context only), and every record removed by the single-home rule.
-    sameEventBests: withContext.bests,
-    excludedMeasurements: homed.excluded.map((r) => ({ axis: r.axis, metric: r.metric, method: r.method, source: r.source, evidenceId: r.evidenceId, reason: r.excludedReason })),
-    efficiencyAnalysis,
-    adaptabilityInvestigations,
     integratedLabel: fullRadarAvailable ? 'Integrated Capability' : 'Limited capability summary',
     // No interpretation label from an undocumented confidence cut-off (S14);
     // the neutral evidence reading lives in capabilityEvidenceReading.js.
