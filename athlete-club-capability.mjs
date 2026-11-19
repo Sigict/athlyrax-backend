@@ -17,7 +17,7 @@ export function currentCapabilitySeason(config = swimmingReportConfig, today = n
   // Athlete Home must assess the ACTIVE season, not silently discard all of a
   // swimmer's current-year club evidence. September starts the swimming season.
   const key = text(today).slice(0, 10);
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(key) || Number.isNaN(Date.parse(key + 'T12:00:00Z'))) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || Number.isNaN(Date.parse(key + 'T12:00:00Z'))) {
     const fallback = config?.currentSeason || {};
     return { key: text(fallback.key), label: text(fallback.label), start: text(fallback.start), end: text(fallback.end) };
   }
