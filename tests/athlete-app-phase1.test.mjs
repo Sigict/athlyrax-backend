@@ -60,8 +60,27 @@ test('a swimmer without club evidence gets an honest empty profile, not invented
   assert.ok(profile.axes.every((axis) => axis.value === null && axis.reasons.length));
 });
 
-test('current season comes from the shared sport configuration (same as the ISP)', () => {
-  assert.deepEqual(currentCapabilitySeason(), SEASON);
+test('Athlete App selects the actual current September–August season, not the stale copied 2025/26 config', () => {
+  assert.deepEqual(currentCapabilitySeason(undefined, '2026-11-19'), {
+    key: '2026-2027', label: '2026/27', start: '2026-09-01', end: '2027-08-31',
+  });
+  assert.deepEqual(currentCapabilitySeason(undefined, '2027-08-31'), {
+    key: '2026-2027', label: '2026/27', start: '2026-09-01', end: '2027-08-31',
+  });
+  assert.deepEqual(currentCapabilitySeason(undefined, '2027-09-01'), {
+    key: '2027-2028', label: '2027/28', start: '2027-09-01', end: '2028-08-31',
+  });
+  assert.deepEqual(currentCapabilitySeason(undefined, '2026-08-31'), SEASON);
+});
+
+test('Athlete App evaluates November 2026 club evidence in 2026/27 instead of 2025/26', () => {
+  const season = currentCapabilitySeason(undefined, '2026-11-19');
+  const swimmer = engineFixtureDb.swimmers[0];
+  const profile = buildClubCapabilityProfile(engineFixtureDb, swimmer, { season, today: '2026-11-19' });
+  assert.equal(profile.season.key, '2026-2027');
+  assert.equal(profile.calculationDate, '2026-11-19');
+  assert.equal(profile.source, 'club_evidence');
+  assert.equal(profile.axes.length, 8);
 });
 
 const plannerDb = (extra = {}) => ({

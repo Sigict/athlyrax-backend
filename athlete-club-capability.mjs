@@ -12,9 +12,24 @@ const text = (value) => String(value ?? '').trim();
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const roundOrNull = (value) => (Number.isFinite(Number(value)) && value !== null ? Math.round(Number(value)) : null);
 
-export function currentCapabilitySeason(config = swimmingReportConfig) {
-  const season = config?.currentSeason || {};
-  return { key: text(season.key), label: text(season.label), start: text(season.start), end: text(season.end) };
+export function currentCapabilitySeason(config = swimmingReportConfig, today = new Date().toISOString().slice(0, 10)) {
+  // The copied swimming report config may still contain a historical season.
+  // Athlete Home must assess the ACTIVE season, not silently discard all of a
+  // swimmer's current-year club evidence. September starts the swimming season.
+  const key = text(today).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || Number.isNaN(Date.parse(key + 'T12:00:00Z'))) {
+    const fallback = config?.currentSeason || {};
+    return { key: text(fallback.key), label: text(fallback.label), start: text(fallback.start), end: text(fallback.end) };
+  }
+  const year = Number(key.slice(0, 4));
+  const startYear = Number(key.slice(5, 7)) >= 9 ? year : year - 1;
+  const endYear = startYear + 1;
+  return {
+    key: `${startYear}-${endYear}`,
+    label: `${startYear}/${String(endYear).slice(-2)}`,
+    start: `${startYear}-09-01`,
+    end: `${endYear}-08-31`,
+  };
 }
 
 export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = currentCapabilitySeason(), today = new Date().toISOString().slice(0, 10), tenantId = '' } = {}) {
