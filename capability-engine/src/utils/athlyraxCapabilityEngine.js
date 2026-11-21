@@ -12,6 +12,37 @@ import { worldAquaticsScore, WORLD_AQUATICS_BASE_TIMES } from './worldAquaticsPo
 import { resolvePushOffAllowance, eliteStrokeIndexReference, EFFICIENCY_REFERENCE_STATUS } from '../data/efficiencyReference.js';
 import { resolveRecordedProgramSplitLength } from './recordedRaceResultDisplay.js';
 import { buildSwimmerScheduleDeliveryRatios } from './swimmerTrainingDeliveryRatios.js';
+import { assessRetentionEvidence, robustnessScoreFromLoss, sendOffSeconds, raceLengthUnits, strokeCountOrigin,
+  ROBUSTNESS_UNKNOWN_RECOVERY_WEIGHT, ROBUSTNESS_MIN_RACE_LENGTHS, ROBUSTNESS_METHOD, robustnessAxisEstimate } from './robustnessOfEfficiency.js';
+
+// Robustness of Efficiency evidence (robustnessOfEfficiency.js): an eligible effort becomes one metric record; an
+// effort that cannot be used is kept as an audit entry (axis 'robustness_audit', never scored) with its reason.
+// Why Robustness could not be scored, from the audited efforts (counted by reason).
+function robustnessAuditReason(auditEntries) {
+  const counts = new Map();
+  for (const entry of asArray(auditEntries)) counts.set(String(entry?.reason || '').replace(/by -?[0-9.]+ %/, 'by more than the tolerance'), (counts.get(String(entry?.reason || '').replace(/by -?[0-9.]+ %/, 'by more than the tolerance')) || 0) + 1);
+  if (!counts.size) return null;
+  return `Robustness not established: ${[...counts].map(([reason, n]) => `${n} effort(s) not usable — ${reason}`).join('; ')}.`;
+}
+function withRobustnessAuditReason(axis, auditEntries) {
+  if (axis?.key !== 'robustness_of_efficiency' || Number.isFinite(axis?.score)) return axis;
+  const reason = robustnessAuditReason(auditEntries);
+  return reason ? { ...axis, reasons: [reason, ...asArray(axis.reasons).filter((r) => !/^No valid calibrated metric records/.test(r))] } : axis;
+}
+
+function addRobustnessEvidence(records, assessment, { date, evidenceId, signal = 1 }) {
+  if (!assessment) return;
+  if (assessment.eligible) {
+    const recovery = assessment.workFraction ?? ROBUSTNESS_UNKNOWN_RECOVERY_WEIGHT;
+    addMetric(records, { axis: 'robustness_of_efficiency', metric: 'stroke_drift', score: robustnessScoreFromLoss(Math.max(0, assessment.lossPct)),
+      source: assessment.source === 'test' ? 'testing' : assessment.source, date, evidenceId, signal: signal * recovery,
+      rawValue: assessment.lossPct, method: ROBUSTNESS_METHOD, context: assessment });
+    return;
+  }
+  const day = dateKey(date);
+  if (day) records.push({ axis: 'robustness_audit', kind: 'audit', metric: 'excluded', date: day, evidenceId: String(evidenceId || ''),
+    source: assessment.source === 'test' ? 'testing' : assessment.source, context: assessment, reason: assessment.reason });
+}
 
 // v1.4: duplicate metrics removed, first-break = reps held / reps, test sets not
 // read as training, confidence no longer weights squad scores. Baselines saved
@@ -161,8 +192,8 @@ const WORLD_LEVEL_METHODS = new Set(['world-class-time-reference', 'competition-
 const SPEED_WEIGHTED_METRICS = new Set([
   'technical_control|stroke_count_stability', 'technical_control|pace_stability',
   'technical_control|turn_consistency', 'technical_control|underwater_consistency',
-  'robustness_of_efficiency|efficiency_decay', 'robustness_of_efficiency|stroke_drift',
-  'robustness_of_efficiency|cost_drift', 'robustness_of_efficiency|fatigue_efficiency_index',
+  // Robustness of Efficiency is NOT speed-weighted (owner review 21-11-2026): it measures retention of stroke length
+  // under comparable relative demand, never absolute speed (robustnessOfEfficiency.js).
   'aerobic_capacity|heart_rate_stability', 'aerobic_capacity|pace_stability', 'aerobic_capacity|repeatability',
   'anaerobic_capacity|repeatability', 'anaerobic_capacity|fatigue_resistance', 'anaerobic_capacity|recovery_index',
   'power_speed_expression|sprint_stability',
@@ -839,45 +870,17 @@ function buildTestMetricRecords({ canonicalTests, setById, swimmer }) {
     // needs a validated reference; measured speed, distance per cycle and
     // Stroke Index are reported by efficiencyAdaptabilityIndicators.js.
 
-    if (comparablePairs.length >= 2 && distance > 0) {
-      const efficiencySeries = comparablePairs.map((rep) => distance / (rep.time * rep.strokeCount));
-      const firstEfficiency = efficiencySeries[0];
-      const finalEfficiency = efficiencySeries[efficiencySeries.length - 1];
-      if (firstEfficiency > 0 && finalEfficiency > 0) {
-        const efficiencyLoss = Math.max(0, ((firstEfficiency - finalEfficiency) / firstEfficiency) * 100);
-        const efficiencyDecayScore = calibratedStabilityScore(efficiencyLoss);
-        if (efficiencyDecayScore !== null) {
-          addMetric(records, {
-            axis: 'robustness_of_efficiency',
-            metric: 'efficiency_decay',
-            score: efficiencyDecayScore,
-            date,
-            evidenceId,
-            signal: testSignal,
-            rawValue: efficiencyLoss,
-            method: 'endpoint-efficiency-retention',
-          });
-          // fatigue_efficiency_index is not written from this value: it used
-          // the same score as efficiency_decay (one measurement counted twice).
-        }
-      }
-      const firstStroke = comparablePairs[0].strokeCount;
-      const finalStroke = comparablePairs[comparablePairs.length - 1].strokeCount;
-      if (firstStroke > 0 && finalStroke > 0) {
-        const strokeDrift = Math.max(0, ((finalStroke - firstStroke) / firstStroke) * 100);
-        const strokeDriftScore = calibratedStabilityScore(strokeDrift);
-        if (strokeDriftScore !== null) {
-          addMetric(records, {
-            axis: 'robustness_of_efficiency',
-            metric: 'stroke_drift',
-            score: strokeDriftScore,
-            date,
-            evidenceId,
-            signal: testSignal,
-            rawValue: strokeDrift,
-            method: 'relative-stroke-drift',
-          });
-        }
+    // Robustness of Efficiency (robustnessOfEfficiency.js): stroke-length retention across the repetitions of a
+    // repeated test at comparable pace; demand context = the test's (or protocol's) canonical energy code.
+    {
+      const repRows = asArray(collectTestRepRows(test, raw));
+      if (repRows.length >= 2 && distance > 0) {
+        addRobustnessEvidence(records, assessRetentionEvidence({ source: 'test',
+          energy: test?.energy || raw?.energy || set?.energy || set?.energySystem || protocol?.energy || '',
+          stroke: test?.stroke || raw?.stroke || set?.stroke || protocol?.stroke,
+          units: repRows.map((row) => ({ count: row?.overallStrokeCount ?? row?.strokeCount, unit: row?.strokeCountUnit,
+            seconds: parseResultTime(row?.overallTime ?? row?.time), origin: strokeCountOrigin({ ...raw, ...row }) })),
+          sendOff: sendOffSeconds(test?.sendOff ?? raw?.sendOff ?? set?.sendOff ?? protocol?.sendOff) }), { date, evidenceId, signal: testSignal });
       }
     }
 
@@ -1127,23 +1130,13 @@ export function buildCompetitionMetricRecords({ completedCompetitions, swimmer }
       if (distance >= 200) addMetric(records, { axis: 'durability', metric: 'late_set_stability', score: segmentScore, source: 'competition', date, evidenceId, signal: signalWeight({ values: segments, explicit: true }), rawValue: segmentCv, method: 'competition-segment-cv' });
     }
 
-    // Robustness of Efficiency in a race: stroke drift from the second to the
-    // last recorded segment (the first segment includes the dive start). Uses
-    // the finest recorded per-length split stroke counts; same calibration as
-    // the stroke drift of tests and training.
+    // Robustness of Efficiency in a race (robustnessOfEfficiency.js): stroke-length retention over the lengths after
+    // the dive length, at comparable length pace; continuous effort (work fraction 1).
     {
-      const splitSets = [asArray(result?.splits), ...Object.values(result?.splitRecordsByLength || {}).map(asArray)];
-      const strokesOf = (rows) => rows.map((row) => (row?.strokeCountUnit === 'cycles' ? NaN : Number(row?.strokeCount ?? row?.overallStrokeCount)));
-      const usable = splitSets.map(strokesOf).filter((counts) => counts.length >= 3 && counts.every((n) => Number.isFinite(n) && n > 0))
-        .sort((a, b) => b.length - a.length)[0];
-      if (usable) {
-        const second = usable[1];
-        const last = usable[usable.length - 1];
-        const drift = Math.max(0, 100 * (last / second - 1));
-        const driftScore = calibratedStabilityScore(drift);
-        if (driftScore !== null) addMetric(records, { axis: 'robustness_of_efficiency', metric: 'stroke_drift', score: driftScore,
-          source: 'competition', date, evidenceId, signal: 1, rawValue: drift, method: 'race-stroke-drift-second-to-last-segment' });
-      }
+      // Course key is the pool length ('25', '50'); yard courses are not compared with metre lengths here.
+      const poolLength = isYardCourseKey(courseKey) ? 0 : Number(String(courseKey || '').replace(/[^0-9.]/g, '')) || 0;
+      const units = raceLengthUnits(result, { poolLength });
+      if (units) addRobustnessEvidence(records, assessRetentionEvidence({ source: 'competition', stroke: stroke || result?.stroke, units, minUnits: ROBUSTNESS_MIN_RACE_LENGTHS }), { date, evidenceId, signal: 1 });
     }
 
     // Same-event comparisons require the same recorded pool course. A race
@@ -1318,22 +1311,11 @@ function buildTrainingMeasurementRecords({ canonicalSets, swimmerId, absentSched
       if (score !== null) {
         addMetric(records, { axis:'technical_control', metric:'stroke_count_stability', score,
           source:'training', date, evidenceId, rawValue:variation, method:'measured-training-stroke-count-cv' });
-        if (times.length >= 3) {
-          const paired = parsed.filter(rep => Number.isFinite(rep.time) && rep.time > 0 && Number.isFinite(rep.strokes) && rep.strokes > 0);
-          if (paired.length >= 4) {
-            const n = Math.max(2, Math.floor(paired.length / 3));
-            const early = paired.slice(0, n);
-            const late = paired.slice(-n);
-            const earlyStrokes = mean(early.map(rep => rep.strokes));
-            const lateStrokes = mean(late.map(rep => rep.strokes));
-            const earlyTime = mean(early.map(rep => rep.time));
-            const lateTime = mean(late.map(rep => rep.time));
-            const deterioration = Math.max(0, 100 * (lateStrokes / earlyStrokes - 1), 100 * (lateTime / earlyTime - 1));
-            const driftScore = calibratedStabilityScore(deterioration);
-            if (driftScore !== null) addMetric(records, { axis:'robustness_of_efficiency', metric:'stroke_drift', score:driftScore,
-              source:'training', date, evidenceId, rawValue:deterioration, method:'measured-training-late-set-deterioration' });
-          }
-        }
+        // Robustness of Efficiency (robustnessOfEfficiency.js): stroke-length retention across the set's repetitions at
+        // comparable pace; demand context = the set's canonical energy code; recovery = work fraction.
+        addRobustnessEvidence(records, assessRetentionEvidence({ source: 'training', energy: set?.energy || set?.energySystem || '',
+          stroke: set?.stroke, units: parsed.map((rep, i) => ({ count: rep.strokes, unit: rep.strokeUnit, seconds: rep.time, origin: strokeCountOrigin(repetitions[i]) })),
+          sendOff: sendOffSeconds(set?.setTimeSeconds ?? set?.sendOff) }), { date, evidenceId, signal: 1 });
       }
     }
   }
@@ -1586,9 +1568,24 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     return buildNotScoredAxis(axis, 'No valid weighted metric contribution remained after validation.');
   }
 
-  const axisDenominator = contributing.reduce((sum, record) => sum + record.weights.W, 0);
+  // Robustness of Efficiency: pooled signed stroke-length loss per relative-demand band, scored once, with a
+  // precision gate (robustnessOfEfficiency.js). It replaces the record-score mean for this axis only.
+  // Explicitly supplied, versioned normalised metrics (other methods) keep the standard single-stage rule and are
+  // combined with the pooled estimate by their weights.
+  const measuredRobustness = axis.key === 'robustness_of_efficiency' ? contributing.filter((record) => record.method === ROBUSTNESS_METHOD) : [];
+  const otherContributing = axis.key === 'robustness_of_efficiency' ? contributing.filter((record) => record.method !== ROBUSTNESS_METHOD) : contributing;
+  const robustnessEstimate = measuredRobustness.length ? robustnessAxisEstimate(measuredRobustness) : null;
+  if (robustnessEstimate && robustnessEstimate.score === null && !otherContributing.length) {
+    // Not Scored is never a score built from records: the measured-but-insufficient efforts stay visible for audit in
+    // robustnessEstimate.contexts and unscoredRobustnessRecords, not as records behind a score.
+    return { ...buildNotScoredAxis(axis, robustnessEstimate.reason), metricRecords: [], unscoredRobustnessRecords: weighted, trendRecords: axisTrends, robustnessEstimate };
+  }
+  const otherW = otherContributing.reduce((sum, record) => sum + record.weights.W, 0);
+  const otherSum = otherContributing.reduce((sum, record) => sum + (record.score * record.weights.W), 0);
+  const estimateW = robustnessEstimate && robustnessEstimate.score !== null ? measuredRobustness.reduce((sum, record) => sum + record.weights.W, 0) : 0;
+  const axisDenominator = otherW + estimateW;
   const rawScore = axisDenominator > 0
-    ? atLeastZero(contributing.reduce((sum, record) => sum + (record.score * record.weights.W), 0) / axisDenominator)
+    ? atLeastZero((otherSum + (estimateW ? robustnessEstimate.score * estimateW : 0)) / axisDenominator)
     : null;
   const availableMetricNames = metricSummaries.map((metric) => metric.metric);
   const omittedMetrics = metricNames.filter((metric) => !availableMetricNames.includes(metric));
@@ -1604,7 +1601,14 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
   );
   const agreement = sourceAgreementScore(axisRecords);
   const confidence = clamp((0.35 * completeness) + (0.35 * recencyCoverage) + (0.30 * agreement));
-  const evidenceIds = new Set(axisRecords.map((record) => String(record.evidenceId || '').trim()).filter(Boolean));
+  // Evidence behind the score: Robustness records of a demand context that was not scored (insufficient evidence or
+  // precision, unknown demand) stay in metricRecords and robustnessEstimate for audit, but are not counted as evidence
+  // behind the score.
+  const scoredContexts = new Set(robustnessEstimate?.coverage?.scored || []);
+  const evidenceRecords = robustnessEstimate
+    ? axisRecords.filter((record) => record.method !== ROBUSTNESS_METHOD || scoredContexts.has(record.context?.context))
+    : axisRecords;
+  const evidenceIds = new Set(evidenceRecords.map((record) => String(record.evidenceId || '').trim()).filter(Boolean));
 
   return {
     key: axis.key,
@@ -1612,7 +1616,7 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     score,
     confidence,
     validation: score === null ? 'Not Scored' : validationLabel(availableMetricNames.length, availableMetricNames.length + omittedMetrics.length),
-    evidenceCount: evidenceIds.size || axisRecords.length,
+    evidenceCount: evidenceIds.size || evidenceRecords.length,
     completeness,
     recencyCoverage,
     sourceAgreement: agreement,
@@ -1626,6 +1630,11 @@ function scoreAxis(axis, records, calculationDate, phaseContext) {
     metricRecords: weighted,
     metricSummaries,
     trendRecords: axisTrends,
+    ...(robustnessEstimate ? { robustnessEstimate, evidenceRecordIds: [...evidenceIds] } : {}),
+    // Evidence origin (robustnessOfEfficiency.js): a score built on synthetic demonstration data is labelled as such
+    // and is never presented as validation by measured swimming.
+    ...(robustnessEstimate?.evidenceOrigin ? { evidenceOrigin: robustnessEstimate.evidenceOrigin,
+      ...(robustnessEstimate.validation ? { validationNote: robustnessEstimate.validation } : {}) } : {}),
   };
 }
 
@@ -1813,9 +1822,10 @@ export function buildAthlyraxCapabilitySnapshot({
       const withSpeed = !Number.isFinite(scored.score) && awaitingSpeedAxes.has(axis.key)
         ? { ...scored, reasons: [SPEED_LEVEL_NEEDED_REASON, ...asArray(scored.reasons)] }
         : scored;
+      const explained = withRobustnessAuditReason(withSpeed, records.filter((record) => record.axis === 'robustness_audit'));
       return axis.key === 'efficiency' && efficiencyReasons.length
-        ? { ...withSpeed, reasons: [...efficiencyReasons, ...asArray(withSpeed.reasons)], efficiencyEvidence: efficiencyAdaptability.efficiencyEvidence }
-        : withSpeed;
+        ? { ...explained, reasons: [...efficiencyReasons, ...asArray(explained.reasons)], efficiencyEvidence: efficiencyAdaptability.efficiencyEvidence }
+        : explained;
     })
     : ATHLYRAX_AXIS_DEFINITIONS.map((axis) => buildNotScoredAxis(axis, 'Select one swimmer to calculate an individual capability profile.'));
   const validAxes = axes.filter((axis) => Number.isFinite(axis.score));
@@ -1847,6 +1857,8 @@ export function buildAthlyraxCapabilitySnapshot({
     axes,
     validAxisCount: validAxes.length,
     trendEvidence: records.filter((record) => record.kind === 'trend'),
+    // Robustness evidence that could not be used, with its reason (robustnessOfEfficiency.js).
+    robustnessAudit: records.filter((record) => record.axis === 'robustness_audit'),
     fullRadarAvailable,
     integratedScore,
     integratedConfidence,
@@ -1913,14 +1925,17 @@ export function buildMeasuredCapabilityRadarSeries(snapshot, allowedSources = []
   // The selected target-cycle end may be in the future and must not age evidence.
   const calculationDate = snapshot?.calculationDate || snapshot?.rangeEnd || new Date().toISOString().slice(0,10);
   const phaseContext = snapshot?.phaseContext || 'default';
+  const audit = asArray(snapshot?.robustnessAudit).filter(record => accepted.has(record?.source));
   const axisResults = ATHLYRAX_AXIS_DEFINITIONS.map(axis =>
-    scoreAxis(axis, eligibleRecords, calculationDate, phaseContext));
+    withRobustnessAuditReason(scoreAxis(axis, eligibleRecords, calculationDate, phaseContext), audit));
   const scores = Object.fromEntries(axisResults.map(axis => [
     axis.key, axis.score === null ? Number.NaN : axis.score,
   ]));
   const counts = Object.fromEntries(axisResults.map(axis => [axis.key, axis.evidenceCount]));
+  // Only records behind a SCORED axis are listed: a Robustness axis whose evidence was measured but not sufficient keeps
+  // that evidence in robustnessEstimate, not among the records behind a score (owner decision 25-10-2026).
   const recordIds = Object.fromEntries(axisResults.map(axis => [axis.key,
-    [...new Set(asArray(axis.metricRecords)
+    axis.score === null ? [] : Array.isArray(axis.evidenceRecordIds) ? axis.evidenceRecordIds : [...new Set(asArray(axis.metricRecords)
       .map(record => String(record.evidenceId || '').trim()).filter(Boolean))],
   ]));
   const trends = Object.fromEntries(axisResults.map(axis => [axis.key, asArray(axis.trendRecords)]));
