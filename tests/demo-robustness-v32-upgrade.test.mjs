@@ -74,3 +74,16 @@ test('production start calls the repair after the showcase upgrade and never sto
   assert.ok(showcase > 0 && robustness > showcase);
   assert.match(src.slice(robustness - 200, robustness + 600), /try \{[\s\S]*catch \(error\)/);
 });
+
+test('Athlete App: the synthetic demo club profile is labelled a synthetic demonstration, a real club stays validated', async () => {
+  const { buildClubCapabilityProfile, SYNTHETIC_DEMO_PROFILE_LABEL } = await import('../athlete-club-capability.mjs');
+  const season = { key: '2026-2027', label: '2026/27', start: '2026-09-01', end: '2027-08-31' };
+  const demo = demoClub();
+  const swimmer = demo.swimmers[0];
+  const demoProfile = buildClubCapabilityProfile(demo, swimmer, { season, today: '2026-11-21', tenantId: 'demo-company' });
+  assert.equal(demoProfile.evidenceType, 'synthetic-demonstration');
+  assert.equal(demoProfile.sourceLabel, SYNTHETIC_DEMO_PROFILE_LABEL);
+  const real = { ...demo, __meta: { tenantId: 'real-club' } };
+  const realProfile = buildClubCapabilityProfile(real, swimmer, { season, today: '2026-11-21', tenantId: 'real-club' });
+  assert.equal(realProfile.evidenceType, 'validated');
+});
