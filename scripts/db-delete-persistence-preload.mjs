@@ -1,3 +1,4 @@
+import { demoRobustnessV32HeaderValue } from './upgrade-demo-robustness-v32.mjs';
 const PATCH_MARKER = Symbol.for('athlyrax.dbDeletePersistenceInstalled');
 const PERSISTENCE_GUARD_VERSION = '2026-08-13-v1';
 
@@ -19,6 +20,7 @@ function stampDbWrite(req, res, next) {
   res.setHeader('X-AthlyraX-DB-Persistence-Guard', PERSISTENCE_GUARD_VERSION);
   const commit = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || '').trim();
   if (commit) res.setHeader('X-AthlyraX-Backend-Commit', commit);
+  res.setHeader('X-AthlyraX-Demo-Robustness-V32', demoRobustnessV32HeaderValue());
   next();
 }
 
@@ -29,6 +31,7 @@ function markDbRead(_req, res, next) {
   res.setHeader('X-AthlyraX-DB-Persistence-Guard', PERSISTENCE_GUARD_VERSION);
   const commit = String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || '').trim();
   if (commit) res.setHeader('X-AthlyraX-Backend-Commit', commit);
+  res.setHeader('X-AthlyraX-Demo-Robustness-V32', demoRobustnessV32HeaderValue());
   next();
 }
 

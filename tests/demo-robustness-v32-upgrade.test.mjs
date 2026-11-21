@@ -68,11 +68,44 @@ test('nothing is written when the club is missing, unreadable, not the demo club
   assert.equal(upgradeDemoRobustnessV32Storage({ ...s, logger: quiet }).changed, true);
 });
 
-test('production start calls the repair after the showcase upgrade and never stops the server on failure', () => {
+test('production start runs the repair after the showcase upgrade and records the state the server reports', () => {
   const src = fs.readFileSync(new URL('../scripts/production-start.mjs', import.meta.url), 'utf8');
-  const showcase = src.indexOf('upgradeDemoShowcaseTenant({'); const robustness = src.indexOf('upgradeDemoRobustnessV32Storage({');
+  const showcase = src.indexOf('upgradeDemoShowcaseTenant({'); const robustness = src.indexOf('runDemoRobustnessV32AtStart({');
   assert.ok(showcase > 0 && robustness > showcase);
-  assert.match(src.slice(robustness - 200, robustness + 600), /try \{[\s\S]*catch \(error\)/);
+  const preload = fs.readFileSync(new URL('../scripts/db-delete-persistence-preload.mjs', import.meta.url), 'utf8');
+  assert.equal((preload.match(/X-AthlyraX-Demo-Robustness-V32/g) || []).length, 2, 'reported on /db reads and writes');
+});
+
+test('start status: complete after the repair, failed (club unchanged) when it throws, not-present without a demo club; header reports it', async () => {
+  const { runDemoRobustnessV32AtStart, demoRobustnessV32HeaderValue, DEMO_ROBUSTNESS_V32_STATUS_KEY } = await import('../scripts/upgrade-demo-robustness-v32.mjs');
+  const { installDbDeletePersistenceGuard } = await import('../scripts/db-delete-persistence-preload.mjs');
+  const ok = storage(demoClub());
+  assert.equal(runDemoRobustnessV32AtStart({ ...ok, logger: { log() {}, error() {} } }).state, 'complete');
+  assert.equal(demoRobustnessV32HeaderValue(), 'complete');
+  assert.equal(runDemoRobustnessV32AtStart({ ...ok, logger: { log() {}, error() {} } }).state, 'complete', 'second start: still complete, nothing written');
+  // A failing repair: never throws, records "failed", leaves the club unchanged.
+  const bad = storage(demoClub()); const before = fs.readFileSync(bad.dbPath);
+  fs.mkdirSync(path.join(bad.backupRoot, 'demo-robustness-v32')); fs.chmodSync(path.join(bad.backupRoot, 'demo-robustness-v32'), 0o500);
+  const failed = runDemoRobustnessV32AtStart({ ...bad, logger: { log() {}, error() {} } });
+  fs.chmodSync(path.join(bad.backupRoot, 'demo-robustness-v32'), 0o700);
+  if (process.getuid?.() !== 0) { assert.equal(failed.state, 'failed'); assert.ok(fs.readFileSync(bad.dbPath).equals(before)); }
+  assert.equal(runDemoRobustnessV32AtStart({ ...storage(undefined), logger: { log() {}, error() {} } }).state, 'not-present');
+  // Header on /db responses through the existing persistence guard.
+  globalThis[DEMO_ROBUSTNESS_V32_STATUS_KEY] = { state: 'failed' };
+  const routes = {}; const app = { get(p, ...h) { routes[`GET ${p}`] = h; }, put(p, ...h) { routes[`PUT ${p}`] = h; } };
+  installDbDeletePersistenceGuard({ application: app });
+  app.get('/db', () => {});
+  const headers = {}; routes['GET /db'][0]({}, { setHeader: (k, v) => { headers[k] = v; } }, () => {});
+  assert.equal(headers['X-AthlyraX-Demo-Robustness-V32'], 'failed');
+});
+
+test('a forced failure inside the atomic write is recorded as failed', async () => {
+  const { runDemoRobustnessV32AtStart } = await import('../scripts/upgrade-demo-robustness-v32.mjs');
+  const s = storage(demoClub()); const before = fs.readFileSync(s.dbPath);
+  const orig = fs.renameSync; fs.renameSync = () => { throw new Error('disk full'); };
+  let status; try { status = runDemoRobustnessV32AtStart({ ...s, logger: { log() {}, error() {} } }); } finally { fs.renameSync = orig; }
+  assert.equal(status.state, 'failed'); assert.match(status.error, /disk full/);
+  assert.ok(fs.readFileSync(s.dbPath).equals(before), 'club unchanged');
 });
 
 test('Athlete App: the synthetic demo club profile is labelled a synthetic demonstration, a real club stays validated', async () => {
@@ -81,8 +114,13 @@ test('Athlete App: the synthetic demo club profile is labelled a synthetic demon
   const demo = demoClub();
   const swimmer = demo.swimmers[0];
   const demoProfile = buildClubCapabilityProfile(demo, swimmer, { season, today: '2026-11-21', tenantId: 'demo-company' });
-  assert.equal(demoProfile.evidenceType, 'synthetic-demonstration');
-  assert.equal(demoProfile.sourceLabel, SYNTHETIC_DEMO_PROFILE_LABEL);
+  assert.equal(demoProfile.evidenceType, 'synthetic-demonstration-update-pending', 'before the one-time update: said explicitly');
+  const s2 = storage(demo); upgradeDemoRobustnessV32Storage({ ...s2, logger: quiet });
+  const repaired = JSON.parse(fs.readFileSync(s2.dbPath, 'utf8'));
+  const repairedProfile = buildClubCapabilityProfile(repaired, swimmer, { season, today: '2026-11-21', tenantId: 'demo-company' });
+  assert.equal(repairedProfile.evidenceType, 'synthetic-demonstration');
+  assert.equal(repairedProfile.sourceLabel, SYNTHETIC_DEMO_PROFILE_LABEL);
+  assert.deepEqual(repairedProfile.axes.map((a) => a.value), buildClubCapabilityProfile(repaired, swimmer, { season, today: '2026-11-21', tenantId: 'demo-company' }).axes.map((a) => a.value));
   const real = { ...demo, __meta: { tenantId: 'real-club' } };
   const realProfile = buildClubCapabilityProfile(real, swimmer, { season, today: '2026-11-21', tenantId: 'real-club' });
   assert.equal(realProfile.evidenceType, 'validated');

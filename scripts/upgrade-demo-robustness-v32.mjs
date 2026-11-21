@@ -58,3 +58,32 @@ export function upgradeDemoRobustnessV32Storage({ storageRoot, backupRoot, logge
   logger.log?.(`[demo-robustness-v32] Demo club repaired once (backup ${backupPath}): ${JSON.stringify(summary)}`);
   return { changed: true, reason: 'applied', dbPath, backupPath, ...summary };
 }
+
+// Release health (owner instruction 21-11-2026): the repair state is read back from the demo club itself after the start
+// attempt and reported on every /db response (X-AthlyraX-Demo-Robustness-V32), beside X-AthlyraX-Backend-Commit. The
+// production workflow and the daily uptime check require "complete"; anything else fails the release or the check.
+export const DEMO_ROBUSTNESS_V32_STATUS_KEY = Symbol.for('athlyrax.demoRobustnessV32Status');
+export function demoRobustnessV32Status({ storageRoot, fsModule = fs } = {}) {
+  const dbPath = path.resolve(String(storageRoot || ''), 'tenants', TENANT_ID, 'db.json');
+  if (!storageRoot || !fsModule.existsSync(dbPath)) return { state: 'not-present' };
+  let db;
+  try { db = JSON.parse(fsModule.readFileSync(dbPath, 'utf8')); } catch { return { state: 'unreadable' }; }
+  if (String(db?.__meta?.demoSeed?.prefix || '') !== 'demo_showcase_') return { state: 'not-demo' };
+  return demoRobustnessV32Pending(db) ? { state: 'pending' } : { state: 'complete', revision: Number(db?.__meta?.storageRevision || 0) };
+}
+/** Runs the one-time repair, then records the state the server reports. Never throws. */
+export function runDemoRobustnessV32AtStart({ storageRoot, backupRoot, logger = console } = {}) {
+  let status;
+  try {
+    const result = upgradeDemoRobustnessV32Storage({ storageRoot, backupRoot, logger });
+    logger.log?.(`[demo-robustness-v32] ${result.changed ? `applied; backup ${result.backupPath}` : `not applied: ${result.reason}`}`);
+    status = demoRobustnessV32Status({ storageRoot });
+  } catch (error) {
+    logger.error?.(`[demo-robustness-v32] FAILED, demo club left unchanged: ${error?.message || error}`);
+    status = { state: 'failed', error: String(error?.message || error) };
+  }
+  globalThis[DEMO_ROBUSTNESS_V32_STATUS_KEY] = status;
+  logger.log?.(`[demo-robustness-v32] status ${status.state}`);
+  return status;
+}
+export const demoRobustnessV32HeaderValue = () => String(globalThis[DEMO_ROBUSTNESS_V32_STATUS_KEY]?.state || 'unknown');
