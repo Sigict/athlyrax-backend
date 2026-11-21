@@ -7,6 +7,7 @@ import { canonicalStoragePaths, restoreBundledDemoTenantIfNeeded } from './stora
 import { readActiveMigrationTransaction } from './migration-transaction-state.mjs';
 import { cleanupDemoPlanningStorage } from './cleanup-demo-planning-storage.mjs';
 import { upgradeDemoShowcaseTenant } from './upgrade-demo-showcase-tenant.mjs';
+import { upgradeDemoRobustnessV32Storage } from './upgrade-demo-robustness-v32.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
 const READY_MARKER_APPROVAL = 'CREATE_READY_MARKER';
@@ -173,6 +174,15 @@ const demoShowcaseUpgrade = upgradeDemoShowcaseTenant({
 });
 if (demoShowcaseUpgrade.changed) {
   console.log(`[demo-showcase] Persistent demo tenant upgraded and backed up before replacement: ${demoShowcaseUpgrade.backupPath}`);
+}
+
+// One-time Robustness v3.2 repair of the synthetic demo club (backup, one atomic write). A failure never stops the
+// server and never leaves a half-written club: the original file stays in place and the error is logged.
+try {
+  const demoRobustnessUpgrade = upgradeDemoRobustnessV32Storage({ storageRoot: runtimeConfiguration.storageRoot, backupRoot: runtimeConfiguration.backupRoot, logger: console });
+  console.log(`[demo-robustness-v32] ${demoRobustnessUpgrade.changed ? `applied; backup ${demoRobustnessUpgrade.backupPath}` : `not applied: ${demoRobustnessUpgrade.reason}`}`);
+} catch (error) {
+  console.error(`[demo-robustness-v32] FAILED, demo club left unchanged: ${error?.message || error}`);
 }
 
 const demoPlanningCleanup = cleanupDemoPlanningStorage({
