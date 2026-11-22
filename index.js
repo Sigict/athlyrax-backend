@@ -106,6 +106,15 @@ const AUTH_AUTO_HEAL_SWIMMER_BINDINGS = String(process.env.AUTH_AUTO_HEAL_SWIMME
 const AUTH_SESSION_COOKIE_NAME = String(process.env.AUTH_SESSION_COOKIE_NAME || 'athlyrax_session').trim() || 'athlyrax_session';
 const AUTH_CSRF_COOKIE_NAME = String(process.env.AUTH_CSRF_COOKIE_NAME || 'athlyrax_csrf').trim() || 'athlyrax_csrf';
 const AUTH_CSRF_HEADER_NAME = 'x-csrf-token';
+// The Athlete App keeps its own sign-in next to the coaching app's (same browser, same site): requests from the
+// Athlete App and its sign-in page carry X-AthlyraX-App: athlete and use these cookies; the coaching app's cookies
+// are never read or written by them.
+const ATHLETE_SESSION_COOKIE_NAME = 'athlyrax_athlete_session';
+const ATHLETE_CSRF_COOKIE_NAME = 'athlyrax_athlete_csrf';
+const ATHLETE_APP_HEADER_NAME = 'x-athlyrax-app';
+function isAthleteAppRequest(req) {
+	return String(req?.headers?.[ATHLETE_APP_HEADER_NAME] || '').trim().toLowerCase() === 'athlete';
+}
 const AUTH_ALLOW_BEARER_COMPAT = String(process.env.AUTH_ALLOW_BEARER_COMPAT || 'false').toLowerCase() === 'true';
 const AUTH_SMTP_HOST = String(process.env.AUTH_SMTP_HOST || '').trim();
 const AUTH_SMTP_PORT = Math.max(1, Number.parseInt(process.env.AUTH_SMTP_PORT || '587', 10) || 587);
@@ -2431,10 +2440,12 @@ function serializeCookie(name, value, options = {}) {
 
 function setAuthCookies(res, { token, csrfToken }) {
 	const base = buildCookieOptions();
-	const authCookie = serializeCookie(AUTH_SESSION_COOKIE_NAME, token, {
+	// Only a swimmer session goes to the Athlete App's own sign-in.
+	const athleteApp = isAthleteAppRequest(res?.req) && String(verifyAuthToken(token)?.role || '').toLowerCase() === 'swimmer';
+	const authCookie = serializeCookie(athleteApp ? ATHLETE_SESSION_COOKIE_NAME : AUTH_SESSION_COOKIE_NAME, token, {
 		...base,
 	});
-	const csrfCookie = serializeCookie(AUTH_CSRF_COOKIE_NAME, csrfToken, {
+	const csrfCookie = serializeCookie(athleteApp ? ATHLETE_CSRF_COOKIE_NAME : AUTH_CSRF_COOKIE_NAME, csrfToken, {
 		httpOnly: false,
 		secure: base.secure,
 		sameSite: base.sameSite,
@@ -2446,10 +2457,16 @@ function setAuthCookies(res, { token, csrfToken }) {
 
 function clearAuthCookies(res) {
 	const base = buildCookieOptions();
-	res.setHeader('Set-Cookie', [
-		serializeCookie(AUTH_SESSION_COOKIE_NAME, '', { ...base, maxAge: 0 }),
-		serializeCookie(AUTH_CSRF_COOKIE_NAME, '', { httpOnly: false, secure: base.secure, sameSite: base.sameSite, path: '/', maxAge: 0 }),
-	]);
+	const req = res?.req;
+	// The Athlete App signs out only its own sign-in (and an athlete session still held in the shared cookie from
+	// before the separate sign-in existed); the coaching app's sign-in is never cleared by it.
+	const pairs = !isAthleteAppRequest(req)
+		? [[AUTH_SESSION_COOKIE_NAME, AUTH_CSRF_COOKIE_NAME]]
+		: [[ATHLETE_SESSION_COOKIE_NAME, ATHLETE_CSRF_COOKIE_NAME], ...(req?.authCookieKind === 'main' ? [[AUTH_SESSION_COOKIE_NAME, AUTH_CSRF_COOKIE_NAME]] : [])];
+	res.setHeader('Set-Cookie', pairs.flatMap(([sessionName, csrfName]) => [
+		serializeCookie(sessionName, '', { ...base, maxAge: 0 }),
+		serializeCookie(csrfName, '', { httpOnly: false, secure: base.secure, sameSite: base.sameSite, path: '/', maxAge: 0 }),
+	]));
 }
 
 function isOriginAllowed(origin) {
@@ -2465,7 +2482,22 @@ function extractBearerToken(req) {
 
 function attachAuthContext(req, _res, next) {
 	const cookies = parseCookies(req);
-	const cookieToken = String(cookies?.[AUTH_SESSION_COOKIE_NAME] || '').trim();
+	// Athlete App requests use the athlete sign-in; an athlete session held in the shared cookie (signed in before
+	// the separate sign-in existed, or a coach's athlete mode) still works there. A coaching session is never used
+	// by the Athlete App, and the coaching app never uses the athlete sign-in.
+	let cookieToken = '';
+	let authCookieKind = 'none';
+	if (isAthleteAppRequest(req)) {
+		const athleteToken = String(cookies?.[ATHLETE_SESSION_COOKIE_NAME] || '').trim();
+		const sharedToken = String(cookies?.[AUTH_SESSION_COOKIE_NAME] || '').trim();
+		const isSwimmerSession = (value) => String(verifyAuthToken(value)?.role || '').toLowerCase() === 'swimmer';
+		if (athleteToken && isSwimmerSession(athleteToken)) { cookieToken = athleteToken; authCookieKind = 'athlete'; }
+		else if (sharedToken && isSwimmerSession(sharedToken)) { cookieToken = sharedToken; authCookieKind = 'main'; }
+	} else {
+		cookieToken = String(cookies?.[AUTH_SESSION_COOKIE_NAME] || '').trim();
+		if (cookieToken) authCookieKind = 'main';
+	}
+	req.authCookieKind = authCookieKind;
 	const headerToken = extractBearerToken(req);
 	const bearerAllowed = AUTH_ALLOW_BEARER_COMPAT && !IS_PRODUCTION;
 	const token = cookieToken || (bearerAllowed ? headerToken : '');
@@ -2595,7 +2627,7 @@ function requireCsrf(req, res, next) {
 	if (!req.auth) return next();
 	if (String(req.authSource || 'none') !== 'cookie') return next();
 	const headerToken = String(req.headers?.[AUTH_CSRF_HEADER_NAME] || '').trim();
-	const cookieToken = String(req.cookies?.[AUTH_CSRF_COOKIE_NAME] || '').trim();
+	const cookieToken = String(req.cookies?.[req.authCookieKind === 'athlete' ? ATHLETE_CSRF_COOKIE_NAME : AUTH_CSRF_COOKIE_NAME] || '').trim();
 	const authToken = String(req.auth?.csrf || '').trim();
 	if (!headerToken || !cookieToken || !authToken) {
 		res.status(403).json({ error: 'CSRF token is required.' });
