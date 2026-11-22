@@ -153,7 +153,7 @@ export function assessRetentionEvidence({ source, energy = '', stroke, units = [
   const context = source === 'competition' ? ROBUSTNESS_RACE_CONTEXT : resolveCanonicalTrainingEnergy({ energy }).energySystem;
   const base = { source, context, units: units.length };
   if (units.length < minUnits) return { ...base, eligible: false, reason: `fewer than ${minUnits} comparable units` };
-  if (units.some((u) => unitOrigin(u) === 'model-derived')) return { ...base, eligible: false, reason: 'stroke counts are model-generated without a synthetic label (not a measurement of stroke length)' };
+  if (units.some((u) => unitOrigin(u) === 'model-derived')) return { ...base, eligible: false, reason: 'stroke counts are model-generated (not a measurement of stroke length)' };
   const origin = units.some((u) => unitOrigin(u) === 'synthetic') ? 'synthetic' : 'measured';
   base.origin = origin;
   const cycles = units.map((u) => cyclesFromCount(u.count, { unit: u.unit, stroke }));

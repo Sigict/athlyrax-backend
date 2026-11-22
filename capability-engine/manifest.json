@@ -1,7 +1,7 @@
 {
   "purpose": "Exact copy of the AthlyraX capability engine (and the Robustness v3.2 demo repairs run at production start) from the website repository, run on the server for the Athlete App. Do not edit here: change the website source and re-copy.",
   "sourceRepository": "Sigict/athlyrax-v6-private",
-  "sourceCommit": "b023074be9c31044786f71b54a7761dfa78d8f03",
+  "sourceCommit": "06fceef47089d6c8a667c1f2abd3c568c7ec1b87",
   "files": {
     "src/data/demoProgrammeEnergyRepairManifest.js": "930e09b637cdbfc4506802737b9f4cb0bf265b4a94301382695dcaaf069f1eaa",
     "src/data/efficiencyReference.js": "4040a22a51d9078562f4fe5df8f49656017d835fc2555e8158cbd3ec9199d975",
@@ -31,7 +31,7 @@
     "src/utils/recordedRaceResultDisplay.js": "2639d3d2748cd04926866e3ef6e8a54b6711927d9520306b37b8acdd369ad32c",
     "src/utils/recordedSetAverages.js": "ff888b34a9fa36c85154d21a7b2ba24af8b838bd95beb9f5afdb487899661bf4",
     "src/utils/repResultCells.js": "1a41927e806c551eb1905aa0c0f92f851cae83202def74091a6c4bd93c10d5bc",
-    "src/utils/robustnessOfEfficiency.js": "76198ac5ec3f5adf2193953774720986be65fa8a49dc44aa61a20a6295fddba3",
+    "src/utils/robustnessOfEfficiency.js": "8b46861b579ee30f96feba43b9a96d58ce5f6a77b22b4890ef6c05e6562f214c",
     "src/utils/scheduleOccurrenceSuppressions.js": "9b764ec6045899abad35846c04f0c304012d171b17b676423b091d6284d7bed8",
     "src/utils/scopedCapabilitySnapshot.js": "037ed87cc5071692079807be6b028695b8c8a5cc63ca133350e88d41064198d3",
     "src/utils/swimmerSquadHistory.js": "bf8958424931308bc85a7bfe2d85c2dd4a4fe8ef6c9f0dee5f269006fdb1a640",
