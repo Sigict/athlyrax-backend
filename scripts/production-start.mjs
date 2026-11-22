@@ -8,6 +8,7 @@ import { readActiveMigrationTransaction } from './migration-transaction-state.mj
 import { cleanupDemoPlanningStorage } from './cleanup-demo-planning-storage.mjs';
 import { upgradeDemoShowcaseTenant } from './upgrade-demo-showcase-tenant.mjs';
 import { runDemoRobustnessV32AtStart } from './upgrade-demo-robustness-v32.mjs';
+import { runDemoWordingCorrectionAtStart } from './upgrade-demo-wording.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
 const READY_MARKER_APPROVAL = 'CREATE_READY_MARKER';
@@ -180,6 +181,8 @@ if (demoShowcaseUpgrade.changed) {
 // half-written club; the resulting state (complete / pending / failed / not-present) is reported on every /db response
 // (X-AthlyraX-Demo-Robustness-V32) so the production release and the daily uptime check fail unless it is "complete".
 runDemoRobustnessV32AtStart({ storageRoot: runtimeConfiguration.storageRoot, backupRoot: runtimeConfiguration.backupRoot, logger: console });
+// One-time wording correction of the demo club (no "synthetic" wording on screen; backup, one atomic write; never stops the server).
+runDemoWordingCorrectionAtStart({ storageRoot: runtimeConfiguration.storageRoot, backupRoot: runtimeConfiguration.backupRoot, logger: console });
 
 const demoPlanningCleanup = cleanupDemoPlanningStorage({
   storageRoot: runtimeConfiguration.storageRoot,

@@ -125,3 +125,21 @@ test('Athlete App: the synthetic demo club profile is labelled a synthetic demon
   const realProfile = buildClubCapabilityProfile(real, swimmer, { season, today: '2026-11-21', tenantId: 'real-club' });
   assert.equal(realProfile.evidenceType, 'validated');
 });
+
+test('demo wording correction at start: once, verified backup, atomic, only the generated phrases; never throws', async () => {
+  const { correctDemoWordingStorage, runDemoWordingCorrectionAtStart } = await import('../scripts/upgrade-demo-wording.mjs');
+  const club = demoClub(); club.trainingSessionSets[0].description = 'Demonstration · County · AEROBIC squad programme (synthetic demonstration)';
+  club.trainingSessions = [{ id: 't1', notes: 'TAPER · squad programme · synthetic demonstration' }, { id: 't2', notes: 'Coach note' }];
+  const s = storage(club); const before = fs.readFileSync(s.dbPath);
+  const r = correctDemoWordingStorage({ ...s, logger: quiet });
+  assert.equal(r.changed, true); assert.equal(r.sets, 1); assert.equal(r.sessions, 1);
+  assert.ok(fs.readFileSync(r.backupPath).equals(before));
+  const db = JSON.parse(fs.readFileSync(s.dbPath, 'utf8'));
+  assert.equal(db.trainingSessionSets[0].description, 'Demonstration · County · AEROBIC squad programme');
+  assert.equal(db.trainingSessions[0].notes, 'TAPER · squad programme'); assert.equal(db.trainingSessions[1].notes, 'Coach note');
+  assert.equal(db.__meta.storageRevision, 42); assert.deepEqual(fs.readdirSync(path.dirname(s.dbPath)), ['db.json']);
+  assert.equal(correctDemoWordingStorage({ ...s, logger: quiet }).changed, false, 'second start: nothing written');
+  const f = storage(club); const fBefore = fs.readFileSync(f.dbPath); const orig = fs.renameSync; fs.renameSync = () => { throw new Error('disk full'); };
+  try { assert.equal(runDemoWordingCorrectionAtStart({ ...f, logger: { log() {}, error() {} } }).reason, 'failed'); } finally { fs.renameSync = orig; }
+  assert.ok(fs.readFileSync(f.dbPath).equals(fBefore), 'failure leaves the club unchanged');
+});
