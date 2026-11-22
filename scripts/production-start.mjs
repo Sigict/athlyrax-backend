@@ -9,6 +9,7 @@ import { cleanupDemoPlanningStorage } from './cleanup-demo-planning-storage.mjs'
 import { upgradeDemoShowcaseTenant } from './upgrade-demo-showcase-tenant.mjs';
 import { runDemoRobustnessV32AtStart } from './upgrade-demo-robustness-v32.mjs';
 import { runDemoWordingCorrectionAtStart } from './upgrade-demo-wording.mjs';
+import { runOwnerWorkspaceCopyAtStart } from './owner-workspace-copy.mjs';
 
 const APPROVAL = 'MIGRATE_CANONICAL_STORAGE_ONCE';
 const READY_MARKER_APPROVAL = 'CREATE_READY_MARKER';
@@ -183,6 +184,9 @@ if (demoShowcaseUpgrade.changed) {
 runDemoRobustnessV32AtStart({ storageRoot: runtimeConfiguration.storageRoot, backupRoot: runtimeConfiguration.backupRoot, logger: console });
 // One-time wording correction of the demo club (no "synthetic" wording on screen; backup, one atomic write; never stops the server).
 runDemoWordingCorrectionAtStart({ storageRoot: runtimeConfiguration.storageRoot, backupRoot: runtimeConfiguration.backupRoot, logger: console });
+// One-time copy of the (repaired) Demo Coach club into the Software Owner's own database: verified backup first, one
+// atomic write, marker so it never runs again; Demo Coach is only read; never stops the server.
+runOwnerWorkspaceCopyAtStart({ storageRoot: runtimeConfiguration.storageRoot, backupRoot: runtimeConfiguration.backupRoot, logger: console });
 
 const demoPlanningCleanup = cleanupDemoPlanningStorage({
   storageRoot: runtimeConfiguration.storageRoot,

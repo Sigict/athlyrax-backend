@@ -206,6 +206,31 @@ const DEFAULT_AUTH_USERS = [
 ];
 const DEMO_SEED_USERNAMES = new Set(['headcoach', 'assistant', 'viewer']);
 const WRITE_ALLOWED_ROLES = new Set(['software-owner', 'head-coach', 'assistant-coach', 'coach']);
+// Public demonstration accounts (owner decision 22-11-2026): many visitors may use them at the same time and see
+// everything, but nothing they do is saved. Every change request is refused here, whatever the screen; sign-in,
+// sign-out, presence and requests that only read or calculate stay open. Their passwords cannot be reset publicly.
+const DEMO_VIEW_ONLY_USERNAMES = new Set(['demo.coach', 'marco']);
+const DEMO_VIEW_ONLY_OPEN_POSTS = new Set([
+	'/auth/login', '/auth/logout', '/auth/presence/ping', '/auth/popup-exchange',
+	'/athlete-invites/preview', '/swimmer/capability/compute', '/coach/athlete-invites/email-preview', '/website-analytics/collect',
+]);
+function isDemoViewOnlyUsername(username) {
+	return DEMO_VIEW_ONLY_USERNAMES.has(String(username || '').trim().toLowerCase());
+}
+function rejectDemoViewOnlyWrites(req, res, next) {
+	if (['GET', 'HEAD', 'OPTIONS'].includes(String(req.method || '').toUpperCase())) return next();
+	if (!isDemoViewOnlyUsername(req.auth?.username)) return next();
+	if (DEMO_VIEW_ONLY_OPEN_POSTS.has(String(req.path || ''))) return next();
+	res.status(403).json({ error: 'This is a view-only demonstration account. Changes are not saved.', demoViewOnly: true });
+}
+// Each visitor of a demonstration account is its own entry in presence and daily access (same account, many people).
+function presenceKeyFor(req) {
+	const username = String(req?.auth?.username || '').trim();
+	if (!username || !isDemoViewOnlyUsername(username)) return username;
+	const session = crypto.createHash('sha256').update(String(req.auth?.csrf || '')).digest('hex').slice(0, 6);
+	return `${username} · visitor ${session}`;
+}
+const presenceUsernameOf = (key) => String(key || '').split(' · visitor ')[0];
 const ADMIN_ALLOWED_ROLES = new Set(['software-owner', 'head-coach']);
 const DEFAULT_ALLOWED_ORIGINS = [
 	'http://localhost:5173',
@@ -1858,6 +1883,7 @@ function buildAuthUserPayload(user) {
 	return {
 		username: String(normalizedUser?.username || '').trim(),
 		role: resolveEffectiveAuthRole(normalizedUser),
+		...(isDemoViewOnlyUsername(normalizedUser?.username) ? { demoViewOnly: true } : {}),
 		tenantId: String(resolvedTenantId || '').trim(),
 		createdAt: String(normalizedUser?.createdAt || '').trim(),
 		onboardingRequired: Boolean(normalizedUser?.onboardingCompletedAt ? false : true),
@@ -2512,7 +2538,7 @@ function attachAuthContext(req, _res, next) {
 	req.cookies = cookies;
 	req.authSource = cookieToken ? 'cookie' : (headerToken ? 'bearer' : 'none');
 	if (req.auth?.username) {
-		authPresenceByUser.set(String(req.auth.username), Date.now());
+		authPresenceByUser.set(presenceKeyFor(req), Date.now());
 	}
 	next();
 }
@@ -2527,7 +2553,7 @@ function getAuthPresenceSummary() {
 
 	const connectedUsers = Array.from(authPresenceByUser.entries())
 		.map(([username, lastSeenAt]) => {
-			const row = authUsers.find((item) => String(item?.username || '') === String(username));
+			const row = authUsers.find((item) => String(item?.username || '') === presenceUsernameOf(username));
 			return {
 				username,
 				role: String(row?.role || 'viewer').trim() || 'viewer',
@@ -2795,7 +2821,9 @@ function recordAuthenticatedAccess(req, source = 'authenticated_session') {
 	const accessUsername = String(req?.auth?.username || '').trim().toLowerCase();
 	if (!accessUsername) return false;
 	const accessDate = new Date().toISOString().slice(0, 10);
-	if (authDailyAccessRecorded.get(accessUsername) === accessDate) return false;
+	// A demonstration account is recorded once a day per visitor session, not once for the account.
+	const accessKey = isDemoViewOnlyUsername(accessUsername) ? presenceKeyFor(req).toLowerCase() : accessUsername;
+	if (authDailyAccessRecorded.get(accessKey) === accessDate) return false;
 	const user = findAuthUser(req.auth.username) || req.auth;
 	const saved = appendAuthAuditEvent({
 		action: 'authenticated_access',
@@ -2808,9 +2836,10 @@ function recordAuthenticatedAccess(req, source = 'authenticated_session') {
 			source: String(source || 'authenticated_session'),
 			swimClub: String(user?.swimClub || '').trim(),
 			teamName: String(user?.teamName || '').trim(),
+			...(accessKey !== accessUsername ? { visitor: accessKey } : {}),
 		},
 	});
-	if (saved) authDailyAccessRecorded.set(accessUsername, accessDate);
+	if (saved) authDailyAccessRecorded.set(accessKey, accessDate);
 	return Boolean(saved);
 }
 
@@ -4022,6 +4051,7 @@ app.use((req, res, next) => {
 });
 
 app.use(attachAuthContext);
+app.use(rejectDemoViewOnlyWrites);
 app.use(requireCsrf);
 
 // ATHLYRAX_ATHLETE_REVOKED_WRITE_GUARD: a swimmer account whose access to its club was revoked by the
@@ -5789,6 +5819,11 @@ app.post('/auth/password-reset/request', requireLoginRateLimit, async (req, res)
 	}
 
 	const user = findAuthUserByIdentifier(identifier);
+	if (user && isDemoViewOnlyUsername(user.username)) {
+		appendAuthAuditEvent({ action: 'password_reset_request', req, status: 'blocked', target: String(user.username), reason: 'demo_view_only_account' });
+		res.status(200).json({ ok: true, message: 'If an account exists, a reset code has been issued.' });
+		return;
+	}
 	if (!user) {
 		appendAuthAuditEvent({
 			action: 'password_reset_request',
@@ -5854,6 +5889,10 @@ app.post('/auth/password-reset/confirm', requireLoginRateLimit, (req, res) => {
 
 	if (nextPassword.length < 8) {
 		res.status(400).json({ error: 'Password must be at least 8 characters.' });
+		return;
+	}
+	if (isDemoViewOnlyUsername(username)) {
+		res.status(400).json({ error: 'Invalid or expired reset code.' });
 		return;
 	}
 
@@ -6610,8 +6649,7 @@ app.get('/auth/audit/events', requireStrictAuth, requireSoftwareOwnerRole, (req,
 });
 
 app.post('/auth/presence/ping', requireStrictAuth, (req, res) => {
-	const username = String(req.auth?.username || '').trim();
-	authPresenceByUser.set(username, Date.now());
+	authPresenceByUser.set(presenceKeyFor(req), Date.now());
 	// Presence is proof of a live authenticated connection. Record it through the
 	// same once-per-account/day audit path so an account cannot appear online while
 	// being absent from Account Access History.

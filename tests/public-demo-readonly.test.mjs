@@ -134,7 +134,7 @@ test('canonical demo credential recovers drifted demo auth while keeping tenant-
 
     const nextDb = {
       ...db,
-      swimmers: [...(db?.swimmers || []), { id: 'allowed-write', name: 'Allowed Demo Write' }],
+      swimmers: [...(db?.swimmers || []), { id: 'refused-write', name: 'Refused Demo Write' }],
     };
     const writeResponse = await fetch(`${server.baseUrl}/db`, {
       method: 'PUT',
@@ -146,12 +146,15 @@ test('canonical demo credential recovers drifted demo auth while keeping tenant-
       body: JSON.stringify(nextDb),
     });
     const writeBody = await writeResponse.json();
-    assert.equal(writeResponse.status, 200, JSON.stringify(writeBody));
+    // Owner decision 22-11-2026: Demo Coach is a public, view-only demonstration; every change is refused.
+    assert.equal(writeResponse.status, 403, JSON.stringify(writeBody));
+    assert.equal(writeBody?.demoViewOnly, true);
 
     const persistedResponse = await fetch(`${server.baseUrl}/db`, { headers: { Cookie: cookie } });
     const persisted = await persistedResponse.json();
     assert.equal(persistedResponse.status, 200);
-    assert.ok((persisted?.swimmers || []).some((row) => row.id === 'allowed-write'));
+    assert.ok(!(persisted?.swimmers || []).some((row) => row.id === 'refused-write'));
+    assert.ok((persisted?.swimmers || []).some((row) => row.id === 'demo-swimmer'));
     assert.ok(!(persisted?.swimmers || []).some((row) => row.id === 'other-swimmer'));
   } finally {
     await server.stop();
