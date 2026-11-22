@@ -369,6 +369,23 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
     catch (error) { console.warn('[athlete-home] capability profile unavailable:', String(error?.message || error).slice(0, 200)); }
   }
 
+  // The coach's Training Planner for the athlete's own squad, read-only: week, phase, cycle block, planned
+  // volume and target competition only (owner request 22-11-2026). Empty placeholder and deleted weeks are left out.
+  const ownSquadId = text(athlete.currentSquadId || athlete.squadId);
+  const plannerByWeek = new Map();
+  for (const row of asArray(db.trainingPlannerWeeks)) {
+    if (!ownSquadId || isDeleted(row) || text(row?.squadId) !== ownSquadId) continue;
+    const weekStart = text(row.weekStart || row.weekStartKey).slice(0, 10);
+    const phase = text(row.phase || row.cyclePhase).toUpperCase();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart) || !phase) continue;
+    const previous = plannerByWeek.get(weekStart);
+    if (previous && text(previous.updatedAt) > text(row.updatedAt)) continue;
+    plannerByWeek.set(weekStart, { updatedAt: text(row.updatedAt), weekStart, phase, cycleBlock: text(row.cycleBlock || row.automaticCycleBlock),
+      plannedVolume: Number.isFinite(Number(row.plannedVolume)) && row.plannedVolume !== null && row.plannedVolume !== '' ? Number(row.plannedVolume) : null,
+      targetCompetition: text(row.targetCompetition) });
+  }
+  const coachPlannerWeeks = [...plannerByWeek.values()].map(({ updatedAt, ...week }) => week).sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+
   return {
     athlete: {
       id: text(athlete.id || athlete.swimmerId || athlete.userId),
@@ -387,5 +404,6 @@ export function buildAthleteHomeProjection(db = {}, authUser = {}, context = {})
     readiness: athlete.readiness || null,
     latestCoachFeedback: athlete.latestCoachFeedback || null,
     nextTarget: athlete.nextTarget || null,
+    coachPlannerWeeks,
   };
 }

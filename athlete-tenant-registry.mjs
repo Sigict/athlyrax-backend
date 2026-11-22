@@ -129,5 +129,7 @@ export function mergeAthleteHomeProjections(projections = []) {
     readiness: latest.readiness || first.readiness || null,
     latestCoachFeedback: latest.latestCoachFeedback || first.latestCoachFeedback || null,
     nextTarget: latest.nextTarget || first.nextTarget || null,
+    // One week appears once: the first club projection that plans it.
+    coachPlannerWeeks: (() => { const seen = new Set(); return valid.flatMap((p) => asArray(p.coachPlannerWeeks)).filter((w) => w?.weekStart && !seen.has(w.weekStart) && seen.add(w.weekStart)); })(),
   };
 }
