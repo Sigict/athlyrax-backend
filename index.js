@@ -22,7 +22,8 @@ import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraini
 import { buildClubResults, buildSelfReportedProgress, testProtocols } from './athlete-tests-races.mjs';
 import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
 import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
-import { DEMO_ACTIVITY_ACCOUNTS, acceptDemoActivity, appendDemoActivity, buildDemoActivityReport, createActiveTimeBudget, eraseBrowserFromDemoActivity, pruneDemoActivity, readDemoActivity, verifiedGeoFrom } from './demo-activity.mjs';
+import { DEMO_ACTIVITY_ACCOUNTS, createActiveTimeBudget, eraseBrowserFromDemoActivity, pruneDemoActivity, readDemoActivity, verifiedGeoFrom } from './demo-activity.mjs';
+import { buildDemoStatsReport, createDemoStatsCollector, pruneDemoStats, testMarkerValid } from './demo-stats.mjs';
 import * as athleteHomeProjectionModule from './athlete-home-projection.mjs';
 import { usernameProblem, normalizeUsername, renameSwimmerLinks, hasActiveWearable } from './account-username.mjs';
 import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
@@ -224,7 +225,7 @@ const DEMO_VIEW_ONLY_USERNAMES = new Set(['demo.coach', 'marco']);
 const DEMO_VIEW_ONLY_OPEN_POSTS = new Set([
 	'/auth/login', '/auth/logout', '/auth/presence/ping', '/auth/popup-exchange',
 	'/athlete-invites/preview', '/swimmer/capability/compute', '/coach/athlete-invites/email-preview', '/website-analytics/collect',
-	'/demo-activity',
+	'/demo-activity', '/demo-activity/test-session',
 ]);
 function isDemoViewOnlyUsername(username) {
 	return DEMO_VIEW_ONLY_USERNAMES.has(String(username || '').trim().toLowerCase());
@@ -6713,38 +6714,67 @@ app.get('/auth/presence/summary', requireStrictAuth, requireSoftwareOwnerRole, (
 	res.status(200).json(getAuthPresenceSummary());
 });
 
-// Demo visitor activity (demo-activity.mjs): only the demonstration accounts send it; only the primary
-// Software Owner reads it. Location only from the signed Netlify header; never an IP address.
+// Demonstration statistics, aggregate only (demo-stats.mjs, 24-11-2026): only the demonstration accounts send them;
+// only the primary Software Owner reads them. Location only from the signed Netlify header; never an IP address.
+// A session's counters live in memory until it ends, then only aggregate counts are kept. The per-session records of
+// 23-24-11-2026 (demo-activity.mjs) are no longer written; they are read as unclassified and expire after 90 days.
 const demoActivityBudget = createActiveTimeBudget();
-// 90-day retention: expired day files are deleted at start and once a day, not only when new visits arrive.
-const pruneDemoActivitySafely = () => { try { pruneDemoActivity(STORAGE_ROOT); } catch { /* retried tomorrow */ } };
-pruneDemoActivitySafely();
-setInterval(pruneDemoActivitySafely, 24 * 60 * 60 * 1000).unref();
+const demoStats = createDemoStatsCollector({ storageRoot: STORAGE_ROOT, activeBudget: demoActivityBudget, onError: (error) => console.error(`[demo-stats] aggregate write failed: ${error?.message || error}`) });
+const demoStatsHousekeeping = () => { try { demoStats.sweep(); pruneDemoStats(STORAGE_ROOT); pruneDemoActivity(STORAGE_ROOT); } catch { /* retried later */ } };
+demoStatsHousekeeping();
+setInterval(demoStatsHousekeeping, 5 * 60 * 1000).unref();
+process.on('exit', () => { try { demoStats.flushAll(); } catch { /* best effort */ } });
 app.post('/demo-activity', requireStrictAuth, (req, res) => {
 	const account = String(req.auth?.username || '').trim().toLowerCase();
 	if (!DEMO_ACTIVITY_ACCOUNTS[account]) {
 		res.status(403).json({ error: 'Activity is recorded only for demonstration accounts.' });
 		return;
 	}
+	// A browser that agreed to the earlier returning-browser identifier sends it once more to have it erased.
+	const legacyId = String(req.body?.browserId || '').toLowerCase();
+	if (req.body?.consent === 'withdrawn' && legacyId) { try { eraseBrowserFromDemoActivity(STORAGE_ROOT, legacyId); } catch { /* best effort */ } }
 	const geo = verifiedGeoFrom(req.headers, process.env.DEMO_GEO_SHARED_SECRET || '');
-	const result = acceptDemoActivity({ account, csrf: req.auth?.csrf, body: req.body, geo, activeBudget: demoActivityBudget });
+	const result = demoStats.accept({ account, csrf: req.auth?.csrf, body: req.body, geo });
 	if (!result.ok) {
 		res.status(400).json({ error: result.error });
 		return;
 	}
-	try {
-		if (result.erase) eraseBrowserFromDemoActivity(STORAGE_ROOT, result.erase);
-		appendDemoActivity(STORAGE_ROOT, result.records);
-	} catch { /* statistics never block the demo */ }
-	res.status(200).json({ ok: true, recorded: result.records.length, locationVerified: Boolean(geo) });
+	res.status(200).json({ ok: true, locationVerified: Boolean(geo), ...(result.discarded ? { discarded: true } : {}) });
+});
+
+// Verified automated tests: authorised test infrastructure marks its own demo session with a secret held only by
+// the server and the test runner (DEMO_TEST_MARKER_SECRET); browsers never see it. Without it, nothing is marked.
+app.post('/demo-activity/test-session', requireStrictAuth, (req, res) => {
+	const account = String(req.auth?.username || '').trim().toLowerCase();
+	if (!DEMO_ACTIVITY_ACCOUNTS[account]) {
+		res.status(403).json({ error: 'Only demonstration sessions can be marked.' });
+		return;
+	}
+	const secret = String(process.env.DEMO_TEST_MARKER_SECRET || '');
+	if (secret.length < 32) {
+		res.status(503).json({ error: 'Test marking is not configured.' });
+		return;
+	}
+	if (!testMarkerValid(req.headers['x-athlyrax-test-marker'], secret)) {
+		appendAuthAuditEvent({ action: 'demo_test_marker_rejected', req, status: 'blocked', reason: 'invalid_test_marker', details: { account } });
+		res.status(403).json({ error: 'Not authorised.' });
+		return;
+	}
+	demoStats.markTest(req.auth?.csrf);
+	res.status(200).json({ ok: true, verifiedTest: true });
 });
 
 app.get('/owner/demo-activity', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
-	const sinceIso = new Date(Date.now() - 90 * 86400000).toISOString();
+	const days = Number(req.query?.days) || 30;
+	// Successful sign-ins come from the security log and are reported apart from engagement.
+	const sinceIso = new Date(Date.now() - ([7, 30, 90].includes(days) ? days : 30) * 86400000).toISOString();
 	const logins = readAuthAuditEvents(AUTH_AUDIT_FETCH_MAX_ROWS, { action: 'login_success' })
 		.filter((row) => DEMO_ACTIVITY_ACCOUNTS[String(row?.target || row?.actor || '').toLowerCase()] && String(row?.at || '') >= sinceIso).length;
 	res.set('Cache-Control', 'no-store');
-	res.status(200).json(buildDemoActivityReport(readDemoActivity(STORAGE_ROOT), { logins }));
+	res.status(200).json({
+		...buildDemoStatsReport({ storageRoot: STORAGE_ROOT, days, legacyRecords: readDemoActivity(STORAGE_ROOT), openSessions: demoStats.openSessions() }),
+		securityLog: { successfulDemoSignIns: logins, note: 'From the security log; not an engagement measure.' },
+	});
 });
 
 registerWebsiteAnalytics(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole, resolveClientKey });

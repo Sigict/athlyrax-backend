@@ -7,6 +7,7 @@ import net from 'node:net';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { acceptDemoActivity, buildDemoActivityReport, createActiveTimeBudget, verifiedGeoFrom, appendDemoActivity, readDemoActivity, pruneDemoActivity, sessionRefOf, eraseBrowserFromDemoActivity } from '../demo-activity.mjs';
+import { buildDemoStatsReport, classifySession, createDemoStatsCollector, pruneDemoStats, testMarkerValid } from '../demo-stats.mjs';
 
 // Demo visitor activity (23-11-2026): sessions, optional returning-browser IDs, sections, estimated active time,
 // signed approximate location; owner-only report; audit addresses and retention.
@@ -227,48 +228,100 @@ test('unit: 90-day retention deletes old day files', () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('server: concurrent demo visitors, returning browser, declined and withdrawn consent, Marco, signed location, owner-only report', async () => {
-  const server = await startServer({ DEMO_GEO_SHARED_SECRET: SECRET });
+test('server: aggregate statistics — three classes, verified test marker, no identifiers, objection, owner-only report', async () => {
+  const MARKER = 'marker-secret-for-tests-with-at-least-32-chars';
+  const server = await startServer({ DEMO_GEO_SHARED_SECRET: SECRET, DEMO_TEST_MARKER_SECRET: MARKER });
   try {
     const { baseUrl, paths } = server;
-    const a1 = await signIn(baseUrl, 'demo.coach', 'DemoCoach123!'); const a2 = await signIn(baseUrl, 'demo.coach', 'DemoCoach123!');
-    const later = await signIn(baseUrl, 'demo.coach', 'DemoCoach123!');
-    const marco = await signIn(baseUrl, 'marco', 'Marco!Pass12345', { 'X-AthlyraX-App': 'athlete' });
-    const geo = signGeo({ cc: 'GB', c: 'United Kingdom', r: 'Scotland', ci: 'Aberdeen', t: now() });
-    let r = await send(baseUrl, a1, { consent: 'granted', browserId: B1, events: [{ type: 'enter', section: 'training-planner', at: now() }, { type: 'active', section: 'training-planner', seconds: 50, at: now() }] }, geo);
+    const geo = () => signGeo({ cc: 'GB', c: 'United Kingdom', r: 'Scotland', ci: 'Aberdeen', t: now() });
+    // human-likely: interaction, no automation signal, no marker
+    const human = await signIn(baseUrl, 'demo.coach', 'DemoCoach123!');
+    let r = await send(baseUrl, human, { events: [{ type: 'enter', section: 'calendar', at: now() }, { type: 'active', section: 'calendar', seconds: 50, at: now() }] }, geo());
     assert.equal(r.status, 200); assert.equal((await r.json()).locationVerified, true);
-    r = await send(baseUrl, a2, { consent: 'declined', events: [{ type: 'enter', section: 'calendar', at: now() }, { type: 'active', section: 'calendar', seconds: 30, at: now() }] }, { 'x-athlyrax-geo': geo['x-athlyrax-geo'], 'x-athlyrax-geo-sig': '0'.repeat(64) });
-    assert.equal((await r.json()).locationVerified, false, 'forged signature');
-    await send(baseUrl, later, { consent: 'granted', browserId: B1, events: [{ type: 'enter', section: 'reports-home', at: now() }, { type: 'active', section: 'reports-home', seconds: 20, at: now() }, { type: 'end', section: 'reports-home', at: now() }] });
-    await send(baseUrl, marco, { consent: 'granted', browserId: B2, events: [{ type: 'enter', section: 'daily', at: now() }, { type: 'active', section: 'daily', seconds: 25, at: now() }] });
-    await send(baseUrl, marco, { consent: 'withdrawn', browserId: B2, events: [] });
-    // Client-supplied location fields are never taken.
-    await send(baseUrl, a2, { consent: 'declined', events: [{ type: 'enter', section: 'overview', at: now(), geo: { city: 'Fake' } }], country: 'Fake' });
+    await send(baseUrl, human, { events: [{ type: 'end', section: 'calendar', at: now() }] });
+    // verified test: the session is marked with the server-held secret
+    const tester = await signIn(baseUrl, 'demo.coach', 'DemoCoach123!');
+    const mark = (s, value) => fetch(`${baseUrl}/demo-activity/test-session`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: s.cookie, 'x-csrf-token': s.csrf, ...s.extra, ...(value ? { 'x-athlyrax-test-marker': value } : {}) }, body: '{}' });
+    assert.equal((await mark(tester, MARKER)).status, 200);
+    await send(baseUrl, tester, { automation: true, events: [{ type: 'enter', section: 'reports-home', at: now() }, { type: 'active', section: 'reports-home', seconds: 30, at: now() }, { type: 'end', section: 'reports-home', at: now() }] });
+    // forged markers: wrong value, missing header, client-side claims -> never verified
+    const forger = await signIn(baseUrl, 'demo.coach', 'DemoCoach123!');
+    assert.equal((await mark(forger, 'wrong-marker-value-wrong-marker-value-123')).status, 403);
+    assert.equal((await mark(forger)).status, 403);
+    await send(baseUrl, forger, { verifiedTest: true, testMarker: MARKER, events: [{ type: 'enter', section: 'overview', at: now() }, { type: 'active', section: 'overview', seconds: 20, at: now() }, { type: 'end', section: 'overview', at: now() }] }, { 'x-athlyrax-test-marker': MARKER });
+    // unclassified: automation signal without a marker; Marco with no interaction
+    const bot = await signIn(baseUrl, 'demo.coach', 'DemoCoach123!');
+    await send(baseUrl, bot, { automation: true, events: [{ type: 'enter', section: 'calendar', at: now() }, { type: 'active', section: 'calendar', seconds: 40, at: now() }, { type: 'end', section: 'calendar', at: now() }] });
+    const marco = await signIn(baseUrl, 'marco', 'Marco!Pass12345', { 'X-AthlyraX-App': 'athlete' });
+    await send(baseUrl, marco, { events: [{ type: 'enter', section: 'timetable', at: now() }, { type: 'end', section: 'timetable', at: now() }] });
+    // objection: the open session is discarded
+    const objector = await signIn(baseUrl, 'demo.coach', 'DemoCoach123!');
+    await send(baseUrl, objector, { events: [{ type: 'enter', section: 'squads', at: now() }, { type: 'active', section: 'squads', seconds: 30, at: now() }] });
+    assert.equal((await (await send(baseUrl, objector, { optOut: true, events: [] })).json()).discarded, true);
+    // ordinary accounts and anonymous visitors are never counted; marker refused for them
     const coach = await signIn(baseUrl, 'coachA', 'CoachA!Pass1234');
-    assert.equal((await send(baseUrl, coach, { events: [{ type: 'enter', section: 'overview' }] })).status, 403, 'normal accounts are never tracked');
+    assert.equal((await send(baseUrl, coach, { events: [{ type: 'enter', section: 'overview' }] })).status, 403);
+    assert.equal((await mark(coach, MARKER)).status, 403);
     assert.equal((await fetch(`${baseUrl}/demo-activity`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"events":[]}' })).status, 401);
-    const big = await send(baseUrl, a1, { consent: 'unset', events: [{ type: 'enter', section: 'overview', pad: 'x'.repeat(6000) }] });
-    assert.equal(big.status, 413, 'payload limit');
-    // Owner-only report.
-    for (const s of [coach, a1, marco]) assert.equal((await fetch(`${baseUrl}/owner/demo-activity`, { headers: { Cookie: s.cookie, ...s.extra } })).status, 403);
+    // owner-only report
+    for (const s of [coach, human, marco]) assert.equal((await fetch(`${baseUrl}/owner/demo-activity`, { headers: { Cookie: s.cookie, ...s.extra } })).status, 403);
     assert.equal((await fetch(`${baseUrl}/owner/demo-activity`)).status, 401);
     const owner = await signIn(baseUrl, 'softwareowner', 'Owner!Pass1234');
-    const report = await (await fetch(`${baseUrl}/owner/demo-activity`, { headers: { Cookie: owner.cookie } })).json();
-    assert.equal(report.measures.successfulLogins, 4);
-    assert.equal(report.measures.returningBrowsers, 1, 'the same browser across two sign-ins');
-    const a = report.visitors.find((v) => v.visitor === 'Visitor A');
-    assert.equal(a.sessions, 2); assert.equal(a.location, 'Aberdeen, Scotland, United Kingdom'); assert.deepEqual(a.sectionsViewed, ['training-planner', 'reports-home']);
-    assert.equal(a.estimatedActiveSeconds, 70);
-    const unlinked = report.visitors.filter((v) => !v.browserLinked);
-    assert.ok(unlinked.some((v) => v.accounts[0] === 'marco'), 'withdrawn browser is shown unlinked');
-    assert.ok(unlinked.some((v) => v.accounts[0] === 'demo.coach' && v.location === 'Unknown'));
+    const report = await (await fetch(`${baseUrl}/owner/demo-activity?days=7`, { headers: { Cookie: owner.cookie } })).json();
+    const c = report.classes;
+    assert.equal(c.human_likely.sessions, 2, 'the human-like session and the forged-marker session (forging changes nothing)');
+    assert.equal(c.verified_test.sessions, 1);
+    assert.equal(c.unclassified.sessions, 2, 'automation without marker; Marco without interaction');
+    assert.equal(c.human_likely.byAccount.coach.sessions, 2); assert.equal(c.unclassified.byAccount.athlete.sessions, 1);
+    assert.equal(c.human_likely.activeSeconds, 70); assert.equal(c.verified_test.activeSeconds, 30);
+    assert.deepEqual(c.human_likely.sections.map((x) => `${x.app}:${x.section}:${x.seconds}`), ['coach:calendar:50', 'coach:overview:20']);
+    assert.deepEqual(c.human_likely.geography, [{ countryCode: 'GB', country: 'United Kingdom', region: 'Scotland', sessions: 1 }]);
+    assert.deepEqual(c.human_likely.cities, [], 'a city shared by fewer than 5 sessions is not shown');
+    assert.equal(c.human_likely.unknownLocationSessions, 1);
+    assert.equal(c.human_likely.daily.length, 1); assert.equal(c.human_likely.weekly.length, 1);
+    assert.equal(report.securityLog.successfulDemoSignIns, 6, 'sign-ins are reported apart from engagement');
+    assert.equal(report.openSessionsNotYetCounted, 0);
     const text = JSON.stringify(report);
-    for (const secretish of [B1, B2, a1.cookie.split('=')[1], a1.csrf, '127.0.0.1', '::1', 'Fake']) assert.equal(text.includes(secretish), false, `report leaks ${secretish}`);
-    const stored = fs.readFileSync(path.join(paths.storageRoot, 'demo-activity', `${new Date().toISOString().slice(0, 10)}.jsonl`), 'utf8');
-    assert.equal(/127\.0\.0\.1|::1|athlyrax_session|Fake/.test(stored), false, 'no IP, token or client-supplied location stored');
-    assert.equal(stored.includes(B2), false, 'a withdrawn browser identifier is erased from every stored record');
-    assert.ok(stored.includes(B1), 'a consenting browser keeps its identifier');
+    for (const leak of [human.csrf, human.cookie.split('=')[1], MARKER, '127.0.0.1', '::1', 'browserId']) assert.equal(text.includes(leak), false, `report leaks ${leak}`);
+    // storage: aggregates only (no session reference, no IP, no identifiers), no new per-session files
+    const dir = path.join(paths.storageRoot, 'demo-stats');
+    const stored = fs.readdirSync(dir).map((f) => fs.readFileSync(path.join(dir, f), 'utf8')).join('');
+    for (const leak of [human.csrf, sessionRefOf(human.csrf), '127.0.0.1', MARKER]) assert.equal(stored.includes(leak), false);
+    assert.equal(fs.existsSync(path.join(paths.storageRoot, 'demo-activity')), false, 'per-session records are no longer written');
+    // marker without server configuration is refused
   } finally { await server.stop(); }
+  const plain = await startServer({});
+  try {
+    const s = await signIn(plain.baseUrl, 'demo.coach', 'DemoCoach123!');
+    const r = await fetch(`${plain.baseUrl}/demo-activity/test-session`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: s.cookie, 'x-csrf-token': s.csrf, 'x-athlyrax-test-marker': 'anything-anything-anything-anything' }, body: '{}' });
+    assert.equal(r.status, 503);
+  } finally { await plain.stop(); }
+});
+
+test('unit: aggregate collector — idle sessions are counted after 30 minutes, shutdown flushes, legacy records are unclassified, retention', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ax-demo-stats-'));
+  try {
+    let t = Date.parse('2026-11-24T10:00:00Z');
+    const col = createDemoStatsCollector({ storageRoot: root, now: () => t });
+    col.accept({ account: 'demo.coach', csrf: 'idle', body: { events: [{ type: 'enter', section: 'calendar' }, { type: 'active', section: 'calendar', seconds: 45 }] } });
+    col.accept({ account: 'marco', csrf: 'open', body: { events: [{ type: 'enter', section: 'home' }, { type: 'active', section: 'home', seconds: 10 }] } });
+    assert.equal(col.openSessions(), 2);
+    t += 31 * 60000; col.accept({ account: 'marco', csrf: 'open', body: { events: [{ type: 'active', section: 'home', seconds: 5 }] } }); col.sweep();
+    assert.equal(col.openSessions(), 1, 'idle session counted and dropped from memory');
+    col.flushAll(); assert.equal(col.openSessions(), 0);
+    const legacy = [{ v: 1, at: '2026-11-24T03:00:00.000Z', kind: 'enter', account: 'demo.coach', session: 'L1', browser: B1, section: 'overview' }, { v: 1, at: '2026-11-24T03:01:00.000Z', kind: 'active', account: 'demo.coach', session: 'L1', browser: B1, section: 'overview', seconds: 60, geo: { countryCode: 'US', country: 'United States', region: 'Virginia', city: 'Ashburn' } }];
+    const rep = buildDemoStatsReport({ storageRoot: root, days: 7, now: t, legacyRecords: legacy });
+    assert.equal(rep.classes.human_likely.sessions, 2);
+    assert.equal(rep.classes.unclassified.sessions, 1); assert.equal(rep.classes.unclassified.legacySessions, 1);
+    assert.equal(rep.classes.unclassified.geography[0].country, 'United States', 'US location alone does not make a session automated or human');
+    assert.equal(JSON.stringify(rep).includes(B1), false);
+    assert.equal(testMarkerValid('x'.repeat(40), 'x'.repeat(40)), true); assert.equal(testMarkerValid('x'.repeat(40), 'short'), false); assert.equal(testMarkerValid('', 'x'.repeat(40)), false);
+    assert.equal(classifySession({ testVerified: false, automation: false, activeSeconds: 1 }), 'human_likely');
+    // Retention: aggregate files older than 90 days are deleted.
+    fs.writeFileSync(path.join(root, 'demo-stats', 'day-2026-07-01.json'), '{}'); fs.writeFileSync(path.join(root, 'demo-stats', 'week-2026-06-29.json'), '{}');
+    assert.equal(pruneDemoStats(root, { now: t }), 2);
+    assert.ok(fs.readdirSync(path.join(root, 'demo-stats')).every((f) => f.includes('2026-11')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('server: by default no audit archive or backup is deleted for its age (expiry is opt-in)', async () => {
