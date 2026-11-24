@@ -307,13 +307,13 @@
     "src/utils/dashboardReadableData.js",
     "src/utils/demoClubLevelTimes.js",
     "src/utils/demoRaceSplitEvidence.js",
+    "src/utils/demoStrokeModelV2Upgrade.js",
     "src/utils/fixtureEditorPersistence.js",
     "src/utils/fixtureResultRoundTrip.js",
     "src/utils/longitudinalCompetitionHistory.js",
     "src/utils/plannerCompetitionRefresh.js",
     "src/utils/plannerReportCompetition.js",
-    "src/utils/reportOperatingSystem.js",
-    "src/utils/scheduledSessionsPrint.js"
+    "src/utils/reportOperatingSystem.js"
    ],
    "fields": [
     "accountId",
@@ -582,12 +582,12 @@
     "src/utils/accountTrainingEvidenceModel.js",
     "src/utils/canonicalCalendar.js",
     "src/utils/canonicalTimetable.js",
+    "src/utils/canonicalTrainingPlanRadars.js",
     "src/utils/coachPrintSheets.js",
     "src/utils/dashboardReadableData.js",
     "src/utils/fixtures.js",
     "src/utils/groupTestResultsMutation.js",
-    "src/utils/plannerPopupData.js",
-    "src/utils/plannerSessionPrint.js"
+    "src/utils/plannerPopupData.js"
    ],
    "fields": [
     "accountId",
@@ -654,11 +654,11 @@
     "src/utils/athlyraxCapabilityEngine.js",
     "src/utils/canonicalGroupIspRadars.js",
     "src/utils/canonicalSwimmerEvidence.js",
+    "src/utils/canonicalTrainingPlanRadars.js",
     "src/utils/capabilityEvidenceReading.js",
     "src/utils/coachPrintSheets.js",
     "src/utils/competitionDocumentImport.js",
-    "src/utils/dashboardReadableData.js",
-    "src/utils/demoClubLevelTimes.js"
+    "src/utils/dashboardReadableData.js"
    ],
    "fields": [
     "accountId",
@@ -753,11 +753,11 @@
     "src/utils/dashboardReadableData.js",
     "src/utils/demoClubLevelTimes.js",
     "src/utils/demoStrokeCountUpgrade.js",
+    "src/utils/demoStrokeModelV2Upgrade.js",
     "src/utils/demoTestBatterySets.js",
     "src/utils/demoTestSplitEvidence.js",
     "src/utils/groupTestResultsMutation.js",
-    "src/utils/groupTestResultsRoundTrip.js",
-    "src/utils/ispCanonicalRadars.js"
+    "src/utils/groupTestResultsRoundTrip.js"
    ],
    "fields": [
     "accountId",
@@ -875,7 +875,9 @@
   {
    "name": "trainingPlannerWeeks",
    "recognisedByIntegrityCheck": true,
-   "usedIn": [],
+   "usedIn": [
+    "athlete-home-projection.mjs"
+   ],
    "writtenIn": [],
    "websiteFiles": [
     "src/AthlyraxPhase1App.jsx",
@@ -948,6 +950,7 @@
     "src/utils/canonicalTrainingSessionLinks.js",
     "src/utils/coachPrintSheets.js",
     "src/utils/cycleTrainingStart.js",
+    "src/utils/demoWordingCorrection.js",
     "src/utils/ispPlannerSource.js",
     "src/utils/plannerAppMutations.js",
     "src/utils/plannerPopupData.js",
@@ -1021,15 +1024,15 @@
     "src/utils/coachPrintSheets.js",
     "src/utils/demoClubLevelTimes.js",
     "src/utils/demoEnergyMix.js",
+    "src/utils/demoProgrammeEnergyRepair.js",
     "src/utils/demoRacePaceResults.js",
     "src/utils/demoSetSendOffs.js",
     "src/utils/demoStrokeCountUpgrade.js",
+    "src/utils/demoStrokeModelV2Upgrade.js",
     "src/utils/demoTestBatterySets.js",
+    "src/utils/demoWordingCorrection.js",
     "src/utils/groupTestResultsMutation.js",
-    "src/utils/ispPlannerSource.js",
-    "src/utils/plannerAppMutations.js",
-    "src/utils/plannerCanonicalDayVolumes.js",
-    "src/utils/plannerPopupData.js"
+    "src/utils/ispPlannerSource.js"
    ],
    "fields": [
     "accountId",
@@ -1337,7 +1340,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5387,
+   "line": 5492,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1351,7 +1354,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5247,
+   "line": 5352,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1365,7 +1368,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5224,
+   "line": 5329,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1379,7 +1382,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5107,
+   "line": 5212,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1393,7 +1396,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5133,
+   "line": 5238,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1407,7 +1410,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5343,
+   "line": 5448,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1421,7 +1424,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5292,
+   "line": 5397,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1435,7 +1438,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5360,
+   "line": 5465,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1449,7 +1452,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5096,
+   "line": 5201,
    "area": "Athlete App invitations",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1464,7 +1467,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 6979,
+   "line": 7093,
    "area": "Accounts & login",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -1476,7 +1479,7 @@
    "path": "/auth/config",
    "guards": [],
    "file": "index.js",
-   "line": 5673,
+   "line": 5778,
    "area": "Accounts & login",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -1488,7 +1491,7 @@
    "path": "/auth/guard",
    "guards": [],
    "file": "index.js",
-   "line": 6524,
+   "line": 6638,
    "area": "Accounts & login",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -1505,7 +1508,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7427,
+   "line": 7567,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRateLimit)",
    "calledBy": [
@@ -1521,7 +1524,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7126,
+   "line": 7266,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1535,7 +1538,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7009,
+   "line": 7149,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": [
@@ -1549,7 +1552,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5973,
+   "line": 6078,
    "area": "Accounts & login",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1565,7 +1568,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6941,
+   "line": 7055,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1580,7 +1583,7 @@
    "path": "/auth/me",
    "guards": [],
    "file": "index.js",
-   "line": 6312,
+   "line": 6426,
    "area": "Accounts & login",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -1597,7 +1600,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6878,
+   "line": 6992,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1611,7 +1614,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 6170,
+   "line": 6280,
    "area": "Accounts & login",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1625,7 +1628,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 6107,
+   "line": 6212,
    "area": "Accounts & login",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1638,7 +1641,7 @@
    "path": "/auth/popup-exchange",
    "guards": [],
    "file": "index.js",
-   "line": 6267,
+   "line": 6381,
    "area": "Accounts & login",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -1652,7 +1655,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6246,
+   "line": 6360,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -1664,7 +1667,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6993,
+   "line": 7107,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1679,7 +1682,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 7003,
+   "line": 7116,
    "area": "Accounts & login",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -1693,7 +1696,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 5687,
+   "line": 5792,
    "area": "Accounts & login",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -1707,7 +1710,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6405,
+   "line": 6519,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1721,7 +1724,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6424,
+   "line": 6538,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1735,7 +1738,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6410,
+   "line": 6524,
    "area": "Accounts & login",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1750,7 +1753,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 5631,
+   "line": 5736,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRateLimit)",
    "calledBy": [
@@ -1766,7 +1769,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7177,
+   "line": 7317,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": [
@@ -1782,7 +1785,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7188,
+   "line": 7328,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1796,7 +1799,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7539,
+   "line": 7679,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1810,7 +1813,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7491,
+   "line": 7631,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1824,7 +1827,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7295,
+   "line": 7435,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1838,7 +1841,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 7344,
+   "line": 7484,
    "area": "Accounts & login",
    "permission": "Signed in + role check (requireAdminRole, requireAdminRateLimit)",
    "calledBy": []
@@ -1851,7 +1854,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 6607,
+   "line": 6721,
    "area": "Billing (Stripe)",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -1866,7 +1869,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 6619,
+   "line": 6733,
    "area": "Billing (Stripe)",
    "permission": "Primary software owner only",
    "calledBy": []
@@ -1878,7 +1881,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6731,
+   "line": 6845,
    "area": "Billing (Stripe)",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1892,7 +1895,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6590,
+   "line": 6704,
    "area": "Billing (Stripe)",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1906,7 +1909,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6844,
+   "line": 6958,
    "area": "Billing (Stripe)",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1920,7 +1923,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6714,
+   "line": 6828,
    "area": "Billing (Stripe)",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -1932,7 +1935,7 @@
    "path": "/billing/webhook",
    "guards": [],
    "file": "index.js",
-   "line": 351,
+   "line": 389,
    "area": "Billing (Stripe)",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -1946,7 +1949,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 4942,
+   "line": 5047,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager, requireAdminRateLimit)",
    "calledBy": []
@@ -1959,7 +1962,7 @@
     "requireAthleteInviteManager"
    ],
    "file": "index.js",
-   "line": 4696,
+   "line": 4801,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager)",
    "calledBy": []
@@ -1973,7 +1976,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 4875,
+   "line": 4980,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager, requireAdminRateLimit)",
    "calledBy": [
@@ -1988,7 +1991,7 @@
     "requireAthleteInviteManager"
    ],
    "file": "index.js",
-   "line": 4862,
+   "line": 4967,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager)",
    "calledBy": [
@@ -2003,7 +2006,7 @@
     "requireAthleteInviteManager"
    ],
    "file": "index.js",
-   "line": 4853,
+   "line": 4958,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager)",
    "calledBy": [
@@ -2018,7 +2021,7 @@
     "requireWriteRole"
    ],
    "file": "index.js",
-   "line": 9666,
+   "line": 9806,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole)",
    "calledBy": [
@@ -2033,7 +2036,7 @@
     "requireWriteRole"
    ],
    "file": "index.js",
-   "line": 9680,
+   "line": 9820,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole)",
    "calledBy": []
@@ -2047,7 +2050,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 4534,
+   "line": 4639,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": [
@@ -2061,7 +2064,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 9805,
+   "line": 9945,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2079,7 +2082,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9890,
+   "line": 10030,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2093,7 +2096,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9850,
+   "line": 9990,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2107,7 +2110,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 4553,
+   "line": 4658,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2121,7 +2124,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9880,
+   "line": 10020,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2135,7 +2138,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9870,
+   "line": 10010,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2149,7 +2152,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9859,
+   "line": 9999,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2163,7 +2166,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 4542,
+   "line": 4647,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2176,7 +2179,7 @@
     "requireCoachLinkManagerRole"
    ],
    "file": "index.js",
-   "line": 9108,
+   "line": 9248,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireCoachLinkManagerRole)",
    "calledBy": [
@@ -2192,7 +2195,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 9133,
+   "line": 9273,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -2205,7 +2208,7 @@
     "requireCoachLinkDecisionRole"
    ],
    "file": "index.js",
-   "line": 9284,
+   "line": 9424,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -2218,7 +2221,7 @@
     "requireAthleteInviteManager"
    ],
    "file": "index.js",
-   "line": 4656,
+   "line": 4761,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager)",
    "calledBy": []
@@ -2232,7 +2235,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 4673,
+   "line": 4778,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAthleteInviteManager, requireAdminRateLimit)",
    "calledBy": []
@@ -2245,7 +2248,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 4707,
+   "line": 4812,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireAdminRateLimit)",
    "calledBy": []
@@ -2259,7 +2262,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 10101,
+   "line": 10241,
    "area": "Coaching Software / Pool Console",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": [
@@ -2273,7 +2276,7 @@
     "requireAuth"
    ],
    "file": "index.js",
-   "line": 7735,
+   "line": 7875,
    "area": "content",
    "permission": "requireAuth",
    "calledBy": []
@@ -2283,7 +2286,7 @@
    "path": "/content/placeholders",
    "guards": [],
    "file": "index.js",
-   "line": 7642,
+   "line": 7782,
    "area": "content",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -2754,7 +2757,7 @@
     "requireAuth"
    ],
    "file": "index.js",
-   "line": 10132,
+   "line": 10272,
    "area": "Club data (whole-club load/save)",
    "permission": "requireAuth",
    "calledBy": [
@@ -2771,7 +2774,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 10682,
+   "line": 10822,
    "area": "Club data (whole-club load/save)",
    "permission": "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2785,7 +2788,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 10295,
+   "line": 10435,
    "area": "Club data (whole-club load/save)",
    "permission": "Signed in + role check (requireAuth, requireAdminRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2797,7 +2800,7 @@
     "requireAuth"
    ],
    "file": "index.js",
-   "line": 10265,
+   "line": 10405,
    "area": "Club data (whole-club load/save)",
    "permission": "requireAuth",
    "calledBy": []
@@ -2811,10 +2814,25 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 10368,
+   "line": 10508,
    "area": "Club data (whole-club load/save)",
    "permission": "Signed in + role check (requireAuth, requireWriteRole, requireBillingWriteAccess)",
    "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/demo-activity",
+   "guards": [
+    "requireStrictAuth"
+   ],
+   "file": "index.js",
+   "line": 7123,
+   "area": "demo-activity",
+   "permission": "Signed in (scope checked inside the handler)",
+   "calledBy": [
+    "Athlete App",
     "Coaching Software"
    ]
   },
@@ -2825,7 +2843,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6838,
+   "line": 6952,
    "area": "entitlements",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2840,7 +2858,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 9963,
+   "line": 10103,
    "area": "feedback",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -2855,7 +2873,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 9980,
+   "line": 10120,
    "area": "feedback",
    "permission": "Signed in + role check (requireAdminRateLimit)",
    "calledBy": []
@@ -2869,7 +2887,7 @@
     "requireAdminRateLimit"
    ],
    "file": "index.js",
-   "line": 10023,
+   "line": 10163,
    "area": "feedback",
    "permission": "Primary software owner only",
    "calledBy": []
@@ -2883,7 +2901,7 @@
     "requireBillingWriteAccess"
    ],
    "file": "index.js",
-   "line": 10071,
+   "line": 10211,
    "area": "fixtures",
    "permission": "Signed in + role check (requireWriteRole, requireBillingWriteAccess)",
    "calledBy": []
@@ -2895,7 +2913,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6488,
+   "line": 6602,
    "area": "guardian",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2909,7 +2927,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6496,
+   "line": 6610,
    "area": "guardian",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2923,7 +2941,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6473,
+   "line": 6587,
    "area": "guardian",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2937,7 +2955,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 6458,
+   "line": 6572,
    "area": "guardian",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -2994,7 +3012,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 4487,
+   "line": 4592,
    "area": "Owner administration",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -3009,7 +3027,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 4429,
+   "line": 4534,
    "area": "Owner administration",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -3024,7 +3042,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 4466,
+   "line": 4571,
    "area": "Owner administration",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -3039,7 +3057,22 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "index.js",
-   "line": 4380,
+   "line": 4485,
+   "area": "Owner administration",
+   "permission": "Primary software owner only",
+   "calledBy": [
+    "Coaching Software"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/owner/demo-activity",
+   "guards": [
+    "requireStrictAuth",
+    "requireSoftwareOwnerRole"
+   ],
+   "file": "index.js",
+   "line": 7139,
    "area": "Owner administration",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -3207,7 +3240,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 8044,
+   "line": 8184,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3221,7 +3254,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 7750,
+   "line": 7890,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -3236,7 +3269,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 8097,
+   "line": 8237,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3250,7 +3283,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 8120,
+   "line": 8260,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -3262,7 +3295,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 7944,
+   "line": 8084,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -3276,7 +3309,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 7895,
+   "line": 8035,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -3290,7 +3323,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 8155,
+   "line": 8295,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3304,7 +3337,7 @@
     "requireStrictAuth"
    ],
    "file": "index.js",
-   "line": 8163,
+   "line": 8303,
    "area": "snapshot",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -3316,7 +3349,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 7867,
+   "line": 8007,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -3330,7 +3363,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 7885,
+   "line": 8025,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -3344,7 +3377,7 @@
     "requireLoginRateLimit"
    ],
    "file": "index.js",
-   "line": 8032,
+   "line": 8172,
    "area": "snapshot",
    "permission": "requireLoginRateLimit",
    "calledBy": [
@@ -3359,7 +3392,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 9519,
+   "line": 9659,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3374,7 +3407,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 9586,
+   "line": 9726,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3389,7 +3422,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 9741,
+   "line": 9881,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -3402,7 +3435,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8633,
+   "line": 8773,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3417,7 +3450,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8602,
+   "line": 8742,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3432,7 +3465,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 5580,
+   "line": 5685,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3447,7 +3480,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 5539,
+   "line": 5644,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3462,7 +3495,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 9340,
+   "line": 9480,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3477,7 +3510,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8986,
+   "line": 9126,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3492,7 +3525,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 5027,
+   "line": 5132,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3507,7 +3540,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 5033,
+   "line": 5138,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": []
@@ -3520,7 +3553,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8746,
+   "line": 8886,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3535,7 +3568,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 8664,
+   "line": 8804,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3550,7 +3583,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 5067,
+   "line": 5172,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3565,7 +3598,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 5063,
+   "line": 5168,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3580,7 +3613,7 @@
     "requireSwimmerRole"
    ],
    "file": "index.js",
-   "line": 9719,
+   "line": 9859,
    "area": "Athlete App",
    "permission": "Signed in (scope checked inside the handler)",
    "calledBy": [
@@ -3592,7 +3625,7 @@
    "path": "/webhooks/brevo/athlete-invites",
    "guards": [],
    "file": "index.js",
-   "line": 4997,
+   "line": 5102,
    "area": "External webhooks",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -3602,7 +3635,7 @@
    "path": "/webhooks/resend/athlete-invites",
    "guards": [],
    "file": "index.js",
-   "line": 472,
+   "line": 510,
    "area": "External webhooks",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -3612,7 +3645,7 @@
    "path": "/webhooks/terra",
    "guards": [],
    "file": "index.js",
-   "line": 530,
+   "line": 569,
    "area": "External webhooks",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": []
@@ -3622,7 +3655,7 @@
    "path": "/website-analytics/collect",
    "guards": [],
    "file": "website-analytics.mjs",
-   "line": 94,
+   "line": 97,
    "area": "Website analytics",
    "permission": "Public (token/secret or rate limit checked inside the handler where relevant)",
    "calledBy": [
@@ -3637,7 +3670,7 @@
     "requireSoftwareOwnerRole"
    ],
    "file": "website-analytics.mjs",
-   "line": 118,
+   "line": 123,
    "area": "Website analytics",
    "permission": "Primary software owner only",
    "calledBy": [
@@ -3715,6 +3748,7 @@
     "AUTH_AUDIT_MAX_ARCHIVE_FILES",
     "AUTH_AUDIT_MAX_BACKUP_FILES",
     "AUTH_AUDIT_MAX_BYTES",
+    "AUTH_AUDIT_RETENTION_DAYS",
     "AUTH_AUTO_HEAL_SWIMMER_BINDINGS",
     "AUTH_CSRF_COOKIE_NAME",
     "AUTH_ENABLE_DEMO_SEED_USERS",
@@ -5366,6 +5400,7 @@
      "GET /owner/console/health",
      "GET /owner/console/sales",
      "GET /auth/audit/events",
+     "GET /owner/demo-activity",
      "GET /feedback",
      "GET /db/ownership-summary",
      "GET /owner/investor/invites",

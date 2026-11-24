@@ -22,6 +22,7 @@ import { applyPersonalTrainingChanges, emptyPersonalTraining, listPersonalTraini
 import { buildClubResults, buildSelfReportedProgress, testProtocols } from './athlete-tests-races.mjs';
 import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
 import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
+import { DEMO_ACTIVITY_ACCOUNTS, acceptDemoActivity, appendDemoActivity, buildDemoActivityReport, createActiveTimeBudget, eraseBrowserFromDemoActivity, pruneDemoActivity, readDemoActivity, verifiedGeoFrom } from './demo-activity.mjs';
 import * as athleteHomeProjectionModule from './athlete-home-projection.mjs';
 import { usernameProblem, normalizeUsername, renameSwimmerLinks, hasActiveWearable } from './account-username.mjs';
 import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
@@ -69,6 +70,16 @@ const AUTH_AUDIT_BACKUP_DIR = path.join(AUTH_AUDIT_DIR, 'backups');
 const MAX_DB_SNAPSHOTS = 15;
 const AUTH_AUDIT_MAX_BYTES = Math.max(64 * 1024, Number.parseInt(process.env.AUTH_AUDIT_MAX_BYTES || `${2 * 1024 * 1024}`, 10) || (2 * 1024 * 1024));
 const AUTH_AUDIT_MAX_ARCHIVE_FILES = Math.max(1, Number.parseInt(process.env.AUTH_AUDIT_MAX_ARCHIVE_FILES || '30', 10) || 30);
+// Time-based expiry of rotated audit archives and audit backups is OFF unless AUTH_AUDIT_RETENTION_DAYS is set
+// (owner decision 24-11-2026: no historical audit record is deleted until the retention policy is approved).
+// When set, the minimum is 30 days. The existing count limits (AUTH_AUDIT_MAX_ARCHIVE_FILES,
+// AUTH_AUDIT_MAX_BACKUP_FILES) apply as before either way.
+const AUTH_AUDIT_RETENTION_DAYS = (() => {
+	const raw = String(process.env.AUTH_AUDIT_RETENTION_DAYS || '').trim();
+	if (!raw) return 0;
+	const days = Number.parseInt(raw, 10);
+	return Number.isFinite(days) && days > 0 ? Math.max(30, days) : 0;
+})();
 const AUTH_AUDIT_FETCH_MAX_ROWS = Math.max(50, Number.parseInt(process.env.AUTH_AUDIT_FETCH_MAX_ROWS || '1000', 10) || 1000);
 const AUTH_AUDIT_MAX_BACKUP_FILES = Math.max(1, Number.parseInt(process.env.AUTH_AUDIT_MAX_BACKUP_FILES || '30', 10) || 30);
 const BILLING_CATALOG_MAX_BACKUP_FILES = Math.max(1, Number.parseInt(process.env.BILLING_CATALOG_MAX_BACKUP_FILES || '40', 10) || 40);
@@ -213,6 +224,7 @@ const DEMO_VIEW_ONLY_USERNAMES = new Set(['demo.coach', 'marco']);
 const DEMO_VIEW_ONLY_OPEN_POSTS = new Set([
 	'/auth/login', '/auth/logout', '/auth/presence/ping', '/auth/popup-exchange',
 	'/athlete-invites/preview', '/swimmer/capability/compute', '/coach/athlete-invites/email-preview', '/website-analytics/collect',
+	'/demo-activity',
 ]);
 function isDemoViewOnlyUsername(username) {
 	return DEMO_VIEW_ONLY_USERNAMES.has(String(username || '').trim().toLowerCase());
@@ -487,6 +499,7 @@ app.post('/webhooks/resend/athlete-invites', express.raw({ type: '*/*', limit: '
 
 // This anonymous collection route must never inherit the larger application JSON body allowance.
 app.use('/website-analytics/collect', express.json({ limit: '1kb' }));
+app.use('/demo-activity', express.json({ limit: '4kb' }));
 app.use(express.json({ limit: '25mb' }));
 app.use(helmet());
 
@@ -2745,6 +2758,24 @@ function rotateAuthAuditIfNeeded() {
 	} catch {
 		// Ignore rotation failures to keep auth flow available.
 	}
+	pruneAuthAuditByAge();
+}
+
+// Time-based retention: archived and backup audit files whose last write is older than the retention are deleted.
+function pruneAuthAuditByAge(now = Date.now()) {
+	if (!AUTH_AUDIT_RETENTION_DAYS) return; // opt-in only (see AUTH_AUDIT_RETENTION_DAYS)
+	const cutoff = now - AUTH_AUDIT_RETENTION_DAYS * 86400000;
+	for (const [dir, pattern] of [[AUTH_AUDIT_DIR, /^events-.*\.jsonl$/i], [AUTH_AUDIT_BACKUP_DIR, /^auth-audit-backup-.*\.jsonl$/i]]) {
+		try {
+			if (!fs.existsSync(dir)) continue;
+			for (const name of fs.readdirSync(dir).filter((entry) => pattern.test(entry))) {
+				const fullPath = path.join(dir, name);
+				if (fs.statSync(fullPath).mtimeMs < cutoff) fs.unlinkSync(fullPath);
+			}
+		} catch {
+			// Best-effort retention; never blocks sign-in.
+		}
+	}
 }
 
 function pruneAuthAuditFiles(paths, keepCount) {
@@ -2780,6 +2811,7 @@ function createAuthAuditBackupIfDue() {
 
 		const nextBackups = [backupPath, ...backups.map((entry) => entry.fullPath)];
 		pruneAuthAuditFiles(nextBackups, AUTH_AUDIT_MAX_BACKUP_FILES);
+		pruneAuthAuditByAge();
 	} catch {
 		// Ignore backup failures to keep auth flow available.
 	}
@@ -2790,7 +2822,9 @@ function appendAuthAuditEvent({ action, req, status = 'info', target = '', reaso
 		ensureStorageLayout();
 		const resolvedActor = sanitizeAuditText(actor || req?.auth?.username || 'anonymous', 'anonymous');
 		const resolvedActorRole = sanitizeAuditText(actorRole || req?.auth?.role || 'unknown', 'unknown');
-		const ip = sanitizeAuditText(resolveClientKey(req), 'unknown');
+		const auditAddresses = resolveAuditAddresses(req);
+		const ip = sanitizeAuditText(auditAddresses.ip, 'unknown');
+		const clientNetworkUnverified = sanitizeAuditText(auditAddresses.clientNetworkUnverified, '');
 		const method = sanitizeAuditText(req?.method || '', '');
 		const routePath = sanitizeAuditText(req?.path || '', '');
 		const payload = {
@@ -2802,6 +2836,7 @@ function appendAuthAuditEvent({ action, req, status = 'info', target = '', reaso
 			target: sanitizeAuditText(target, ''),
 			reason: sanitizeAuditText(reason, ''),
 			ip,
+			...(clientNetworkUnverified ? { clientNetworkUnverified } : {}),
 			method,
 			path: routePath,
 			details: details && typeof details === 'object' ? details : {},
@@ -2905,6 +2940,23 @@ function readAuthAuditEvents(limit = 250, filters = {}) {
 	}
 
 	return rows;
+}
+
+// Audit addresses (23-11-2026). The left part of X-Forwarded-For is written by the browser and can be anything,
+// so it is never recorded as the client's address. "ip" is the right-most entry, added by our own hosting proxy
+// (or the socket peer when there is no proxy); the address the proxy chain reports for the client is kept only
+// truncated to its network (/24 for IPv4, /48 for IPv6) and labelled unverified.
+function truncateToNetwork(address) {
+	const value = String(address || '').trim().replace(/^::ffff:/i, '');
+	if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return `${value.split('.').slice(0, 3).join('.')}.0/24`;
+	if (value.includes(':')) { const parts = value.split(':').filter(Boolean).slice(0, 3); return parts.length ? `${parts.join(':')}::/48` : ''; }
+	return '';
+}
+function resolveAuditAddresses(req) {
+	const chain = String(req?.headers?.['x-forwarded-for'] || '').split(',').map((part) => part.trim()).filter(Boolean);
+	const socketAddress = String(req?.socket?.remoteAddress || req?.ip || '').trim();
+	if (!chain.length) return { ip: socketAddress || 'unknown', clientNetworkUnverified: '' };
+	return { ip: chain[chain.length - 1], clientNetworkUnverified: chain.length > 1 ? truncateToNetwork(chain[chain.length - 2]) : '' };
 }
 
 function resolveClientKey(req) {
@@ -6661,6 +6713,40 @@ app.get('/auth/presence/summary', requireStrictAuth, requireSoftwareOwnerRole, (
 	res.status(200).json(getAuthPresenceSummary());
 });
 
+// Demo visitor activity (demo-activity.mjs): only the demonstration accounts send it; only the primary
+// Software Owner reads it. Location only from the signed Netlify header; never an IP address.
+const demoActivityBudget = createActiveTimeBudget();
+// 90-day retention: expired day files are deleted at start and once a day, not only when new visits arrive.
+const pruneDemoActivitySafely = () => { try { pruneDemoActivity(STORAGE_ROOT); } catch { /* retried tomorrow */ } };
+pruneDemoActivitySafely();
+setInterval(pruneDemoActivitySafely, 24 * 60 * 60 * 1000).unref();
+app.post('/demo-activity', requireStrictAuth, (req, res) => {
+	const account = String(req.auth?.username || '').trim().toLowerCase();
+	if (!DEMO_ACTIVITY_ACCOUNTS[account]) {
+		res.status(403).json({ error: 'Activity is recorded only for demonstration accounts.' });
+		return;
+	}
+	const geo = verifiedGeoFrom(req.headers, process.env.DEMO_GEO_SHARED_SECRET || '');
+	const result = acceptDemoActivity({ account, csrf: req.auth?.csrf, body: req.body, geo, activeBudget: demoActivityBudget });
+	if (!result.ok) {
+		res.status(400).json({ error: result.error });
+		return;
+	}
+	try {
+		if (result.erase) eraseBrowserFromDemoActivity(STORAGE_ROOT, result.erase);
+		appendDemoActivity(STORAGE_ROOT, result.records);
+	} catch { /* statistics never block the demo */ }
+	res.status(200).json({ ok: true, recorded: result.records.length, locationVerified: Boolean(geo) });
+});
+
+app.get('/owner/demo-activity', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
+	const sinceIso = new Date(Date.now() - 90 * 86400000).toISOString();
+	const logins = readAuthAuditEvents(AUTH_AUDIT_FETCH_MAX_ROWS, { action: 'login_success' })
+		.filter((row) => DEMO_ACTIVITY_ACCOUNTS[String(row?.target || row?.actor || '').toLowerCase()] && String(row?.at || '') >= sinceIso).length;
+	res.set('Cache-Control', 'no-store');
+	res.status(200).json(buildDemoActivityReport(readDemoActivity(STORAGE_ROOT), { logins }));
+});
+
 registerWebsiteAnalytics(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole, resolveClientKey });
 
 app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {
@@ -9020,6 +9106,7 @@ app.put('/db', requireAuth, requireWriteRole, requireBillingWriteAccess, (req, r
 
 const server = app.listen(PORT, () => {
 	console.log(`Server running at http://localhost:${PORT}/db`);
+	console.log(`[auth-audit] time-based expiry of audit archives and backups: ${AUTH_AUDIT_RETENTION_DAYS ? `after ${AUTH_AUDIT_RETENTION_DAYS} days` : 'off (AUTH_AUDIT_RETENTION_DAYS not set); count limits only'}`);
 	console.log(`Website placeholders feed at http://localhost:${PORT}/content/placeholders`);
 	autoHealSwimmerBindingsAtStartup();
 });
