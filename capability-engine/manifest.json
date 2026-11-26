@@ -1,7 +1,7 @@
 {
   "purpose": "Exact copy of the AthlyraX capability engine (and the Robustness v3.2 demo repairs run at production start) from the website repository, run on the server for the Athlete App. Do not edit here: change the website source and re-copy.",
   "sourceRepository": "Sigict/athlyrax-v6-private",
-  "sourceCommit": "785a19e3e54c9538f50e07888de88b07b3bf3e96",
+  "sourceCommit": "a61f375ac4bbe1f33299d3d37e3b74418f8b2a63",
   "files": {
     "src/data/demoProgrammeEnergyRepairManifest.js": "930e09b637cdbfc4506802737b9f4cb0bf265b4a94301382695dcaaf069f1eaa",
     "src/data/efficiencyReference.js": "4040a22a51d9078562f4fe5df8f49656017d835fc2555e8158cbd3ec9199d975",
@@ -48,13 +48,13 @@
     "src/utils/swimmingStrokeMetrics.js": "49a0867865d3c328d4d3a1d80c0c193cdf63554d57924bd4c7a54ae9949c618b",
     "src/utils/syntheticStrokeModelV2.js": "0019f606a4dfa01dfeb43edb90b8c02adfec9ca395c4d7c5c992c9a59d9c52b5",
     "src/utils/testTemplateCatalog.js": "fcbca5accfd18a8830abd7a10d6c4608ef4ad7a4420a1ba55613d5cee5309b07",
-    "src/utils/trainingGraphEvidence.js": "d4f99bd56081d2df21e3ff5f183db709cac68da091531bd925856096fd866100",
+    "src/utils/trainingGraphEvidence.js": "f2f7f2406db816b417cb6201bbfe612cdaf6238767d02b05adc2f6f822a1e067",
     "src/utils/volumeConsistency.js": "b866b761d8323c91e5e5225d67dadcf3fc4361d46df96787e3e8ebff3c503496",
     "src/utils/worldAquaticsPoints.js": "c1bed7834b3d7de10036fc962ad5da6931a9ecdb8a3835c6fda448b955a20b13"
   },
   "experimentalV02": {
-    "note": "EXPERIMENTAL isolated branch: capability engine v0.2 files copied from the website working tree of branch experimental/capability-v02-20261126 (base commit below). Not for production.",
-    "websiteBaseCommit": "3c4b4dbe3749e210bed258cb672993bf9c16aa90",
+    "note": "Capability v0.2.2 release candidate: engine files copied byte-identical from the website release branch release/capability-v022-20261126 at sourceCommit. Deploy only together with that website release (owner approval required).",
+    "websiteCommit": "a61f375ac4bbe1f33299d3d37e3b74418f8b2a63",
     "files": [
       "src/utils/swimmerTrainingDeliveryRatios.js",
       "src/utils/capabilityV02/calibration.js",
