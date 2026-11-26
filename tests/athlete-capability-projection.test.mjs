@@ -54,17 +54,20 @@ test('athlete projection exposes no invented capability when no saved server sna
 });
 
 // ATHLYRAX_ATHLETE_CAPABILITY_SPEED_LEVEL
-test('athlete capability follows the ISP speed-level rule: no timed swim -> consistency areas Not Scored; a timed swim scales them', async () => {
+// EXPERIMENTAL v0.2 branch (replaces the previous engine's speed-level-rule test): a new timed swim is recalculated
+// at once and changes only the domain its protocol belongs to (R2: M100 -> Anaerobic), on the absolute World Aquatics
+// points / 10 scale; no other level domain changes.
+test('athlete capability recalculates a new M100 into Anaerobic only, on the absolute scale', async () => {
   const demo = await import('../scripts/demo-showcase-dataset.mjs');
   const cap = await import('../athlete-club-capability.mjs');
   const db = demo.buildDemoTenantSeed();
   const s = db.swimmers[0];
   const before = cap.buildClubCapabilityProfile(db, s, { tenantId: 'demo' });
-  const aerobic = (p) => p.axes.find((a) => a.id === 'aerobic_capacity');
-  assert.equal(aerobic(before).value, null);
-  assert.match(aerobic(before).reasons[0], /Needs a timed test or race/);
+  const axis = (p, id) => p.axes.find((a) => a.id === id);
   const d = before.calculationDate;
-  db.tests = [...(db.tests || []), { id: 't-max100', swimmerId: s.id, date: d, testDate: d, templateId: 'builtin-test-max', testItemKey: 'M100', testName: 'M100', category: 'Swimming', repResults: [{ overallTime: '1:02.50', overallStrokeCount: '58' }], resultTime: '1:02.50', distance: 100, stroke: 'free', capabilityScoringEligible: true, completed: true, status: 'completed' }];
+  db.tests = [...(db.tests || []), { id: 't-max100', swimmerId: s.id, date: d, testDate: d, templateId: 'builtin-test-max', templateName: 'Max', testItemKey: 'M100', testName: 'M100', category: 'Swimming', repResults: [{ overallTime: '1:02.50', overallStrokeCount: '58' }], resultTime: '1:02.50', distance: 100, stroke: 'free', capabilityScoringEligible: true, completed: true, status: 'completed' }];
   const after = cap.buildClubCapabilityProfile(db, s, { tenantId: 'demo' });
-  assert.ok(aerobic(after).value > 0 && aerobic(after).value < 90, `aerobic is speed-scaled, not saturated: ${aerobic(after).value}`);
+  assert.notEqual(axis(after, 'anaerobic_capacity').value, axis(before, 'anaerobic_capacity').value, 'Anaerobic recalculated');
+  assert.ok(axis(after, 'anaerobic_capacity').value > 0 && axis(after, 'anaerobic_capacity').value < 90, `absolute scale, not saturated: ${axis(after, 'anaerobic_capacity').value}`);
+  for (const id of ['aerobic_capacity', 'power_speed_expression']) assert.equal(axis(after, id).value, axis(before, id).value, `${id} unchanged by an M100`);
 });
