@@ -97,6 +97,7 @@ for (const relative of [
   'scripts/data-safety-preload.mjs',
   'index.js',
   'website-analytics.mjs',
+  'model-calibration.mjs',
   'scripts/storage-path-contract.mjs',
   'scripts/migrate-storage-once.mjs',
   'scripts/approve-storage-layout.mjs',

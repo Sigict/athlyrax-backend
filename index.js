@@ -24,6 +24,7 @@ import { resolveLinkedSwimmer } from './athlete-home-projection.mjs';
 import * as athleteTenantRegistry from './athlete-tenant-registry.mjs';
 import { DEMO_ACTIVITY_ACCOUNTS, createActiveTimeBudget, eraseBrowserFromDemoActivity, pruneDemoActivity, readDemoActivity, verifiedGeoFrom } from './demo-activity.mjs';
 import { buildDemoStatsReport, createDemoStatsCollector, pruneDemoStats, testMarkerValid } from './demo-stats.mjs';
+import { registerModelCalibration } from './model-calibration.mjs';
 import * as athleteHomeProjectionModule from './athlete-home-projection.mjs';
 import { usernameProblem, normalizeUsername, renameSwimmerLinks, hasActiveWearable } from './account-username.mjs';
 import { checkManagedAcceptance, managedUserRecord, issueManageCode, verifyManageCode, isGuardianManaged } from './athlete-guardian-managed.mjs';
@@ -6778,6 +6779,9 @@ app.get('/owner/demo-activity', requireStrictAuth, requireSoftwareOwnerRole, (re
 });
 
 registerWebsiteAnalytics(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole, resolveClientKey });
+// Mathematical calibration versions (Final Model C): owner-only drafts / approval / activation, read-only active version.
+registerModelCalibration(app, { storageRoot: STORAGE_ROOT, requireStrictAuth, requireSoftwareOwnerRole,
+	audit: (req, action, details) => appendAuthAuditEvent({ action, req, status: 'success', details }) });
 
 app.post('/auth/invites', requireStrictAuth, requireAdminRole, requireAdminRateLimit, (req, res) => {
 	if (!AUTH_ALLOW_COACH_INVITES) {

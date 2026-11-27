@@ -9,6 +9,10 @@ import { officialCapabilityRadar } from './capability-engine/src/utils/officialC
 import { swimmerSpeedLevel } from './capability-engine/src/utils/athlyraxCapabilityEngine.js';
 import { isSyntheticDemoDb } from './capability-engine/src/utils/demoSetSendOffs.js';
 import { demoRobustnessV32Pending } from './capability-engine/src/utils/demoRobustnessV32Upgrade.js';
+import { computeModelCProfile } from './capability-engine/src/utils/modelC/engine.js';
+import { WORLD_RECORD_BASE_TIMES } from './capability-engine/src/data/worldRecordBaseTimes.js';
+import { ELITE_STROKE_RATE_PROVISIONAL } from './capability-engine/src/data/efficiencyReference.js';
+import { activeModelConfig } from './model-calibration.mjs';
 
 // Owner decision 22-11-2026: no "synthetic" wording on any screen; the demo club's profile shows the same source line as
 // every club. Until the one-time server update of the demo club has completed, the profile says so explicitly.
@@ -40,7 +44,10 @@ export function currentCapabilitySeason(config = swimmingReportConfig, today = n
   };
 }
 
-export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = currentCapabilitySeason(), today = new Date().toISOString().slice(0, 10), tenantId = '' } = {}) {
+export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = currentCapabilitySeason(), today = new Date().toISOString().slice(0, 10), tenantId = '', modelConfig } = {}) {
+  // Same mathematical model as the coach's Analysis / ISP: the Software Owner's ACTIVE version (Final Model C) or,
+  // with none active, the original engine. Model C uses the identical engine code (capability-engine copy).
+  const model = modelConfig === undefined ? activeModelConfig() : modelConfig;
   const swimmerId = text(swimmer.id);
   if (!swimmerId || !season.start || !season.end) return null;
   const squadId = text(swimmer.currentSquadId || swimmer.squadId || asArray(swimmer.currentSquadIds)[0] || asArray(swimmer.squadIds)[0]) || 'all';
@@ -72,9 +79,14 @@ export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = cur
   // Displayed exactly as the club's ISP displays them (swimmersIspEvidence): the official ISP radar
   // rule scores an axis only with a finite score AND evidence; everything else is Not Scored.
   const official = officialCapabilityRadar(snapshot, asArray(snapshot.axes).map((axis) => axis.key));
+  const mc = model && model.engine === 'model-c' ? computeModelCProfile({
+    db, swimmerId, swimmerSex: swimmer?.sex || swimmer?.gender,
+    records: asArray(snapshot.axes).flatMap((axis) => asArray(axis?.metricRecords)), asOf: calculationDate, cfg: model,
+    worldRecords: WORLD_RECORD_BASE_TIMES, eliteRates: ELITE_STROKE_RATE_PROVISIONAL,
+  }) : null;
   const axes = asArray(snapshot.axes).map((axis) => {
-    const officialScore = official?.scores?.[axis.key];
-    const evidenceCount = Math.max(0, Number(axis?.evidenceCount) || 0);
+    const officialScore = mc ? mc.integrated?.[axis.key] : official?.scores?.[axis.key];
+    const evidenceCount = mc ? Math.max(0, Number(mc.counts?.integrated?.[axis.key]) || 0) : Math.max(0, Number(axis?.evidenceCount) || 0);
     const scored = evidenceCount > 0 && Number.isFinite(officialScore);
     return {
       id: text(axis.key || axis.id),
@@ -89,8 +101,9 @@ export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = cur
   });
   const scored = axes.filter((axis) => axis.scored);
   const loadSummary = snapshot.loadSummary || {};
+  const modelScore = mc && scored.length ? scored.reduce((sum, axis) => sum + Number(mc.integrated[axis.id]), 0) / scored.length : null;
   return {
-    score: roundOrNull(snapshot.integratedScore),
+    score: mc ? roundOrNull(modelScore) : roundOrNull(snapshot.integratedScore),
     trend: null,
     headline: snapshot.integratedLabel || 'Integrated Capability',
     summary: scored.length
@@ -113,8 +126,9 @@ export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = cur
       competitions: Number(loadSummary.completedCompetitionCount) || 0,
       trainingSets: Number(loadSummary.canonicalSetCount) || 0,
     },
-    engineVersion: text(snapshot.engineVersion),
-    calibrationVersion: text(snapshot.calibrationVersion),
+    engineVersion: mc ? text(mc.engineVersion) : text(snapshot.engineVersion),
+    calibrationVersion: mc ? `${text(mc.referenceVersion)}` : text(snapshot.calibrationVersion),
+    ...(mc ? { integratedUnrounded: Object.fromEntries(Object.entries(mc.integrated).map(([k, v]) => [k, Number.isFinite(v) ? v : null])), effectiveWeights: mc.effectiveWeights.integrated } : {}),
     axes,
   };
 }
