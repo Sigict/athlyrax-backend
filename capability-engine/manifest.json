@@ -1,7 +1,7 @@
 {
   "purpose": "Exact copy of the AthlyraX capability engine (and the Robustness v3.2 demo repairs run at production start) from the website repository, run on the server for the Athlete App. Do not edit here: change the website source and re-copy.",
   "sourceRepository": "Sigict/athlyrax-v6-private",
-  "sourceCommit": "785a19e3e54c9538f50e07888de88b07b3bf3e96",
+  "sourceCommit": "a61f375ac4bbe1f33299d3d37e3b74418f8b2a63",
   "files": {
     "src/data/demoProgrammeEnergyRepairManifest.js": "930e09b637cdbfc4506802737b9f4cb0bf265b4a94301382695dcaaf069f1eaa",
     "src/data/efficiencyReference.js": "4040a22a51d9078562f4fe5df8f49656017d835fc2555e8158cbd3ec9199d975",
@@ -9,11 +9,18 @@
     "src/sports/swimming/swimmingReports.js": "88003e3634299410215cd8be34f189de6dc8423b3a70f95767a7c5c1dc54479c",
     "src/utils/athlyraxCapabilityEngine.js": "700b12853910da31f999697a3fcce02f007c514a546170f87a1b14b65a225ba4",
     "src/utils/attendanceIdentity.js": "c5bdc193d2aab06da302624ad87f430f114789085f47c7af766ace0aaaa220a2",
+    "src/utils/axisModel.js": "b247446d59409611361b12a70107e89159af535921356626bf88335c4c4ac030",
     "src/utils/canonicalScheduleRows.js": "b6ce5ab5e647c13a3a5f3c7d55e7e08a8f162d87fe244910cd6a4a8c11437252",
     "src/utils/canonicalSwimmerEvidence.js": "db7b2bc4de9d02f86a6e1497d3a897557abda72e3320b31fa00bd358a65df568",
     "src/utils/canonicalTrainingEnergyAuthority.js": "b9635db69d5d8050e3851c180b9b5a96defc6e901343eb6a1edc5cc4dbdd0b00",
     "src/utils/canonicalTrainingSessionLinks.js": "17fa778912f8c67b0e4dffaf9475c95d7c26138d97be92279508802190af5ddf",
     "src/utils/canonicalTrainingSetRows.js": "036589c3f21cd16a0b7541b8a9ee14f7f95ff186d3effa5822922665cbac16d6",
+    "src/utils/capabilityV02/appAdapter.js": "5872e2c1e3f9a301478b3a2336117a6159fcd8110ea971d16e110791b0583146",
+    "src/utils/capabilityV02/calibration.js": "c2af059369c84bfb4463924aaa3071d1c1ea200d87940bc992091c13f270563f",
+    "src/utils/capabilityV02/engine.js": "276a81a6b25ad92865c90bd72071db0fb4dabab094e10e5f710c4e37f5bb90a3",
+    "src/utils/capabilityV02/ingest.js": "53ba7f4aa45900878e481a7ed3d8c90be96498199e827fb43a1ef2bb820b97a7",
+    "src/utils/capabilityV02/ledger.js": "6eaab372ff5658e386f83552edf8be58b6c34cfb815cf622e9a3745902a74847",
+    "src/utils/capabilityV02/metrics.js": "03062b50c87862e48bc33d1efb5afa72f458ba78a65f0e7f8b8a0106d551b4ab",
     "src/utils/competitionCourse.js": "e98eefcbd64cae03ab7b7f2d98e6eb9d486eb52dac3a9dbea0d237c1d438d251",
     "src/utils/coursePersonalBests.js": "8653b00ace13d9dd54df299626ce410ed30f55b4a2126eafa7a7be76b1c86e68",
     "src/utils/demoCompetitionCourse.js": "4f3a6669a5bda7d70e17124468c24d3bf7418491c3eac989e05832a8ae30cdf6",
@@ -37,12 +44,26 @@
     "src/utils/scopedCapabilitySnapshot.js": "037ed87cc5071692079807be6b028695b8c8a5cc63ca133350e88d41064198d3",
     "src/utils/swimmerSquadHistory.js": "bf8958424931308bc85a7bfe2d85c2dd4a4fe8ef6c9f0dee5f269006fdb1a640",
     "src/utils/swimmerTrainingDelivery.js": "7d810439fedf2d9a230246d62ecb648e7f885970bb6bbae6ce9ddedccaec7a43",
-    "src/utils/swimmerTrainingDeliveryRatios.js": "4109f99509c62be66eb5425001057e8a48d342e927a957515c94f6fb808db37e",
+    "src/utils/swimmerTrainingDeliveryRatios.js": "25eacc5d2a0e7930f6a94be9fe93ec56b3d40b3a8fc82e566b5d99d07970ee0f",
     "src/utils/swimmingStrokeMetrics.js": "49a0867865d3c328d4d3a1d80c0c193cdf63554d57924bd4c7a54ae9949c618b",
     "src/utils/syntheticStrokeModelV2.js": "0019f606a4dfa01dfeb43edb90b8c02adfec9ca395c4d7c5c992c9a59d9c52b5",
     "src/utils/testTemplateCatalog.js": "fcbca5accfd18a8830abd7a10d6c4608ef4ad7a4420a1ba55613d5cee5309b07",
-    "src/utils/trainingGraphEvidence.js": "d4f99bd56081d2df21e3ff5f183db709cac68da091531bd925856096fd866100",
+    "src/utils/trainingGraphEvidence.js": "f2f7f2406db816b417cb6201bbfe612cdaf6238767d02b05adc2f6f822a1e067",
     "src/utils/volumeConsistency.js": "b866b761d8323c91e5e5225d67dadcf3fc4361d46df96787e3e8ebff3c503496",
     "src/utils/worldAquaticsPoints.js": "c1bed7834b3d7de10036fc962ad5da6931a9ecdb8a3835c6fda448b955a20b13"
+  },
+  "experimentalV02": {
+    "note": "Capability v0.2.2 release candidate: engine files copied byte-identical from the website release branch release/capability-v022-20261126 at sourceCommit. Deploy only together with that website release (owner approval required).",
+    "websiteCommit": "a61f375ac4bbe1f33299d3d37e3b74418f8b2a63",
+    "files": [
+      "src/utils/swimmerTrainingDeliveryRatios.js",
+      "src/utils/capabilityV02/calibration.js",
+      "src/utils/capabilityV02/metrics.js",
+      "src/utils/capabilityV02/ingest.js",
+      "src/utils/capabilityV02/ledger.js",
+      "src/utils/capabilityV02/engine.js",
+      "src/utils/capabilityV02/appAdapter.js",
+      "src/utils/axisModel.js"
+    ]
   }
 }

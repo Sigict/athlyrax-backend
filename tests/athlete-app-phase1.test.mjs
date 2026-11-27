@@ -25,30 +25,32 @@ test('the server copy of the capability engine is byte-identical to its manifest
   assert.match(manifest.sourceCommit, /^[0-9a-f]{40}$/);
 });
 
-test('club profile = the ISP engine result for the linked swimmer (same call, nothing estimated)', () => {
+// EXPERIMENTAL v0.2 branch: the Athlete App profile is the coach's v0.2 Capability radar (integrated, all sources) for
+// the linked swimmer and season window - the same call the website's Analysis / ISP make. (Replaces the previous
+// engine's contract test: profile == buildScopedAthlyraxCapabilitySnapshot.)
+test('club profile = the v0.2 ISP Capability radar for the linked swimmer (same call, nothing estimated)', async () => {
+  const v02 = await import('../capability-engine/src/utils/capabilityV02/appAdapter.js');
   const swimmer = engineFixtureDb.swimmers[0];
   const profile = buildClubCapabilityProfile(engineFixtureDb, swimmer, { season: SEASON, today: '2026-11-07' });
-  const isp = buildScopedAthlyraxCapabilitySnapshot({
-    db: engineFixtureDb,
-    scope: { swimmerId: swimmer.id, squadId: swimmer.currentSquadId, seasonStartDate: SEASON.start, startDate: SEASON.start, endDate: SEASON.end },
-    activeWindow: { start: SEASON.start, end: SEASON.end },
-    activeAccountId: '', activeTenantId: '', calculationDate: SEASON.end,
-  });
+  const result = v02.evaluateSwimmerForApp({ db: engineFixtureDb, swimmerId: swimmer.id, startDate: SEASON.start, endDate: SEASON.end, asOfDate: SEASON.end });
+  const radars = v02.radarsFromV02(result);
   assert.equal(profile.source, 'club_evidence');
   assert.equal(profile.evidenceType, 'validated');
   assert.equal(profile.axes.length, 8, 'the eight AthlyraX capability axes');
   assert.equal(profile.calculationDate, '2026-08-31', 'season ended: calculated at season end, as the ISP does');
-  assert.equal(profile.score, Math.round(isp.integratedScore));
-  // Same display rule as the ISP (swimmersIspEvidence axisValueRows): official radar score, only with evidence.
-  const official = officialCapabilityRadar(isp, isp.axes.map((axis) => axis.key));
+  assert.equal(profile.score, null, 'no composite number across domains (D11)');
+  assert.equal(profile.experimental, true);
   for (const axis of profile.axes) {
-    const ref = isp.axes.find((row) => row.key === axis.id);
-    const shown = Number(ref.evidenceCount) > 0 && Number.isFinite(official.scores[ref.key]) ? Math.round(official.scores[ref.key]) : null;
+    const shown = radars.counts.integrated[axis.id] > 0 && Number.isFinite(radars.integrated[axis.id]) ? Math.round(radars.integrated[axis.id]) : null;
     assert.equal(axis.value, shown, axis.id);
-    assert.equal(axis.validation, shown === null ? 'Not Scored' : String(ref.validation || 'Not Scored'), `${axis.id} validation`);
-    if (!axis.scored) assert.ok(axis.reasons.length, `${axis.id}: an unscored axis says why`);
+    assert.equal(axis.decision, radars.v02.domains[axis.id].decision, `${axis.id} decision`);
+    if (!axis.scored) assert.equal(axis.validation, 'Not Scored');
   }
-  assert.ok(profile.measuredAxes >= 1 && profile.measuredAxes < 8, 'partial evidence: some axes measured, none invented');
+  assert.equal(profile.measuredAxes, profile.axes.filter((axis) => axis.scored).length);
+  // This fixture holds only NON-catalogue tests ("4x400 aerobic threshold", "8x50 SP sprint") and sets without
+  // swimmer results: v0.2 scores only the fixed battery and recorded swims (R2), so nothing is measured - and nothing is
+  // invented (the previous engine scored these custom tests; documented limitation L-07).
+  assert.equal(profile.measuredAxes, 0);
   assert.equal(profile.fullRadarAvailable, false);
 });
 

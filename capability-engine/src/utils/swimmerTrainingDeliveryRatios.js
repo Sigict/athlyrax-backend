@@ -97,6 +97,8 @@ export function buildSwimmerScheduleDeliveryRatios(db = {}, swimmerId = '') {
   return new Map([...bySchedule.entries()].map(([scheduleId,{row}]) => [
     scheduleId,
     {
+      // The attendance revision these values come from (read-only; added for the experimental v0.2 ledger label).
+      row,
       fraction: attendanceDeliveredFraction(row),
       attended: hasPositiveAttendanceEvidence(row),
       // Partial attendance without recorded metres: completion unknown.

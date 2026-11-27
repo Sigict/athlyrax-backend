@@ -1,12 +1,10 @@
-// Club capability profile for the Athlete App, calculated on the server with the AthlyraX capability
-// engine (an exact copy of the Coaching Software engine in ./capability-engine, see its manifest.json).
-// The call matches the club's Individual Swimmer Profile (ISP): the linked swimmer, their squad and
-// the current season window, so the athlete sees the same evidence-based profile as their coach.
-// Nothing is estimated: axes without enough evidence stay unscored, with the engine's reason.
-import { buildScopedAthlyraxCapabilitySnapshot } from './capability-engine/src/utils/scopedCapabilitySnapshot.js';
+// Club capability profile for the Athlete App, calculated on the server.
+// EXPERIMENTAL isolated branch: the calculation is AthlyraX capability engine v0.2, a byte-identical copy of the
+// website's src/utils/capabilityV02 in ./capability-engine (see manifest.json experimentalV02), so the athlete sees the
+// same evidence-based profile as their coach's Analysis / ISP. Axes without enough evidence stay unscored.
 import { swimmingReportConfig } from './capability-engine/src/sports/swimming/swimmingReports.js';
-import { officialCapabilityRadar } from './capability-engine/src/utils/officialCapabilityRadar.js';
-import { swimmerSpeedLevel } from './capability-engine/src/utils/athlyraxCapabilityEngine.js';
+import { evaluateSwimmerForApp, radarsFromV02, observationsFor, DOMAINS as V02_DOMAINS } from './capability-engine/src/utils/capabilityV02/appAdapter.js';
+import { ATHLYRAX_AXES_SNAKE } from './capability-engine/src/utils/axisModel.js';
 import { isSyntheticDemoDb } from './capability-engine/src/utils/demoSetSendOffs.js';
 import { demoRobustnessV32Pending } from './capability-engine/src/utils/demoRobustnessV32Upgrade.js';
 
@@ -43,56 +41,43 @@ export function currentCapabilitySeason(config = swimmingReportConfig, today = n
 export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = currentCapabilitySeason(), today = new Date().toISOString().slice(0, 10), tenantId = '' } = {}) {
   const swimmerId = text(swimmer.id);
   if (!swimmerId || !season.start || !season.end) return null;
-  const squadId = text(swimmer.currentSquadId || swimmer.squadId || asArray(swimmer.currentSquadIds)[0] || asArray(swimmer.squadIds)[0]) || 'all';
   const calculationDate = season.end < today ? season.end : today;
-  // ATHLYRAX_ATHLETE_CAPABILITY_SPEED_LEVEL: same rule as the club's ISP (ispCanonicalRadars.js).
-  // Consistency metrics are placed on the world-record scale by the swimmer's speed level; with no timed
-  // test or race in the window, the best timed swim of the previous 12 months sets it, and with none at
-  // all those metrics stay Not Scored ("Needs a timed test or race") instead of a raw consistency score.
-  const lookbackStart = new Date(Date.parse(`${calculationDate}T12:00:00Z`) - 364 * 86400000).toISOString().slice(0, 10);
-  let fallbackSpeedLevel = null;
-  try {
-    const history = buildScopedAthlyraxCapabilitySnapshot({
-      db, scope: { swimmerId, squadId, startDate: '', endDate: calculationDate }, activeWindow: { start: '', end: calculationDate },
-      activeAccountId: '', activeTenantId: text(tenantId), calculationDate,
-    });
-    fallbackSpeedLevel = swimmerSpeedLevel(asArray(history?.axes).flatMap((axis) => asArray(axis?.metricRecords))
-      .filter((record) => text(record?.date).slice(0, 10) >= lookbackStart));
-  } catch { fallbackSpeedLevel = null; }
-  const snapshot = buildScopedAthlyraxCapabilitySnapshot({
-    fallbackSpeedLevel, requireSpeedLevel: true,
-    db,
-    scope: { swimmerId, squadId, seasonStartDate: season.start, startDate: season.start, endDate: season.end },
-    activeWindow: { start: season.start, end: season.end },
-    activeAccountId: '',
-    activeTenantId: text(tenantId),
-    calculationDate,
-  });
-  if (!snapshot || !snapshot.selectedSingleSwimmer) return null;
-  // Displayed exactly as the club's ISP displays them (swimmersIspEvidence): the official ISP radar
-  // rule scores an axis only with a finite score AND evidence; everything else is Not Scored.
-  const official = officialCapabilityRadar(snapshot, asArray(snapshot.axes).map((axis) => axis.key));
-  const axes = asArray(snapshot.axes).map((axis) => {
-    const officialScore = official?.scores?.[axis.key];
-    const evidenceCount = Math.max(0, Number(axis?.evidenceCount) || 0);
-    const scored = evidenceCount > 0 && Number.isFinite(officialScore);
+  // EXPERIMENTAL v0.2 (isolated branch): the Athlete App shows the SAME calculation as the club's Analysis / ISP
+  // (capability-engine/src/utils/capabilityV02, byte-identical to the website; see manifest.json). The integrated
+  // radar (training 0.30 / testing 0.50 / competition 0.20) is shown per axis. No overall composite number is formed.
+  void tenantId;
+  const result = evaluateSwimmerForApp({ db, swimmerId, startDate: season.start, endDate: season.end, asOfDate: calculationDate });
+  if (!result?.domains) return null;
+  const radars = radarsFromV02(result);
+  const labels = Object.fromEntries(ATHLYRAX_AXES_SNAKE.map((axis) => [axis.key, axis.label]));
+  const axes = V02_DOMAINS.map((key) => {
+    const value = radars.integrated[key];
+    const evidenceCount = Math.max(0, Number(radars.counts.integrated[key]) || 0);
+    const scored = evidenceCount > 0 && Number.isFinite(value);
+    const domain = radars.v02.domains[key];
     return {
-      id: text(axis.key || axis.id),
-      label: text(axis.label || axis.name || axis.key),
-      value: scored ? Math.round(officialScore) : null,
-      validation: scored ? text(axis.validation || 'Not Scored') : 'Not Scored',
+      id: key,
+      label: labels[key] || key,
+      value: scored ? Math.round(value) : null,
+      validation: scored ? text(domain?.confidence?.sufficiency || 'measured') : 'Not Scored',
       evidenceCount,
-      confidence: roundOrNull(axis.confidence),
+      confidence: null,
       scored,
-      reasons: asArray(axis.reasons).map(text).filter(Boolean).slice(0, 3),
+      decision: domain?.decision || null,
+      paired: domain?.pairedProfile ? { expression: roundOrNull(domain.pairedProfile.expression), repeatability: roundOrNull(domain.pairedProfile.repeatability) } : null,
+      reasons: [text(domain?.development?.class), text(domain?.development?.plateau)].filter(Boolean).slice(0, 3),
     };
   });
   const scored = axes.filter((axis) => axis.scored);
-  const loadSummary = snapshot.loadSummary || {};
+  const evidence = {
+    tests: new Set(observationsFor(db).observations.filter((o) => o.swimmer === swimmerId && o.source === 'testing' && o.date >= season.start && o.date <= calculationDate).map((o) => o.set_id)).size,
+    competitions: new Set(observationsFor(db).observations.filter((o) => o.swimmer === swimmerId && o.source === 'competition' && o.date >= season.start && o.date <= calculationDate).map((o) => o.set_id)).size,
+    trainingSets: asArray(result.ledger_rows).filter((row) => !row.duplicate_of).length,
+  };
   return {
-    score: roundOrNull(snapshot.integratedScore),
+    score: null,
     trend: null,
-    headline: snapshot.integratedLabel || 'Integrated Capability',
+    headline: 'Integrated Capability (experimental v0.2)',
     summary: scored.length
       ? `${scored.length} of ${axes.length} capability areas measured from your club evidence (${season.label || season.key} season).`
       : `Not enough club evidence yet to measure a capability area (${season.label || season.key} season).`,
@@ -104,17 +89,14 @@ export function buildClubCapabilityProfile(db = {}, swimmer = {}, { season = cur
       : { evidenceType: 'validated', sourceLabel: 'Club evidence: coach-recorded tests, training and competitions' }),
     season,
     calculationDate,
-    confidence: roundOrNull(snapshot.integratedConfidence),
-    fullRadarAvailable: Boolean(snapshot.fullRadarAvailable),
+    confidence: null,
+    fullRadarAvailable: scored.length === axes.length,
     measuredAxes: scored.length,
     totalAxes: axes.length,
-    evidence: {
-      tests: Number(loadSummary.completedTestCount) || 0,
-      competitions: Number(loadSummary.completedCompetitionCount) || 0,
-      trainingSets: Number(loadSummary.canonicalSetCount) || 0,
-    },
-    engineVersion: text(snapshot.engineVersion),
-    calibrationVersion: text(snapshot.calibrationVersion),
+    evidence,
+    engineVersion: text(result.engine),
+    calibrationVersion: text(result.app_calibration || result.calibration),
+    experimental: true,
     axes,
   };
 }

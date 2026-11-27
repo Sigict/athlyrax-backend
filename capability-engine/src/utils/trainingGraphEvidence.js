@@ -26,14 +26,6 @@ export function hasPositiveAttendanceEvidence(row) {
   ].some((value) => value === false);
   if (explicitNegative) return false;
 
-  const explicitPositive = [
-    row?.present,
-    row?.attended,
-    row?.wasPresent,
-    row?.isPresent,
-  ].some((value) => value === true);
-  if (explicitPositive) return true;
-
   const status = String(
     row?.status
     || row?.attendanceStatus
@@ -43,10 +35,21 @@ export function hasPositiveAttendanceEvidence(row) {
     || '',
   ).trim().toLowerCase();
 
+  // An explicitly negative status (absent, excused, ...) is the coach's recorded decision and outranks an older
+  // positive presence flag left on the same record: absence is never counted as delivered training. (Release check C;
+  // every current writer stores status and flags consistently, so only historical contradictory records are affected.)
+  const negativeStatus = /(absent|missed|no[\s-]?show|not[\s-]?completed|planned|scheduled|cancelled|canceled|injured|sick|excused)/i.test(status);
+  if (negativeStatus) return false;
+
+  const explicitPositive = [
+    row?.present,
+    row?.attended,
+    row?.wasPresent,
+    row?.isPresent,
+  ].some((value) => value === true);
+  if (explicitPositive) return true;
+
   if (!status) return false;
-  if (/(absent|missed|no[\s-]?show|not[\s-]?completed|planned|scheduled|cancelled|canceled|injured|sick|excused)/i.test(status)) {
-    return false;
-  }
 
   return /(present|attended|complete|completed|yes|here|late|partial)/i.test(status);
 }

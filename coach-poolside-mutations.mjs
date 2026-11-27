@@ -31,9 +31,22 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
   const normalizedSubmitted = submitted.map((submittedRow) => {
     const swimmerId = text(submittedRow.swimmerId || submittedRow.athleteId);
     const status = text(submittedRow.status).toLowerCase();
-    if (!swimmerId || !['present', 'absent', 'late', 'excused', 'unmarked'].includes(status)) return null;
-    return { swimmerId, status };
+    if (!swimmerId || !['present', 'absent', 'late', 'excused', 'unmarked', 'partial'].includes(status)) return null;
+    // L-07 (v0.2.2): optional completed session volume. Absent from the row = unchanged; null = clear a recorded
+    // value; a number = recorded completed metres against the prescribed session volume.
+    if (!Object.prototype.hasOwnProperty.call(submittedRow, 'deliveredVolume')) return { swimmerId, status };
+    const raw = submittedRow.deliveredVolume;
+    if (raw === null || raw === '') return { swimmerId, status, deliveredVolume: null };
+    const volume = Number(raw); const prescribed = Number(submittedRow.prescribedVolume);
+    if (!Number.isFinite(volume) || volume < 0) return { invalid: 'Completed volume must be a number of metres, 0 or more.' };
+    if (status === 'unmarked') return { invalid: 'Mark attendance before recording completed volume.' };
+    if ((status === 'absent' || status === 'excused') && volume > 0) return { invalid: 'An absent or excused swimmer cannot have completed metres.' };
+    if (!(prescribed > 0)) return { invalid: 'The session has no prescribed volume to record against.' };
+    if (volume > prescribed) return { invalid: `Completed volume exceeds the prescribed ${prescribed} m.` };
+    return { swimmerId, status, deliveredVolume: volume, prescribedVolume: prescribed };
   });
+  const invalidRow = normalizedSubmitted.find((row) => row?.invalid);
+  if (invalidRow) return { ok: false, status: 400, error: invalidRow.invalid };
   if (normalizedSubmitted.some((row) => !row)) {
     return { ok: false, status: 400, error: 'Attendance rows require swimmerId and a supported status.' };
   }
@@ -64,9 +77,12 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
   });
 
   const changedRows = [];
-  for (const { swimmerId, status } of uniqueSubmitted) {
+  const DELIVERED_FIELDS = ['volumeSwam', 'swamVolume', 'completedVolume', 'volumeCompleted', 'deliveredVolume', 'actualVolume'];
+  for (const submittedRow of uniqueSubmitted) {
+    const { swimmerId, status } = submittedRow;
     if (status === 'unmarked') continue;
     const base = existingTargetBySwimmerId.get(swimmerId) || {};
+    const attended = status === 'present' || status === 'late' || status === 'partial';
     const row = {
       ...base,
       id: text(base.id) || `attendance:${link.sessionId || link.scheduleId}:${swimmerId}`,
@@ -75,10 +91,16 @@ export function applyCoachPoolsideAttendance(db = {}, input = {}) {
       scheduleId: link.scheduleId,
       swimmerId,
       status,
-      present: status === 'present' || status === 'late',
+      present: attended,
+      // The submitted status is authoritative: an older `attended` flag must not contradict it.
+      ...(Object.prototype.hasOwnProperty.call(base, 'attended') ? { attended } : {}),
       updatedAt: now,
       updatedBy: actor,
     };
+    if (Object.prototype.hasOwnProperty.call(submittedRow, 'deliveredVolume')) {
+      for (const field of DELIVERED_FIELDS) delete row[field];
+      if (submittedRow.deliveredVolume !== null) { row.volumeSwam = submittedRow.deliveredVolume; row.volumeTotal = submittedRow.prescribedVolume; }
+    }
     retained.push(row);
     changedRows.push(row);
   }
