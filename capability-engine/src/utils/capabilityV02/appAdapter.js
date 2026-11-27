@@ -24,7 +24,7 @@ export const V02_DEPARTURES = Object.freeze([
 export const V02_LABELS = Object.freeze({
   experimental: 'Experimental calculation v0.2 (isolated test version; not validated against real swimmers)',
   underwater: 'Distance per cycle uses an ESTIMATED underwater convention (5 m push-off allowance per wall; dive breakout) unless underwater distance is recorded.',
-  technical: 'Technical Control: provisional rating index (structured coach ratings 1-5 rescaled to 0-100).',
+  technical: 'Technical Control: consistency of pace and stroke count across repetitions and race segments (0-100; previous AthlyraX stability scale), plus structured coach ratings 1-5 rescaled to 0-100 where recorded.',
   modelC: 'Expression (performance level) and Repeatability (retention under the domain\'s repeated task) are different constructs on different scales; they are shown side by side and never combined into one number.',
   training: 'Training radar = training stimulus exposure against the owner-approved reference week (not capability). Axes without an approved reference week are not scored.',
 });
@@ -218,16 +218,16 @@ export { LEVEL_DOMAINS, DOMAINS, CALIBRATION_VERSION, APP_CALIBRATION_VERSION };
 
 // Measured TRAINING-EXECUTION evidence per axis (the recorded swims of ordinary training that feed measured Capability),
 // expressed as app training-set ids. This is the "measured-quality" information shown beside the Training demand
-// graph; it is never part of the Training demand score. Technical Control has no training-based measurement
-// (structured ratings only; D3), so it is never "measured" from repetition times or stroke-count stability.
+// graph; it is never part of the Training demand score. v0.2.3 (owner-approved 27-11-2026): Technical Control is also
+// measured from consistency - the pace and stroke-count stability of a timed set of >= 3 repetitions.
 const TRAINING_EXECUTION_REQUIREMENT = {
-  technical_control: 'a structured technical assessment (training repetition times or stroke-count stability are not technical evidence)',
+  technical_control: 'a timed set of >= 3 repetitions (pace and stroke-count consistency) or a structured technical assessment',
   efficiency: '>= 8 stroke-counted unfatigued freestyle swims over a 0.05 m/s speed range and a 200 m Max speed in the window',
   robustness_of_efficiency: 'a set of >= 4 repetitions with >= 15 counted cycles per repetition',
   aerobic_capacity: 'a timed EN2/EN3 set of >= 4 repetitions (retention)',
   anaerobic_capacity: 'a timed LP/LT set of >= 4 repetitions (retention)',
   power_speed_expression: 'a timed SP set of >= 4 repetitions (retention)',
-  adaptability: 'the same set swum twice within 14 days with a send-off changed by >= 2 %',
+  adaptability: 'the same set swum twice within 14 days with a send-off changed by >= 2 % (tests and races: the same test or event repeated)',
   durability: 'a timed set lasting >= 20 minutes',
 };
 export function trainingExecutionEvidence(result, observations = [], swimmerId = '') {
@@ -237,7 +237,12 @@ export function trainingExecutionEvidence(result, observations = [], swimmerId =
   const eff = result.asof;
   const days = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
   const inTrainingWindow = (date) => date && date >= start && date <= eff && days(date, eff) <= 42;
-  const setOfKey = (k) => (String(k).startsWith('set:') ? [String(k).slice(4)] : String(k).startsWith('pair:') ? String(k).slice(5).split(':') : []);
+  // v0.2.3: "stab:pace:<set>" / "stab:strokes:<set>" are measured consistency items of one training set.
+  const setOfKey = (k) => { const s = String(k);
+    if (s.startsWith('set:')) return [s.slice(4)];
+    if (s.startsWith('pair:')) return s.slice(5).split(':');
+    if (s.startsWith('stab:pace:') || s.startsWith('stab:strokes:')) return [s.slice(s.indexOf(':', 5) + 1)];
+    return []; };
   for (const d of DOMAINS) {
     const keys = result.domains[d].per_source_keys?.training || [];
     let ids = keys.flatMap(setOfKey);
@@ -371,9 +376,20 @@ export function evidenceRecordsByKind(result, observations = [], swimmerId = '')
   const fresh = (o) => (o.nreps || 1) <= 1 || (o.rep || 1) <= Math.max(1, Math.floor((o.nreps || 1) / 3));
   const modelSwims = (src) => mine.filter((o) => (src === 'pooled' || o.source === src) && o.dps && o.speed && o.stroke === 'free' && (o.pool || 25) === 25
     && fresh(o) && o.date >= start && o.date <= eff).map((o) => (o.source === 'competition' ? raceId.get(String(o.set_id)) : String(o.set_id)));
+  const pyStr = (x) => (x === null || x === undefined ? 'None' : String(x));
   const recordsOf = (key) => {
     const k = String(key);
     if (k.startsWith('set:')) { const id = k.slice(4); return [raceId.get(id) || id]; }
+    // v0.2.3 consistency items: one test / training set ("stab:pace:<set>", "stab:strokes:<set>") or one race ("stab:race:<mkey>").
+    if (k.startsWith('stab:race:')) return recordsOf(k.slice(10));
+    if (k.startsWith('stab:pace:') || k.startsWith('stab:strokes:')) { const id = k.slice(k.indexOf(':', 5) + 1); return [raceId.get(id) || id]; }
+    // v0.2.3 repeated-demand items "retest:<source>|<a>|<stroke>|<pool>:<date1>:<date2>": the tests / races of both occasions.
+    if (k.startsWith('retest:')) {
+      const parts = k.slice(7).split(':'); const dates = parts.slice(-2); const [src, a, stroke, pool] = parts.slice(0, -2).join(':').split('|');
+      return mine.filter((o) => o.source === src && dates.includes(o.date) && pyStr(o.stroke) === stroke && pyStr(o.pool) === pool
+        && (src === 'competition' ? pyStr(o.distance) === a : pyStr(o.protocol) === a))
+        .map((o) => (src === 'competition' ? raceId.get(String(o.set_id)) : String(o.set_id)));
+    }
     if (k.startsWith('pair:')) return k.slice(5).split(':');
     if (k.startsWith('dpsmodel:')) return modelSwims(k.slice(9));
     if (k.startsWith('rating|')) return [k.slice(7)];

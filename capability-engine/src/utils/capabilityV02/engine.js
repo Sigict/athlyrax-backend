@@ -316,6 +316,88 @@ export function adaptabilityItems(windowObs, allObs) {
   return items;
 }
 
+// v0.2.3 (owner-approved release correction 27-11-2026). Port of stability_score / cv_pct / stability_items / retest_items.
+export function stabilityScore(cvPct) {
+  const a = PARAMS.stabilityCvAnchors;
+  const v = Math.max(0, cvPct);
+  if (v <= a[0][0]) return a[0][1];
+  for (let i = 1; i < a.length; i += 1) {
+    const [lx, ly] = a[i - 1]; const [ux, uy] = a[i];
+    if (v <= ux) { const t = (v - lx) / Math.max(0.0001, ux - lx); return ly + (uy - ly) * t; }
+  }
+  return a[a.length - 1][1];
+}
+function cvPct(values) {
+  const v = values.filter(truthy);
+  if (v.length < 2) return null;
+  const m = v.reduce((s, x) => s + x, 0) / v.length;
+  const s = sd(v);
+  return m > 0 && s !== null ? (s / m) * 100 : null;
+}
+// Technical Control from measured consistency: repetition pace and stroke-count stability within a test or training set
+// (>= 3 repetitions) and segment pace stability within a race (splits after the start segment).
+export function stabilityItems(hist) {
+  const items = []; const n = PARAMS.stabilityMinValues;
+  for (const [sid, rows] of groupSets(hist.filter((o) => o.source === 'training' || o.source === 'testing'))) {
+    const o = rows[0];
+    if (rows.length < n) continue;
+    const times = rows.filter((r) => truthy(r.time)).map((r) => r.time);
+    const cyc = rows.filter((r) => truthy(r.cycles)).map((r) => r.cycles);
+    if (times.length >= n) {
+      const c = cvPct(times);
+      if (c !== null) items.push(item('technical_control', stabilityScore(c), o.source, o.date, `stab:pace:${pyStr(sid)}`, 1.0,
+        { protocol: o.protocol ?? null, group: 'pace-stability', cv_pct: c, n_values: times.length }));
+    }
+    if (cyc.length >= n) {
+      const c = cvPct(cyc);
+      if (c !== null) items.push(item('technical_control', stabilityScore(c), o.source, o.date, `stab:strokes:${pyStr(sid)}`, 1.0,
+        { protocol: o.protocol ?? null, group: 'stroke-count-stability', cv_pct: c, n_values: cyc.length }));
+    }
+  }
+  for (const o of hist) {
+    if (o.source !== 'competition') continue;
+    const cum = (o.splits || []).map((x) => x?.time);
+    if (cum.length < n + 1 || cum.some((t) => !truthy(t))) continue;
+    const seg = cum.slice(1).map((b, i) => b - cum[i]);
+    if (seg.some((x) => x <= 0)) continue;
+    const c = cvPct(seg);
+    if (c !== null) items.push(item('technical_control', stabilityScore(c), 'competition', o.date, `stab:race:${pyStr(o.mkey)}`, 1.0,
+      { protocol: o.protocol ?? null, group: 'race-segment-stability', cv_pct: c, n_values: seg.length }));
+  }
+  return items;
+}
+// Adaptability from the response to a repeated demand: the same test protocol (stroke, pool) or the same race event
+// (distance, stroke, pool) on its next occasion within retestMaxGapDays. 50 = no change (previous AthlyraX rule).
+export function retestItems(hist) {
+  const by = new Map();
+  const add = (key, source, protocol, date, v) => {
+    if (!by.has(key)) by.set(key, { source, protocol: protocol ?? null, dates: new Map() });
+    const g = by.get(key); if (!g.dates.has(date)) g.dates.set(date, []); g.dates.get(date).push(v);
+  };
+  for (const [, rows] of groupSets(hist.filter((o) => o.source === 'testing'))) {
+    const o = rows[0];
+    const sp = mean(rows.filter((r) => truthy(r.speed)).map((r) => r.speed));
+    if (truthy(sp)) add(`testing|${pyStr(o.protocol)}|${pyStr(o.stroke)}|${pyStr(o.pool)}`, 'testing', o.protocol, o.date, sp);
+  }
+  for (const o of hist) {
+    if (o.source === 'competition' && truthy(o.speed)) add(`competition|${pyStr(o.distance)}|${pyStr(o.stroke)}|${pyStr(o.pool)}`, 'competition', o.protocol, o.date, o.speed);
+  }
+  const items = [];
+  for (const [k, g] of by) {
+    const dates = [...g.dates.keys()].sort();
+    for (let i = 0; i + 1 < dates.length; i += 1) {
+      const a = dates[i]; const b = dates[i + 1];
+      if (days(a, b) > PARAMS.retestMaxGapDays) continue;
+      const va = g.source === 'competition' ? Math.max(...g.dates.get(a)) : mean(g.dates.get(a));
+      const vb = g.source === 'competition' ? Math.max(...g.dates.get(b)) : mean(g.dates.get(b));
+      const ch = ((vb - va) / va) * 100;
+      items.push(item('adaptability', 50 + PARAMS.adaptabilityIndexSlope * (ch / PARAMS.smallestWorthwhileChangePct), g.source, b,
+        `retest:${k}:${a}:${b}`, 1.0, { protocol: g.protocol, group: 'repeated-demand', speed_change_pct: ch, gap_days: days(a, b) }));
+    }
+  }
+  return items;
+}
+
 export function adaptabilityExtras(windowObs, latest) {
   const out = { race_transfer: [], intensity_steps: [] };
   const tests = new Map(); for (const o of latest.values()) tests.set(o.distance, o);
@@ -516,6 +598,8 @@ export function evaluateSwimmer(db, obsAll, swimmerId, start, end, asof = null, 
   const [effItems, rob, ec] = efficiencyRobustness(hist, sex, win);
   items.efficiency.push(...effItems); items.robustness_of_efficiency.push(...rob); Object.assign(comps.efficiency, ec);
   items.adaptability.push(...adaptabilityItems(win, hist));
+  items.technical_control.push(...stabilityItems(hist));
+  items.adaptability.push(...retestItems(hist));
   const refFrom = addDays(eff, -PARAMS.referenceMaxAgeDays);
   const maxes = hist.filter((o) => o.date >= refFrom && ['M25', 'M50', 'M100', 'M200', 'M400'].includes(o.protocol) && o.rep === 1);
   const latest = new Map();

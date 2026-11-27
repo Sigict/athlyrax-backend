@@ -40,6 +40,10 @@ export const PARAMS = {
   adaptabilityMethod: 'continuous',
   durabilityBasis: 'excess',
   technicalAggregation: 'equal_kind',
+  // v0.2.3 release correction 27-11-2026 (owner-approved): measured evidence for Technical Control and Adaptability
+  stabilityMinValues: 3,
+  stabilityCvAnchors: [[0, 100], [1, 95], [2, 90], [3, 85], [4, 75], [5, 65], [6, 55], [8, 40], [10, 25], [12, 10]],
+  retestMaxGapDays: 120,
   // App port (intentional departure A-1): informal coach observations are context only.
   scoreInformalCoachObservations: false,
 };
