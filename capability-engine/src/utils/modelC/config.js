@@ -208,7 +208,7 @@ export function parameterCatalogue(cfg = DEFAULT_MODEL_CONFIG) {
   out.push(S('training', 'training.attributionMode', 'Attribution mode', null, null, null, "'scaled' = stimulus distributed by attribution (approved); 'original' = on/off.", 'Training graph', 'enum:scaled,original'));
   for (const [code, axes] of Object.entries(cfg.training.energyAttribution)) for (const axis of AXES) {
     if (axes[axis] === undefined && !['en3', 'lt', 'lp', 'sp'].includes(code)) continue;
-    out.push(S('training', `training.energyAttribution.${code}.${axis}`, `Energy attribution · ${code.toUpperCase()} → ${AXIS_LABEL[axis]}`, 0, 1, 0.05, 'Share of the set stimulus attributed to this axis.', 'Training graph'));
+    out.push(S('training', `training.energyAttribution.${code}.${axis}`, `Energy attribution · ${code.toUpperCase()} → ${AXIS_LABEL[axis]}`, 0, 1, 0.05, 'Share of the set stimulus attributed to this axis (blank = 0).', 'Training graph', 'nullable'));
   }
   for (const k of Object.keys(cfg.training.coefficients)) out.push(S('training', `training.coefficients.${k}`, `Demand coefficient · ${k}`, 0, 1, 0.01, 'Training-demand v8 set demand component.', 'Training graph'));
   out.push(S('training', 'training.weeklyReferenceMetres', 'World-class reference week (m)', 10000, 150000, 1000, 'Score = √(focused metres / world-class week focused metres) (diminishing returns).', 'Training graph'));
