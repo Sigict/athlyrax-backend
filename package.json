@@ -49,7 +49,8 @@
     "test:production-auth-session": "node --test tests/production-auth-session-regression.test.mjs",
     "test:coach-poolside": "node --test tests/coach-poolside-projection.test.mjs tests/coach-poolside-mutations.test.mjs",
     "test:canonical-data-cleanup": "node --test tests/canonical-data-cleanup.test.mjs",
-    "test:coach-feedback": "node --test tests/coach-feedback-contract.test.mjs"
+    "test:coach-feedback": "node --test tests/coach-feedback-contract.test.mjs",
+    "test:model-calibration": "node --test tests/model-calibration.test.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
