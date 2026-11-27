@@ -117,7 +117,11 @@ export function observationsFor(db) {
   if (!db || typeof db !== 'object') return { observations: [], issues: [] };
   const sig = contentSignature(db); const hit = cache.get(db);
   if (hit && hit.sig === sig) return hit;
-  const built = { sig, ...buildObservations(db) }; cache.set(db, built); return built;
+  const built = { sig, ...buildObservations(db) };
+  // per-swimmer observation lists and the set lookup, built once per database (read-only)
+  built.bySwimmer = new Map(); for (const o of built.observations) { const k = String(o.swimmer); if (!built.bySwimmer.has(k)) built.bySwimmer.set(k, []); built.bySwimmer.get(k).push(o); }
+  built.setById = new Map((db?.trainingSessionSets || []).map((x) => [String(x.id), x]));
+  cache.set(db, built); return built;
 }
 
 // Race halves from stored splits (cumulative or per-lap, detected against the official time).
@@ -131,9 +135,9 @@ export function raceHalves(o, toleranceSeconds) {
   const h = laps.length / 2; return [laps.slice(0, h).reduce((a, b) => a + b, 0), laps.slice(h).reduce((a, b) => a + b, 0)];
 }
 
-export function evidenceIndex(observations, swimmerId, db, cfg) {
-  const setById = new Map((db?.trainingSessionSets || []).map((x) => [String(x.id), x]));
-  const mine = observations.filter((o) => o.swimmer === swimmerId);
+export function evidenceIndex(observations, swimmerId, db, cfg, prebuilt = null) {
+  const setById = prebuilt?.setById || new Map((db?.trainingSessionSets || []).map((x) => [String(x.id), x]));
+  const mine = prebuilt?.bySwimmer ? (prebuilt.bySwimmer.get(String(swimmerId)) || []).filter((o) => o.swimmer === swimmerId) : observations.filter((o) => o.swimmer === swimmerId);
   const by = new Map();
   for (const o of mine) { const key = o.source === 'competition' ? `${o.fixture_id}:${o.set_id}:${swimmerId}` : String(o.set_id); if (!by.has(key)) by.set(key, []); by.get(key).push(o); }
   const out = new Map();

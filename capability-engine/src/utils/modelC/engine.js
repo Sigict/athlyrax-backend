@@ -308,8 +308,8 @@ export const eventLabel = (key) => { const [d, st, c] = String(key).split(' '); 
 export function computeModelCProfile({ db, swimmerId, swimmerSex, records, asOf, cfg, worldRecords, eliteRates }) {
   const refs = makeReferences(worldRecords, cfg);
   const W = metricWeights(cfg); const EXPO = cfg.exposureTargets;
-  const { observations, issues } = observationsFor(db);
-  const index = evidenceIndex(observations, String(swimmerId), db, cfg);
+  const built = observationsFor(db); const { observations, issues } = built;
+  const index = evidenceIndex(observations, String(swimmerId), db, cfg, built);
   const { scored, audit } = rescoreRecords({ records, index, refs, cfg, swimmerSex, eliteRates });
   const src = Object.fromEntries(['training', 'testing', 'competition'].map((k) => [k, aggregateSource(scored, k, W, EXPO, asOf, cfg)]));
   const compRecs = scored.filter((r) => r.source === 'competition');
@@ -346,7 +346,7 @@ export function computeModelCProfile({ db, swimmerId, swimmerSex, records, asOf,
       integrated: add(src.training.counts, src.testing.counts, Rcounts) },
     coverage: { training: src.training.coverage, testing: src.testing.coverage, competition: src.competition.coverage },
     competitionPooled: src.competition.scores, events, perEvent, perEventCounts: Object.fromEntries(events.map((e) => [e, perEventAgg[e].counts])), perRace,
-    scored, audit, issues: issues.filter((x) => x.swimmer === swimmerId),
+    scored, audit, issues: issues.filter((x) => String(x.swimmer) === String(swimmerId)),
     detail: { training: src.training.detail, testing: src.testing.detail, competition: src.competition.detail },
   };
 }
