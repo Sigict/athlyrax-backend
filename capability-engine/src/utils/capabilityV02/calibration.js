@@ -44,6 +44,7 @@ export const PARAMS = {
   stabilityMinValues: 3,
   stabilityCvAnchors: [[0, 100], [1, 95], [2, 90], [3, 85], [4, 75], [5, 65], [6, 55], [8, 40], [10, 25], [12, 10]],
   retestMaxGapDays: 120,
+  levelAdjustedDomains: ['technical_control', 'robustness_of_efficiency', 'durability'],   // option B: consistency rated at the swimmer's performance level
   // App port (intentional departure A-1): informal coach observations are context only.
   scoreInformalCoachObservations: false,
 };

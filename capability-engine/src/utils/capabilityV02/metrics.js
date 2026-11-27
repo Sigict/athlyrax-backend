@@ -169,6 +169,12 @@ export function eliteDps(stroke = 'free', sex = 'male', distance = 200) {
   if (!wr || !sr) return null;
   return ((distance / wr) * 60) / sr;
 }
+// v0.2.3: elite (world-record, long course) speed of the event, m/s - the speed of the elite Stroke Index reference.
+export function eliteSpeed(stroke = 'free', sex = 'male', distance = 200) {
+  const sx = String(sex).startsWith('f') ? 'female' : 'male';
+  const wr = WORLD_RECORD_BASE_TIMES?.LC?.[sx]?.[stroke]?.[distance];
+  return wr ? distance / wr : null;
+}
 export function dpsRetention(rows, model) {
   const r = [...rows].sort((a, b) => (a.rep || 0) - (b.rep || 0)).filter((o) => o.dps && o.speed);
   if (r.length < 4) return null;

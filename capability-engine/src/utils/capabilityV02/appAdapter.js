@@ -318,7 +318,7 @@ export const MEASURED_PREVIEW_PARAMETER = Object.freeze({
 });
 export const MEASURED_PREVIEW_UNAVAILABLE = Object.freeze({
   technical_control: 'Unavailable in v0.2: Technical Control is a provisional rating index with no stability coefficient.',
-  efficiency: 'Unavailable in v0.2: Efficiency is distance per cycle at a matched speed; it has no stability coefficient.',
+  efficiency: 'Unavailable in v0.2: Efficiency is the Stroke Index (speed x distance per cycle) at a matched speed relative to the elite Stroke Index; it has no stability coefficient.',
 });
 export function previewMeasuredParameter({ db, swimmerId, startDate, endDate, asOfDate = '', axis, factor }) {
   const spec = MEASURED_PREVIEW_PARAMETER[axis];

@@ -14,7 +14,7 @@
 import { PARAMS, CALIBRATION_VERSION, APP_CALIBRATION_VERSION, recencyWeight, linearIndexRaw } from './calibration.js';
 import { buildLedger, summarise, workloadChange, trainingRadar, markConstraintVaried } from './ledger.js';
 import { pyRound } from './ingest.js';
-import { waPoints, criticalSpeed, setFade, dpsModel, dpsAt, eliteDps, dpsRetention, sd, durabilityExcess } from './metrics.js';
+import { waPoints, criticalSpeed, setFade, dpsModel, dpsAt, eliteDps, eliteSpeed, dpsRetention, sd, durabilityExcess } from './metrics.js';
 
 export const ENGINE_VERSION = 'AthlyraX Candidate Engine v0.2.1 (O-1 delivery rule, O-2 battery boundary, repeatability development; 2026-11-25) - JS port app.2';
 export const BATTERY_PROTOCOLS = ['M25', 'M50', 'M100', 'M200', 'M400', 'R8x25', 'R8x50', 'R8x100', 'A5x400'];
@@ -144,6 +144,9 @@ export function efficiencyRobustness(obs, sex, windowObs) {
   const vref = m200.length ? m200[m200.length - 1].speed : null;
   comps.reference_speed_m_s = vref;
   const eDps = eliteDps('free', sex, 200);
+  // v0.2.3 (owner-approved 27-11-2026, decision D-6): Efficiency = Stroke Index (speed x distance per cycle) at the swimmer's
+  // reference speed / elite Stroke Index (elite speed x elite DPC). Comparing DPC alone rewarded the longer stroke of a slower swimmer.
+  const eSi = eDps ? eliteSpeed('free', sex, 200) * eDps : null;
   if (model && vref) {
     const d = dpsAt(model, vref);
     if (d === null) comps.efficiency_status = 'reference speed outside the observed speed range: not interpolated (no extrapolation)';
@@ -152,16 +155,16 @@ export function efficiencyRobustness(obs, sex, windowObs) {
         const sub = dpsModel(swim.filter((o) => o.source === src));
         const ds = sub ? dpsAt(sub, vref) : null;
         if (ds !== null) {
-          effItems.push(item('efficiency', (100 * ds) / eDps, src, maxStr(swim.filter((o) => o.source === src).map((o) => o.date)), `dpsmodel:${src}`, 1.0,
-            { dps_at_ref: ds, elite_dps: eDps, n: sub.n, stroke_index_at_ref: vref * ds, stroke_rate_at_ref: (vref * 60) / ds }));
+          effItems.push(item('efficiency', (100 * (vref * ds)) / eSi, src, maxStr(swim.filter((o) => o.source === src).map((o) => o.date)), `dpsmodel:${src}`, 1.0,
+            { dps_at_ref: ds, elite_dps: eDps, elite_stroke_index: eSi, n: sub.n, stroke_index_at_ref: vref * ds, stroke_rate_at_ref: (vref * 60) / ds }));
         }
       }
-      Object.assign(comps, { dps_at_reference_m: d, elite_dps_m: eDps, stroke_index_at_reference: vref * d,
+      Object.assign(comps, { dps_at_reference_m: d, elite_dps_m: eDps, elite_stroke_index: eSi, stroke_index_at_reference: vref * d,
         stroke_rate_at_reference_cpm: (vref * 60) / d, kinematic_consistency_resid_pct: (model.resid_sd / d) * 100 });
       if (!effItems.length) {
         const cnt = (s) => swim.filter((o) => o.source === s).length;
         const src = SOURCES.reduce((best, s) => (cnt(s) > cnt(best) ? s : best), SOURCES[0]);
-        effItems.push(item('efficiency', (100 * d) / eDps, src, maxStr(swim.map((o) => o.date)), 'dpsmodel:pooled', 0.85, { dps_at_ref: d, elite_dps: eDps, n: model.n }));
+        effItems.push(item('efficiency', (100 * (vref * d)) / eSi, src, maxStr(swim.map((o) => o.date)), 'dpsmodel:pooled', 0.85, { dps_at_ref: d, elite_dps: eDps, elite_stroke_index: eSi, n: model.n }));
       }
     }
   } else {
@@ -712,6 +715,32 @@ export function evaluateSwimmer(db, obsAll, swimmerId, start, end, asof = null, 
     // App-only, NON-enumerable: the keys of the review-window evidence items behind each source value (traceability).
     Object.defineProperty(result.domains[dom], 'per_source_keys', { enumerable: false,
       value: Object.fromEntries(SOURCES.map((src) => [src, windowFilter(its, src, eff, start).map((i) => i.key)])) });
+  }
+  // v0.2.3 option B (owner-approved 27-11-2026): Technical Control, Robustness of Efficiency and Durability measure how EVENLY the swimmer swims; rated at
+  // the swimmer's performance level so a slow, even swimmer cannot score like an elite one: adjusted = sqrt(raw x level), level =
+  // mean Capability of the three absolute speed domains. Without a measured level the raw value is kept (and labelled).
+  const lv = Object.keys(LEVEL_DOMAINS).map((d) => result.domains[d].capability).filter((v) => v !== null && v !== undefined);
+  const level = lv.length ? lv.reduce((a, b) => a + b, 0) / lv.length : null;
+  for (const dom of PARAMS.levelAdjustedDomains) {
+    const r = result.domains[dom];
+    const raw = Object.fromEntries(['capability', 'testing', 'competition', 'training_execution'].map((k) => [k, r[k]]));
+    if (level !== null) {
+      for (const k of ['training_execution', 'testing', 'competition']) if (raw[k] !== null && raw[k] !== undefined) r[k] = Math.sqrt(Math.max(0, raw[k]) * level);
+      // Integrated keeps the locked formula: the source weights applied to the (level-rated) source values
+      const avail = [['training', 'training_execution'], ['testing', 'testing'], ['competition', 'competition']]
+        .filter(([, f]) => r[f] !== null && r[f] !== undefined).map(([s, f]) => [s, r[f]]);
+      if (avail.length) {
+        const se = r.confidence.se;
+        const w = PARAMS.sourceWeighting === 'precision' && avail.every(([s]) => truthy(se[s]))
+          ? Object.fromEntries(avail.map(([s]) => [s, 1 / (se[s] ** 2)])) : Object.fromEntries(avail.map(([s]) => [s, PARAMS.sourceWeights[s]]));
+        r.capability = avail.reduce((a, [s, v]) => a + w[s] * v, 0) / Object.values(w).reduce((a, b) => a + b, 0);
+      }
+      r.level.value = r.capability;
+      // App-only per-source triples (Testing / Competition graphs) carry the same adjusted values.
+      for (const t of Object.values(r.per_source || {})) if (t && t[0] !== null && t[0] !== undefined) t[0] = Math.sqrt(Math.max(0, t[0]) * level);
+    }
+    r.components.level_adjustment = { performance_level: level, unadjusted: raw,
+      rule: level !== null ? 'each source: sqrt(consistency x performance level); Integrated = locked source weights' : 'no performance level measured: unadjusted' };
   }
   result.training_ledger = { current: cur, previous: prev, previous_window: [pstart, pend], workload_change: load };
   Object.defineProperty(result, 'ledger_rows', { value: led, enumerable: false });   // app-only, never serialised
