@@ -62,10 +62,10 @@ export function registerModelCalibration(app, { storageRoot, requireStrictAuth, 
     engineVersion: v.engineVersion, referenceVersion: v.referenceVersion, basedOn: v.basedOn || null, config: v.config });
 
   // Read-only for every signed-in account (calculations need the active version).
-  app.get('/model-calibration/active', requireStrictAuth, (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    res.json({ active: store.activeRecord() });
-  });
+  // Under /auth so every deployment path (production /api/*, local development proxy) reaches it; alias kept.
+  const readActive = (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ active: store.activeRecord() }); };
+  app.get('/auth/model-calibration/active', requireStrictAuth, readActive);
+  app.get('/model-calibration/active', requireStrictAuth, readActive);
 
   app.get('/owner/model-calibration', requireStrictAuth, requireSoftwareOwnerRole, (req, res) => {
     const data = store.ensureSeed(actorOf(req));
