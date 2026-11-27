@@ -33,16 +33,56 @@ export function waPoints(time, distance, stroke = 'free', sex = 'male', pool = 2
   }
   return b ? 1000 * (b / time) ** 3 : null;
 }
+// Performance (release correction 27-11-2026): the k-th smallest value of a Float64Array by selection (in place,
+// average linear time) instead of sorting all n(n-1)/2 Theil-Sen slopes. It returns exactly the value a full typed-array
+// sort would place at index k, including the sign of a zero (a sort orders -0 before +0); arrays holding NaN use the sort.
+function kthSmallest(a, k) {
+  let lo = 0; let hi = a.length - 1;
+  while (hi > lo) {
+    const mid = (lo + hi) >>> 1;
+    if (a[mid] < a[lo]) { const t = a[mid]; a[mid] = a[lo]; a[lo] = t; }
+    if (a[hi] < a[lo]) { const t = a[hi]; a[hi] = a[lo]; a[lo] = t; }
+    if (a[hi] < a[mid]) { const t = a[hi]; a[hi] = a[mid]; a[mid] = t; }
+    const pivot = a[mid]; let i = lo; let j = hi;
+    while (i <= j) {
+      while (a[i] < pivot) i += 1;
+      while (a[j] > pivot) j -= 1;
+      if (i <= j) { const t = a[i]; a[i] = a[j]; a[j] = t; i += 1; j -= 1; }
+    }
+    if (k <= j) hi = j; else if (k >= i) lo = i; else break;
+  }
+  return a[k];
+}
+// A zero found at sorted index k is -0 exactly when k falls among the negatives and negative zeros (sorted first).
+function zeroAt(a, k) {
+  let before = 0;
+  for (let i = 0; i < a.length; i += 1) { const x = a[i]; if (x < 0 || Object.is(x, -0)) before += 1; }
+  return k < before ? -0 : 0;
+}
+function medianOfTyped(s) {
+  const n = s.length;
+  if (!n) return null;
+  for (let i = 0; i < n; i += 1) if (Number.isNaN(s[i])) { s.sort(); return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; }
+  const k = n % 2 ? (n - 1) / 2 : n / 2 - 1;
+  let lower = kthSmallest(s, k);
+  if (lower === 0) lower = zeroAt(s, k);
+  if (n % 2) return lower;
+  // After selecting index k every later element is >= it, so the next order statistic is the smallest of them.
+  let upper = s[k + 1];
+  for (let i = k + 2; i < n; i += 1) if (s[i] < upper) upper = s[i];
+  if (upper === 0) upper = zeroAt(s, k + 1);
+  return (lower + upper) / 2;
+}
 export function theilSen(xs, ys) {
   const pts = xs.map((x, i) => [x, ys[i]]).filter(([x, y]) => x !== null && x !== undefined && y !== null && y !== undefined);
   if (pts.length < 2) return [null, null, pts.length];
-  const sl = [];
-  for (let i = 0; i < pts.length; i += 1) for (let j = i + 1; j < pts.length; j += 1) {
-    const [x1, y1] = pts[i]; const [x2, y2] = pts[j];
-    if (x2 !== x1) sl.push((y2 - y1) / (x2 - x1));
+  const m = pts.length; const sl = new Float64Array((m * (m - 1)) / 2); let n = 0;
+  for (let i = 0; i < m; i += 1) {
+    const x1 = pts[i][0]; const y1 = pts[i][1];
+    for (let j = i + 1; j < m; j += 1) { const x2 = pts[j][0]; if (x2 !== x1) { sl[n] = (pts[j][1] - y1) / (x2 - x1); n += 1; } }
   }
-  if (!sl.length) return [null, null, pts.length];
-  const b = median(sl);
+  if (!n) return [null, null, pts.length];
+  const b = medianOfTyped(sl.subarray(0, n));
   const a = median(pts.map(([x, y]) => y - b * x));
   return [b, a, pts.length];
 }
@@ -97,9 +137,20 @@ export function setFade(times, distance, sendoff = null) {
     onset_censoring: onset ? 'interval' : 'right-censored', onset_interval: onset ? [onset - 1, onset] : [n, null],
     onset_accumulated_m: onset ? (onset - 1) * distance : null, onset_accumulated_min: onset && sendoff ? ((onset - 1) * sendoff) / 60 : null };
 }
+// Performance (release correction 27-11-2026): the model depends only on the ordered (speed, DPS) pairs and the
+// calibration parameters, so an identical input is computed once. Each caller receives its own copy of the result.
+const dpsModelMemo = new Map();
 export function dpsModel(obs) {
   const pts = obs.filter((o) => o.speed && o.dps).map((o) => [o.speed, o.dps]);
   if (pts.length < PARAMS.dpsModelMinObs) return null;
+  const key = `${PARAMS.dpsModelMinObs}|${PARAMS.dpsModelMinSpeedRange}|${pts.join(';')}`;
+  if (dpsModelMemo.has(key)) { const hit = dpsModelMemo.get(key); return hit && { ...hit }; }
+  const model = dpsModelUncached(pts);
+  if (dpsModelMemo.size >= 2000) dpsModelMemo.clear();
+  dpsModelMemo.set(key, model);
+  return model && { ...model };
+}
+function dpsModelUncached(pts) {
   const vs = pts.map((p) => p[0]);
   if (Math.max(...vs) - Math.min(...vs) < PARAMS.dpsModelMinSpeedRange) return null;
   const [b, a, n] = theilSen(vs, pts.map((p) => p[1]));

@@ -20,7 +20,7 @@
     "src/utils/capabilityV02/engine.js": "622ea9c7b10b30930e105de914d87e6311292a2d4e0af098036150959eb1b681",
     "src/utils/capabilityV02/ingest.js": "53ba7f4aa45900878e481a7ed3d8c90be96498199e827fb43a1ef2bb820b97a7",
     "src/utils/capabilityV02/ledger.js": "6eaab372ff5658e386f83552edf8be58b6c34cfb815cf622e9a3745902a74847",
-    "src/utils/capabilityV02/metrics.js": "8abd4101e3ba625c6da6540e2067e6e7443223d8557a5961bf71b8b6ef12ee06",
+    "src/utils/capabilityV02/metrics.js": "5084c8a3c1233e74acb46cad041fc920ae73a492a27143d7f88d4ff6cb5180f5",
     "src/utils/competitionCourse.js": "e98eefcbd64cae03ab7b7f2d98e6eb9d486eb52dac3a9dbea0d237c1d438d251",
     "src/utils/coursePersonalBests.js": "8653b00ace13d9dd54df299626ce410ed30f55b4a2126eafa7a7be76b1c86e68",
     "src/utils/demoCompetitionCourse.js": "4f3a6669a5bda7d70e17124468c24d3bf7418491c3eac989e05832a8ae30cdf6",
