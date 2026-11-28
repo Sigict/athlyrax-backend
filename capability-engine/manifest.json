@@ -1,7 +1,7 @@
 {
   "purpose": "Exact copy of the AthlyraX capability engine (and the Robustness v3.2 demo repairs run at production start) from the website repository, run on the server for the Athlete App. Do not edit here: change the website source and re-copy.",
   "sourceRepository": "Sigict/athlyrax-v6-private",
-  "sourceCommit": "30cca768143d575fdd962e4df93f2d5f513fcbac",
+  "sourceCommit": "97845769b5bc0e88b1b398a6fc15c4a13c0b9c06",
   "files": {
     "src/data/demoProgrammeEnergyRepairManifest.js": "930e09b637cdbfc4506802737b9f4cb0bf265b4a94301382695dcaaf069f1eaa",
     "src/data/efficiencyReference.js": "4040a22a51d9078562f4fe5df8f49656017d835fc2555e8158cbd3ec9199d975",
@@ -25,7 +25,7 @@
     "src/utils/demoWordingCorrection.js": "545bc39daee971e36810765fc8eb75ef7ebcd895378ddb585acf2c681887527c",
     "src/utils/efficiencyAdaptabilityIndicators.js": "8b63cd9b5d681dd412b0f7e28794d77ba6d5fae264d9ff4bf69722a51fc0111d",
     "src/utils/ispPlannerSource.js": "c80c5b99d18e444c5a9e82b9bf495645ca19ddfc61fad558e641a10735897d3a",
-    "src/utils/modelC/config.js": "5d0fe063b364d2f137ff8d28fcf8c4d00c962dab6f2a9dbda674c070da39715f",
+    "src/utils/modelC/config.js": "d63b7848f066c52608b863d44a1f405ab7a1991b80f25d8c4afcd262eb8bd8b0",
     "src/utils/modelC/engine.js": "03c20ef29ac70a788893a83db9241005585be9e3aa88bd15d13d967cb5730d2e",
     "src/utils/modelC/evidence.js": "ae9f4a4bbd930a04044e42f19fe2ccd1a819ddd3504b45a3e21c6d3ceb1f807a",
     "src/utils/officialCapabilityRadar.js": "67c0e2df4406f1ed7d72ef08183b311459beb47acf86f4c5bbf290ad4f28d9e2",
