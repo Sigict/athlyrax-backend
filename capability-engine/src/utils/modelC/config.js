@@ -87,7 +87,10 @@ export function buildDefaultModelConfig() {
     // pairing: 'most-recent-eligible' (owner decision 28-11-2026: corrected rule; multiple simultaneous changes,
     // including repetition-count changes, are never scored) | 'consecutive' (Phase 0 simulation rule, kept for rollback)
     adaptability: { pairing: 'most-recent-eligible', tolerance: 0.10, sendoffChangeRef: 0.20, speedChangeRef: 0.10, distanceChangeRef: 1.0, pairWindowDays: 14,
-      direction: { harder: 1.0, easier: 0.5, neutral: 1.0 } },
+      direction: { harder: 1.0, easier: 0.5, neutral: 1.0 },
+      // Provisional fallback F2 (owner decision 28-11-2026): used only when the changed-demand calculation leaves
+      // Adaptability unscored in every source; never combined with a valid score. 'off' disables it (rollback).
+      repetitionFallback: { mode: 'provisional-f2', b: 0, tolerance: 0.10, magnitudeRef: 1.0, alpha: 0.5 } },
     // ---- integration and competition
     sourceWeights: { training: 0.30, testing: 0.50, competition: 0.20 },
     combine: 'flat',
@@ -105,7 +108,7 @@ export function buildDefaultModelConfig() {
 // The original working engine's values for the same parameters (baseline column of the console).
 export function buildOriginalBaselineConfig() {
   const c = buildDefaultModelConfig();
-  return { ...c, engine: ORIGINAL_ENGINE_ID, engineVersion: 'AthlyraX Full V6 Axis Engine v1.8', adaptability: { ...c.adaptability, pairing: 'consecutive' },
+  return { ...c, engine: ORIGINAL_ENGINE_ID, engineVersion: 'AthlyraX Full V6 Axis Engine v1.8', adaptability: { ...c.adaptability, pairing: 'consecutive', repetitionFallback: { ...c.adaptability.repetitionFallback, mode: 'off' } },
     training: { ...c.training, attributionMode: 'original', energyAttribution: clone(ORIGINAL_ENERGY_ATTRIBUTION) } };
 }
 
@@ -185,6 +188,12 @@ export function parameterCatalogue(cfg = DEFAULT_MODEL_CONFIG) {
   out.push(S('adaptability', 'adaptability.pairing', 'Changed-demand pairing rule', null, null, null,
     "'most-recent-eligible' = compare with the most recent earlier set within the window that differs in exactly one scorable demand, repetitions and technical prescription unchanged (owner decision 28-11-2026); 'consecutive' = the Phase 0 rule (immediately preceding timed set), kept for rollback.", 'Adaptability', 'enum:consecutive,most-recent-eligible'));
   out.push(S('adaptability', 'adaptability.pairWindowDays', 'Changed-demand pair window (days)', 1, 60, 1, 'Maximum separation of the two compared sets.', 'Adaptability'));
+  out.push(S('adaptability', 'adaptability.repetitionFallback.mode', 'Repetition-count fallback (F2, provisional)', null, null, null,
+    "'provisional-f2' = when the changed-demand calculation leaves Adaptability unscored, score it from sets whose only change is the repetition count (shown as a provisional estimate; never combined with a valid score); 'off' = no fallback.", 'Adaptability', 'enum:provisional-f2,off'));
+  out.push(S('adaptability', 'adaptability.repetitionFallback.b', 'F2 · expected pace exponent b', 0, 0.2, 0.01, 'Expected profile × (r_new / r_old)^−b; 0 = the swimmer\'s own previous profile extended or truncated.', 'Adaptability (F2 fallback)'));
+  out.push(S('adaptability', 'adaptability.repetitionFallback.tolerance', 'F2 · response tolerance τ', 0.005, 0.5, 0.005, 'Q = clamp(1 − max(0, −δ) / τ), δ = mean actual / mean expected speed − 1.', 'Adaptability (F2 fallback)'));
+  out.push(S('adaptability', 'adaptability.repetitionFallback.magnitudeRef', 'F2 · magnitude weighting coefficient c', 0.25, 3, 0.05, 'Evidence weight = min(1, |ln(r_new / r_old)| / ln 2 / c); the magnitude never changes the score.', 'Adaptability (F2 fallback)'));
+  out.push(S('adaptability', 'adaptability.repetitionFallback.alpha', 'F2 · demand exponent α', 0, 2, 0.05, 'S = 100 · Q · D_out^α.', 'Adaptability (F2 fallback)'));
   for (const k of ['harder', 'easier', 'neutral']) out.push(S('adaptability', `adaptability.direction.${k}`, `Direction coefficient · ${k}`, 0, 1, 0.05, 'Multiplies the change difficulty by direction.', 'Adaptability'));
   for (const k of ['wOutput', 'wWork', 'wDensity']) out.push(S('durability', `durability.${k}`, { wOutput: 'D_out exponent', wWork: 'D_work exponent', wDensity: 'D_density exponent' }[k], 0, 1, 0.05,
     'D = D_out^w1 · D_work^w2 · D_density^w3 (inapplicable components omitted and renormalised).', 'Durability'));

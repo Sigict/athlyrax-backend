@@ -282,6 +282,53 @@ export function changedDemandItems({ index, refs, cfg, swimmerSex, diagnostics =
   return items;
 }
 
+// Provisional Adaptability fallback F2 (owner decision 28-11-2026; research rep2, b = 0, τ = 0.10, c = 1, α = 0.5).
+// Used ONLY when the changed-demand calculation above leaves Adaptability unscored in every source (never combined with
+// a valid score). Pair: the most recent earlier timed set (other day, within the pair window) with the same distance,
+// stroke, course, intensity code, send-off, modality and target stroke count whose repetition count differs; sets with
+// the same repetition count are skipped (development). Expected profile = line fitted through the previous set's
+// repetition speeds, a + s·i, extended or truncated to every repetition of the new set, × (r_new / r_old)^-b.
+// δ = mean(v_new) / mean(v_expected) − 1;  Q = clamp(1 − max(0, −δ) / τ);  S = 100 · Q · D_out^α;
+// evidence weight (signal) w = min(1, |ln(r_new / r_old)| / ln 2 / c); recency and exposure weighting as every item.
+const F2_METHOD = 'provisional-repetition-count-response-F2';
+function lineFit(v) {
+  const n = v.length; const m = v.reduce((a, b) => a + b, 0) / n; if (n < 3) return { a: m, s: 0 };
+  const mi = (n - 1) / 2; let sxy = 0; let sxx = 0;
+  for (let i = 0; i < n; i += 1) { sxy += (i - mi) * (v[i] - m); sxx += (i - mi) ** 2; }
+  const s = sxy / sxx; return { a: m - s * mi, s };
+}
+export function repetitionFallbackItems({ index, refs, cfg, swimmerSex }) {
+  const F = cfg.adaptability?.repetitionFallback; if (!F || F.mode !== 'provisional-f2') return [];
+  const reps = (e) => e.prescription?.repetitions;
+  const sets = [...index.byKey.values()].filter((e) => e.source === 'training' && e.meanSpeed && e.repSpeeds?.length && reps(e))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
+  const same = (a, b) => a.sendoff === b.sendoff && a.energy === b.energy && a.distance === b.distance && refs.sk(a.stroke) === refs.sk(b.stroke)
+    && refs.ck(a.pool) === refs.ck(b.pool) && String(a.prescription?.modality) === String(b.prescription?.modality)
+    && (a.prescription?.targetStrokeCount ?? null) === (b.prescription?.targetStrokeCount ?? null);
+  const items = [];
+  for (let i = 0; i < sets.length; i += 1) {
+    const a = sets[i];
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const b = sets[j]; if (b.date === a.date) continue;
+      if ((Date.parse(a.date) - Date.parse(b.date)) > cfg.adaptability.pairWindowDays * DAY) break;
+      if (!same(a, b) || reps(a) === reps(b)) continue;
+      const tr = taskReference(a, refs, cfg, swimmerSex); if (!tr.v) break;
+      const L = Math.log(reps(a) / reps(b)); const m = Math.exp(-F.b * L); const f = lineFit(b.repSpeeds);
+      const expected = a.repSpeeds.map((_, k) => (f.a + f.s * k) * m);
+      const vNew = a.repSpeeds.reduce((x, y) => x + y, 0) / a.repSpeeds.length; const vExp = expected.reduce((x, y) => x + y, 0) / expected.length;
+      const delta = vNew / vExp - 1; const Q = clamp01(1 - Math.max(0, -delta) / F.tolerance);
+      const Dout = Math.min(1, a.meanSpeed / tr.v); const magnitude = Math.abs(L) / Math.log(2); const w = Math.min(1, magnitude / F.magnitudeRef);
+      items.push({ axis: 'adaptability', source: 'training', metric: 'transfer_success', method: F2_METHOD, provisional: true, kind: 'quality',
+        date: a.date, evidenceId: a.key, signal: w, Q, D: Dout, alpha: F.alpha, S: 100 * Q * Dout ** F.alpha, rawValue: 100 * delta,
+        ref: `Provisional estimate (repetition-count fallback F2): ${reps(b)} → ${reps(a)} repetitions; expected mean ${vExp.toFixed(3)} m/s, actual ${vNew.toFixed(3)} m/s (${(100 * delta).toFixed(2)} %); ${tr.label}`,
+        parts: { from: b.key, rOld: reps(b), rNew: reps(a), direction: reps(a) > reps(b) ? 'increase' : 'decrease', magnitude, weight: w, b: F.b, tolerance: F.tolerance,
+          fitPrevious: f, vExpected: vExp, vObserved: vNew, delta, Dout, vReference: tr.v } });
+      break;
+    }
+  }
+  return items;
+}
+
 // Race retention (100 m and longer): second-half / first-half time against the elite pacing reference of the distance
 // (finishing acceleration never penalised). Shared without double counting: Durability weight r = min(1, distance /
 // relevance metres), Anaerobic fatigue_resistance weight 1 - r.
@@ -356,7 +403,17 @@ export function computeModelCProfile({ db, swimmerId, swimmerSex, records, asOf,
   const built = observationsFor(db); const { observations, issues } = built;
   const index = evidenceIndex(observations, String(swimmerId), db, cfg, built);
   const { scored, audit } = rescoreRecords({ records, index, refs, cfg, swimmerSex, eliteRates });
-  const src = Object.fromEntries(['training', 'testing', 'competition'].map((k) => [k, aggregateSource(scored, k, W, EXPO, asOf, cfg)]));
+  let src = Object.fromEntries(['training', 'testing', 'competition'].map((k) => [k, aggregateSource(scored, k, W, EXPO, asOf, cfg)]));
+  // Adaptability fallback F2: only when no source produced an Adaptability score (never combined with a valid score).
+  let provisional = null;
+  if (!['training', 'testing', 'competition'].some((k) => Number.isFinite(src[k].scores.adaptability))) {
+    const f2 = repetitionFallbackItems({ index, refs, cfg, swimmerSex }).filter((r) => r.date <= asOf);
+    if (f2.length) {
+      scored.push(...f2);
+      src = { ...src, training: aggregateSource(scored, 'training', W, EXPO, asOf, cfg) };
+      if (Number.isFinite(src.training.scores.adaptability)) provisional = { adaptability: { method: F2_METHOD, comparisons: f2.length, sets: src.training.counts.adaptability } };
+    }
+  }
   const compRecs = scored.filter((r) => r.source === 'competition');
   const evOf = (id) => index.byKey.get(String(id));
   const eventOf = (r) => { const ev = evOf(r.evidenceId); return ev ? eventKeyOf(ev, refs) : 'unknown'; };
@@ -391,7 +448,7 @@ export function computeModelCProfile({ db, swimmerId, swimmerSex, records, asOf,
       integrated: add(src.training.counts, src.testing.counts, Rcounts) },
     coverage: { training: src.training.coverage, testing: src.testing.coverage, competition: src.competition.coverage },
     competitionPooled: src.competition.scores, events, perEvent, perEventCounts: Object.fromEntries(events.map((e) => [e, perEventAgg[e].counts])), perRace,
-    scored, audit, issues: issues.filter((x) => String(x.swimmer) === String(swimmerId)),
+    provisional, scored, audit, issues: issues.filter((x) => String(x.swimmer) === String(swimmerId)),
     detail: { training: src.training.detail, testing: src.testing.detail, competition: src.competition.detail },
   };
 }
