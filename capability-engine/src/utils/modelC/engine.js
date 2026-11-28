@@ -192,47 +192,92 @@ export function criticalSpeedItems({ index, refs, cfg, swimmerSex }) {
   return out;
 }
 
-// Adaptability: identifiable changed demand between consecutive training sets of the same swimmer (within the pair
-// window); exactly ONE of send-off / recovery / prescribed pace / intensity code / repetition distance / stroke / task
-// differs. Q = max(0, 1 - E/tolerance), E = relative error vs the task benchmark (transition = first repetition,
-// stabilisation = later repetitions). D = sqrt(D_output x D_change x direction); S = 100 x Q x D^alpha.
-export function changedDemandItems({ index, refs, cfg, swimmerSex }) {
+// Adaptability: identifiable changed demand between two training sets of the same swimmer (within the pair window);
+// exactly ONE of send-off / recovery / prescribed pace / intensity code / repetition distance / stroke / task differs.
+// Q = max(0, 1 - E/tolerance), E = relative error vs the task benchmark (transition = first repetition, stabilisation =
+// later repetitions). D = sqrt(D_output x D_change x direction); S = 100 x Q x D^alpha.
+// Pairing (cfg.adaptability.pairing):
+//   'consecutive' (approved Final Model C): each set is compared with the immediately preceding timed set only.
+//   'most-recent-eligible': each set is compared with the most recent earlier set (other day, within the pair window)
+//     whose demand differs in exactly ONE scorable way; repetition count and technical prescriptions (target stroke
+//     count) must then be unchanged - a change in those alone has no approved change-difficulty formula and is not scored.
+// The scoring formula is identical in both modes. `diagnostics` (optional array) receives the reason for every set.
+const taskOf = (x) => (/kick/.test(x.modality + x.setName.toLowerCase()) ? 'kick' : /drill/.test(x.modality + x.setName.toLowerCase()) ? 'drill' : /\bim\b|medley/.test(x.setName.toLowerCase()) ? 'im' : 'swim');
+function demandDiff(a, b, refs, extended) {
+  const pa = a.prescription || {}; const pb = b.prescription || {};
+  const diff = { sendoff: a.sendoff !== b.sendoff, intensity: a.energy !== b.energy, distance: a.distance !== b.distance, stroke: refs.sk(a.stroke) !== refs.sk(b.stroke),
+    pace: Boolean(pa.targetPace && pb.targetPace && pa.targetPace !== pb.targetPace), recovery: Boolean(pa.rest !== null && pb.rest !== null && pa.rest !== undefined && pa.rest !== pb.rest && a.sendoff === b.sendoff),
+    task: taskOf(pa.modality !== undefined ? pa : { modality: '', setName: '' }) !== taskOf(pb.modality !== undefined ? pb : { modality: '', setName: '' }) };
+  if (diff.pace) diff.intensity = false; // a prescribed pace change is the more specific description of the intensity change
+  const kinds = Object.entries(diff).filter(([, v]) => v).map(([k]) => k);
+  const unscorable = [];
+  if (extended) {
+    if (pa.repetitions && pb.repetitions && pa.repetitions !== pb.repetitions) unscorable.push('repetitions');
+    if ((pa.targetStrokeCount ?? null) !== (pb.targetStrokeCount ?? null)) unscorable.push('technical');
+  }
+  return { kinds, unscorable, pa, pb };
+}
+function pairItems({ a, b, kind, pa, pb, refs, cfg, swimmerSex }) {
+  const A = cfg.adaptability;
+  const vb = b.meanSpeed; const refB = taskReference(b, refs, cfg, swimmerSex); const refA = taskReference(a, refs, cfg, swimmerSex);
+  if (!refA.v || !refB.v) return { items: null, reason: 'no task reference' };
+  let vExp; let change; let Dchg; let direction; let oneSided = false;
+  if (kind === 'sendoff') { if (!a.sendoff || !b.sendoff) return { items: null, reason: 'send-off not recorded' }; change = Math.abs(a.sendoff - b.sendoff) / b.sendoff; Dchg = Math.min(1, change / A.sendoffChangeRef); direction = a.sendoff < b.sendoff ? 'harder' : 'easier'; vExp = vb; oneSided = true; }
+  else if (kind === 'intensity') { const ratio = refA.v / refB.v; change = Math.abs(ratio - 1); Dchg = Math.min(1, change / A.speedChangeRef); direction = ratio > 1 ? 'harder' : 'easier'; vExp = vb * ratio; }
+  else if (kind === 'distance') { change = Math.abs(Math.log(a.distance / b.distance)) / Math.log(2); Dchg = Math.min(1, change / A.distanceChangeRef); direction = a.distance > b.distance ? 'harder' : 'easier'; vExp = vb * (refA.v / refB.v); }
+  else if (kind === 'pace') { const tA = a.distance / pa.targetPace; const tB = b.distance / pb.targetPace; change = Math.abs(tA - tB) / tB; Dchg = Math.min(1, change / A.speedChangeRef); direction = tA > tB ? 'harder' : 'easier'; vExp = tA; }
+  else if (kind === 'recovery') { change = Math.abs(pa.rest - pb.rest) / Math.max(1, pb.rest); Dchg = Math.min(1, change / A.sendoffChangeRef); direction = pa.rest < pb.rest ? 'harder' : 'easier'; vExp = vb; oneSided = true; }
+  else if (kind === 'task') { change = 1; Dchg = 1; direction = 'neutral'; vExp = vb; oneSided = true; }
+  else { change = 1; Dchg = 1; direction = 'neutral'; vExp = vb * (refA.v / refB.v); }
+  // a prescribed target on the changed set is the response benchmark whenever it exists
+  if (pa.targetPace && kind !== 'pace') { vExp = a.distance / pa.targetPace; oneSided = false; }
+  const err = (v) => (oneSided ? Math.max(0, (vExp - v) / vExp) : Math.abs(v - vExp) / vExp);
+  const reps = a.repSpeeds; const Eall = reps.reduce((s, v) => s + err(v), 0) / reps.length;
+  const Etrans = err(reps[0]); const Estab = reps.length >= 3 ? reps.slice(1).reduce((s, v) => s + err(v), 0) / (reps.length - 1) : null;
+  const Dout = Math.min(1, a.meanSpeed / refA.v); const dir = A.direction[direction] ?? 1;
+  const D = Math.sqrt(Dout * Dchg * dir); const alpha = cfg.alpha.adaptability;
+  const common = { axis: 'adaptability', source: 'training', date: a.date, evidenceId: a.key, signal: 1, D, alpha, kind: 'quality',
+    ref: `${kind} change ${(100 * change).toFixed(1)} % (${direction}); benchmark ${oneSided ? 'hold pace' : 'task reference ratio'} ${vExp.toFixed(3)} m/s; ${refA.label}`,
+    parts: { changeKind: kind, from: b.key, Dout, Dchange: Dchg, direction, directionFactor: dir, Eall, Etransition: Etrans, Estabilisation: Estab, vExpected: vExp } };
+  const items = [];
+  const Qt = Math.max(0, 1 - Etrans / A.tolerance); items.push({ ...common, metric: 'transfer_success', method: `changed-${kind}-transition-response`, rawValue: 100 * Etrans, Q: Qt, S: 100 * Qt * D ** alpha });
+  if (Estab !== null) { const Qs = Math.max(0, 1 - Estab / A.tolerance); items.push({ ...common, metric: 'stabilisation_speed', method: `changed-${kind}-stabilisation-response`, rawValue: 100 * Estab, Q: Qs, S: 100 * Qs * D ** alpha }); }
+  return { items, reason: null };
+}
+export function changedDemandItems({ index, refs, cfg, swimmerSex, diagnostics = null }) {
   const A = cfg.adaptability; const sets = [...index.byKey.values()].filter((e) => e.source === 'training' && e.meanSpeed && e.repSpeeds?.length)
     .sort((a, b) => a.date.localeCompare(b.date) || a.key.localeCompare(b.key));
-  const items = [];
-  for (let i = 1; i < sets.length; i += 1) {
-    const b = sets[i - 1]; const a = sets[i];
-    if ((Date.parse(a.date) - Date.parse(b.date)) > A.pairWindowDays * DAY || a.date === b.date) continue;
-    const pa = a.prescription || {}; const pb = b.prescription || {};
-    const taskOf = (x) => (/kick/.test(x.modality + x.setName.toLowerCase()) ? 'kick' : /drill/.test(x.modality + x.setName.toLowerCase()) ? 'drill' : /\bim\b|medley/.test(x.setName.toLowerCase()) ? 'im' : 'swim');
-    const diff = { sendoff: a.sendoff !== b.sendoff, intensity: a.energy !== b.energy, distance: a.distance !== b.distance, stroke: refs.sk(a.stroke) !== refs.sk(b.stroke),
-      pace: Boolean(pa.targetPace && pb.targetPace && pa.targetPace !== pb.targetPace), recovery: Boolean(pa.rest !== null && pb.rest !== null && pa.rest !== undefined && pa.rest !== pb.rest && a.sendoff === b.sendoff),
-      task: taskOf(pa.modality !== undefined ? pa : { modality: '', setName: '' }) !== taskOf(pb.modality !== undefined ? pb : { modality: '', setName: '' }) };
-    if (diff.pace) diff.intensity = false; // a prescribed pace change is the more specific description of the intensity change
-    const kinds = Object.entries(diff).filter(([, v]) => v).map(([k]) => k);
-    if (kinds.length !== 1) continue; // identical demand (development, not adaptability) or more than one change (not identifiable)
-    const kind = kinds[0]; const vb = b.meanSpeed; const refB = taskReference(b, refs, cfg, swimmerSex); const refA = taskReference(a, refs, cfg, swimmerSex);
-    if (!refA.v || !refB.v) continue;
-    let vExp; let change; let Dchg; let direction; let oneSided = false;
-    if (kind === 'sendoff') { if (!a.sendoff || !b.sendoff) continue; change = Math.abs(a.sendoff - b.sendoff) / b.sendoff; Dchg = Math.min(1, change / A.sendoffChangeRef); direction = a.sendoff < b.sendoff ? 'harder' : 'easier'; vExp = vb; oneSided = true; }
-    else if (kind === 'intensity') { const ratio = refA.v / refB.v; change = Math.abs(ratio - 1); Dchg = Math.min(1, change / A.speedChangeRef); direction = ratio > 1 ? 'harder' : 'easier'; vExp = vb * ratio; }
-    else if (kind === 'distance') { change = Math.abs(Math.log(a.distance / b.distance)) / Math.log(2); Dchg = Math.min(1, change / A.distanceChangeRef); direction = a.distance > b.distance ? 'harder' : 'easier'; vExp = vb * (refA.v / refB.v); }
-    else if (kind === 'pace') { const tA = a.distance / pa.targetPace; const tB = b.distance / pb.targetPace; change = Math.abs(tA - tB) / tB; Dchg = Math.min(1, change / A.speedChangeRef); direction = tA > tB ? 'harder' : 'easier'; vExp = tA; }
-    else if (kind === 'recovery') { change = Math.abs(pa.rest - pb.rest) / Math.max(1, pb.rest); Dchg = Math.min(1, change / A.sendoffChangeRef); direction = pa.rest < pb.rest ? 'harder' : 'easier'; vExp = vb; oneSided = true; }
-    else if (kind === 'task') { change = 1; Dchg = 1; direction = 'neutral'; vExp = vb; oneSided = true; }
-    else { change = 1; Dchg = 1; direction = 'neutral'; vExp = vb * (refA.v / refB.v); }
-    // a prescribed target on the changed set is the response benchmark whenever it exists
-    if (pa.targetPace && kind !== 'pace') { vExp = a.distance / pa.targetPace; oneSided = false; }
-    const err = (v) => (oneSided ? Math.max(0, (vExp - v) / vExp) : Math.abs(v - vExp) / vExp);
-    const reps = a.repSpeeds; const Eall = reps.reduce((s, v) => s + err(v), 0) / reps.length;
-    const Etrans = err(reps[0]); const Estab = reps.length >= 3 ? reps.slice(1).reduce((s, v) => s + err(v), 0) / (reps.length - 1) : null;
-    const Dout = Math.min(1, a.meanSpeed / refA.v); const dir = A.direction[direction] ?? 1;
-    const D = Math.sqrt(Dout * Dchg * dir); const alpha = cfg.alpha.adaptability;
-    const common = { axis: 'adaptability', source: 'training', date: a.date, evidenceId: a.key, signal: 1, D, alpha, kind: 'quality',
-      ref: `${kind} change ${(100 * change).toFixed(1)} % (${direction}); benchmark ${oneSided ? 'hold pace' : 'task reference ratio'} ${vExp.toFixed(3)} m/s; ${refA.label}`,
-      parts: { changeKind: kind, from: b.key, Dout, Dchange: Dchg, direction, directionFactor: dir, Eall, Etransition: Etrans, Estabilisation: Estab, vExpected: vExp } };
-    const Qt = Math.max(0, 1 - Etrans / A.tolerance); items.push({ ...common, metric: 'transfer_success', method: `changed-${kind}-transition-response`, rawValue: 100 * Etrans, Q: Qt, S: 100 * Qt * D ** alpha });
-    if (Estab !== null) { const Qs = Math.max(0, 1 - Estab / A.tolerance); items.push({ ...common, metric: 'stabilisation_speed', method: `changed-${kind}-stabilisation-response`, rawValue: 100 * Estab, Q: Qs, S: 100 * Qs * D ** alpha }); }
+  const items = []; const note = (a, outcome, reason, from = null) => { if (diagnostics) diagnostics.push({ set: a.key, date: a.date, outcome, reason, from }); };
+  if ((A.pairing || 'consecutive') === 'consecutive') {
+    for (let i = 1; i < sets.length; i += 1) {
+      const b = sets[i - 1]; const a = sets[i];
+      if (a.date === b.date) { note(a, 'excluded', 'previous set on the same day', b.key); continue; }
+      if ((Date.parse(a.date) - Date.parse(b.date)) > A.pairWindowDays * DAY) { note(a, 'excluded', `previous set more than ${A.pairWindowDays} days earlier`, b.key); continue; }
+      const { kinds, pa, pb } = demandDiff(a, b, refs, false);
+      if (kinds.length !== 1) { note(a, 'excluded', kinds.length ? 'two or more demands changed at once' : 'identical demand (development, not adaptability)', b.key); continue; } // not identifiable
+      const r = pairItems({ a, b, kind: kinds[0], pa, pb, refs, cfg, swimmerSex });
+      if (!r.items) { note(a, 'excluded', r.reason, b.key); continue; }
+      items.push(...r.items); note(a, 'scored', `${kinds[0]} change`, b.key);
+    }
+    if (sets.length) note(sets[0], 'excluded', 'no earlier timed set');
+    return items;
+  }
+  // most-recent-eligible
+  for (let i = 0; i < sets.length; i += 1) {
+    const a = sets[i]; const seen = new Set(); let scored = false;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const b = sets[j];
+      if (b.date === a.date) { seen.add('only same-day sets'); continue; }
+      if ((Date.parse(a.date) - Date.parse(b.date)) > A.pairWindowDays * DAY) break;
+      const { kinds, unscorable, pa, pb } = demandDiff(a, b, refs, true);
+      if (kinds.length === 0 && unscorable.length === 0) { seen.add('identical demand (development, not adaptability)'); continue; }
+      if (kinds.length + unscorable.length > 1) { seen.add('two or more demands changed at once'); continue; }
+      if (unscorable.length) { seen.add(`only the ${unscorable[0] === 'technical' ? 'technical prescription (target stroke count)' : 'repetition count'} changed: no approved change-difficulty formula`); continue; }
+      const r = pairItems({ a, b, kind: kinds[0], pa, pb, refs, cfg, swimmerSex });
+      if (!r.items) { seen.add(r.reason); continue; }
+      items.push(...r.items); note(a, 'scored', `${kinds[0]} change`, b.key); scored = true; break;
+    }
+    if (!scored) note(a, 'excluded', seen.size ? [...seen].join('; ') : `no earlier timed set within ${A.pairWindowDays} days`);
   }
   return items;
 }

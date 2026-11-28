@@ -147,7 +147,8 @@ export function evidenceIndex(observations, swimmerId, db, cfg, prebuilt = null)
     out.set(k, { key: k, source: r0.source, protocol: r0.protocol, energy: String(r0.energy || '').toUpperCase(), distance: r0.distance, stroke: r0.stroke,
       pool: r0.pool, sendoff: r0.sendoff, nreps: rows.length, date: r0.date, meanSpeed: sp.length ? sp.reduce((a, b) => a + b, 0) / sp.length : null,
       repSpeeds: [...rows].sort((a, b) => (a.rep || 0) - (b.rep || 0)).map((r) => r.speed).filter((v) => v > 0), splits: r0.splits || null,
-      prescription: x ? { targetPace: sec(x.targetPace), rest: sec(x.rest), modality: String(x.modality || '').toLowerCase(), setName: String(x.setName || '') } : null,
+      prescription: x ? { targetPace: sec(x.targetPace), rest: sec(x.rest), modality: String(x.modality || '').toLowerCase(), setName: String(x.setName || ''),
+        repetitions: (Number(x.reps) || 0) * Math.max(1, Number(x.rounds) || 1) || null, targetStrokeCount: Number(x.targetStrokeCount) > 0 ? Number(x.targetStrokeCount) : null } : null,
       halves: raceHalves(r0, cfg.references.splitToleranceSeconds), meanTime: tm.length ? tm.reduce((a, b) => a + b, 0) / tm.length : null,
       metres: rows.length * (r0.distance || 0), sex: r0.sex, fixtureId: r0.fixture_id || null, eventId: r0.source === 'competition' ? r0.set_id : null,
       competition: r0.competition || '', eventLabel: r0.eventLabel || '', pb: Boolean(r0.pb), testName: r0.testName || '' });

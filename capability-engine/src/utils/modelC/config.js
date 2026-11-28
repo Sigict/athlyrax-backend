@@ -84,7 +84,8 @@ export function buildDefaultModelConfig() {
     // 100 m 0.25, 200 m 0.50, >= 400 m 1.00. Race retention below the relevance goes to Anaerobic fatigue_resistance (1 - r).
     durabilityRelevanceMetres: 400,
     // ---- Adaptability
-    adaptability: { tolerance: 0.10, sendoffChangeRef: 0.20, speedChangeRef: 0.10, distanceChangeRef: 1.0, pairWindowDays: 14,
+    // pairing: 'consecutive' (approved) | 'most-recent-eligible' (owner option 28-11-2026)
+    adaptability: { pairing: 'consecutive', tolerance: 0.10, sendoffChangeRef: 0.20, speedChangeRef: 0.10, distanceChangeRef: 1.0, pairWindowDays: 14,
       direction: { harder: 1.0, easier: 0.5, neutral: 1.0 } },
     // ---- integration and competition
     sourceWeights: { training: 0.30, testing: 0.50, competition: 0.20 },
@@ -180,6 +181,8 @@ export function parameterCatalogue(cfg = DEFAULT_MODEL_CONFIG) {
     { tolerance: 'Response tolerance (relative error at Q = 0)', sendoffChangeRef: 'Send-off / recovery change for full change difficulty', speedChangeRef: 'Pace / intensity change for full change difficulty', distanceChangeRef: 'Distance change (doublings) for full change difficulty' }[k],
     k === 'distanceChangeRef' ? 0.25 : 0.02, k === 'distanceChangeRef' ? 3 : 0.5, 0.01,
     k === 'tolerance' ? 'Q = max(0, 1 − E/tolerance).' : 'D_change = min(1, change / reference).', 'Adaptability'));
+  out.push(S('adaptability', 'adaptability.pairing', 'Changed-demand pairing rule', null, null, null,
+    "'consecutive' = compare each set with the immediately preceding timed set (approved); 'most-recent-eligible' = compare with the most recent earlier set within the window that differs in exactly one scorable demand (repetitions and technical prescription unchanged).", 'Adaptability', 'enum:consecutive,most-recent-eligible'));
   out.push(S('adaptability', 'adaptability.pairWindowDays', 'Changed-demand pair window (days)', 1, 60, 1, 'Maximum separation of the two compared sets.', 'Adaptability'));
   for (const k of ['harder', 'easier', 'neutral']) out.push(S('adaptability', `adaptability.direction.${k}`, `Direction coefficient · ${k}`, 0, 1, 0.05, 'Multiplies the change difficulty by direction.', 'Adaptability'));
   for (const k of ['wOutput', 'wWork', 'wDensity']) out.push(S('durability', `durability.${k}`, { wOutput: 'D_out exponent', wWork: 'D_work exponent', wDensity: 'D_density exponent' }[k], 0, 1, 0.05,
